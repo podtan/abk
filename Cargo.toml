@@ -3,9 +3,9 @@
 
 [package]
 name = "abk"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
-description = "Agent Builder Kit - Modular utilities for building LLM agents (config, observability, CLI)"
+description = "Agent Builder Kit - Modular utilities for building LLM agents (config, observability, CLI, checkpointing)"
 license = "MIT OR Apache-2.0"
 authors = ["simpaticoder Team"]
 keywords = ["agent", "llm", "config", "observability", "cli"]
@@ -19,7 +19,8 @@ default = []
 config = ["serde", "serde_json", "toml", "anyhow", "chrono", "dotenv"]
 observability = ["anyhow", "chrono", "serde_json"]
 cli = ["colored", "unicode-width"]
-all = ["config", "observability", "cli"]
+checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf"]
+all = ["config", "observability", "cli", "checkpoint"]
 
 [dependencies]
 # Config feature dependencies
@@ -34,5 +35,14 @@ dotenv = { version = "0.15", optional = true }
 colored = { version = "2.0", optional = true }
 unicode-width = { version = "0.1", optional = true }
 
+# Checkpoint feature dependencies
+thiserror = { version = "1.0", optional = true }
+tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
+sha2 = { version = "0.10", optional = true }
+uuid = { version = "1.0", features = ["v4"], optional = true }
+umf = { version = "0.1.0", optional = true }
+
 [dev-dependencies]
 tempfile = "3.0"
+tokio = { version = "1.0", features = ["macros", "rt", "test-util"] }
+tokio-test = "0.4"

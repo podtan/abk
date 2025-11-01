@@ -5,6 +5,7 @@
 //! - **`config`** - Configuration and environment loading
 //! - **`observability`** - Structured logging, metrics, and tracing
 //! - **`cli`** - CLI display utilities and formatting helpers
+//! - **`checkpoint`** - Session persistence and checkpoint management
 //!
 //! # Features
 //!
@@ -54,6 +55,20 @@
 //! let messages = vec![];
 //! logger.log_llm_interaction(&messages, "Hello, world!", "gpt-4").unwrap();
 //! ```
+//!
+//! # Example: Using the checkpoint feature
+//!
+//! ```ignore
+//! use abk::checkpoint::{get_storage_manager, CheckpointResult};
+//! use std::path::Path;
+//!
+//! async fn example() -> CheckpointResult<()> {
+//!     let manager = get_storage_manager()?;
+//!     let project_path = Path::new(".");
+//!     let project_storage = manager.get_project_storage(project_path).await?;
+//!     Ok(())
+//! }
+//! ```
 
 #![warn(missing_docs)]
 
@@ -69,6 +84,10 @@ pub mod observability;
 #[cfg(feature = "cli")]
 pub mod cli;
 
+/// Checkpoint and session management (enabled with the `checkpoint` feature)
+#[cfg(feature = "checkpoint")]
+pub mod checkpoint;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]
@@ -76,4 +95,10 @@ pub mod prelude {
 
     #[cfg(feature = "observability")]
     pub use crate::observability::Logger;
+
+    #[cfg(feature = "checkpoint")]
+    pub use crate::checkpoint::{
+        get_storage_manager, Checkpoint, CheckpointError, CheckpointResult,
+        CheckpointStorageManager, ProjectStorage, SessionStorage,
+    };
 }
