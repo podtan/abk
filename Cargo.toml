@@ -1,0 +1,42 @@
+[workspace]
+# This is a standalone crate, not part of the simpaticoder workspace
+
+[package]
+name = "abk"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Builder Kit - Modular utilities for building LLM agents (config, observability, CLI)"
+license = "MIT OR Apache-2.0"
+authors = ["simpaticoder Team"]
+keywords = ["agent", "llm", "config", "observability", "cli"]
+categories = ["config", "development-tools", "command-line-utilities"]
+repository = "https://github.com/podtan/abk"
+homepage = "https://abk.podtan.com"
+readme = "README.md"
+
+[features]
+default = []
+config = ["serde", "serde_json", "toml", "anyhow", "chrono", "dotenv"]
+observability = ["tracing", "tracing-subscriber"]
+cli = ["colored", "unicode-width"]
+all = ["config", "observability", "cli"]
+
+[dependencies]
+# Config feature dependencies
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+toml = { version = "0.8", optional = true }
+anyhow = { version = "1.0", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+dotenv = { version = "0.15", optional = true }
+
+# Observability feature dependencies
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+
+# CLI feature dependencies
+colored = { version = "2.0", optional = true }
+unicode-width = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tempfile = "3.0"

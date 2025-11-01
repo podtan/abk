@@ -1,0 +1,33 @@
+# Ignore build output
+/target/
+
+# Ignore Cargo's generated files
+# Cargo.lock is usually committed for applications, so we don't ignore it here.
+
+# Editor directories and files
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+*~
+*.swp
+
+# Node modules (if any JS tooling is present)
+node_modules/
+
+# Environment files
+.env
+
+# Mac-specific
+.AppleDouble
+
+# Misc
+.cache/
+.history/
