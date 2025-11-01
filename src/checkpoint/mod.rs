@@ -36,6 +36,7 @@ pub mod resume_tracker;
 pub mod session_manager;
 pub mod size_calc;
 pub mod storage;
+pub mod utils;
 
 // Re-export key types for convenience
 pub use agent_context::AgentContext;
