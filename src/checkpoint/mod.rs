@@ -25,6 +25,7 @@
 //! }
 //! ```
 
+pub mod agent_context;
 pub mod atomic;
 pub mod cleanup;
 pub mod config;
@@ -32,10 +33,12 @@ pub mod errors;
 pub mod models;
 pub mod restoration;
 pub mod resume_tracker;
+pub mod session_manager;
 pub mod size_calc;
 pub mod storage;
 
 // Re-export key types for convenience
+pub use agent_context::AgentContext;
 pub use atomic::{AtomicFileWriter, AtomicOps, FileLock};
 pub use cleanup::CleanupManager;
 pub use config::{
@@ -54,6 +57,7 @@ pub use restoration::{
     ValidationIssue, ValidationResults, ValidationSeverity,
 };
 pub use resume_tracker::{ResumeContext, ResumeTracker};
+pub use session_manager::SessionManager;
 pub use size_calc::{SizeCategory, SizeInfo, SizeUtils, StorageSizeCalculator};
 pub use storage::{CheckpointStorageManager, ProjectStorage, SessionStorage};
 
