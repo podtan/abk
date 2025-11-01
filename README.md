@@ -16,10 +16,12 @@ ABK provides three main feature modules:
 - Validation and defaults
 
 ### `observability` - Logging & Metrics
-*Coming soon - will be extracted from simpaticoder*
-- Structured logging
-- Metrics collection
-- Distributed tracing
+- Markdown-formatted logging for agent sessions
+- LLM interaction tracking
+- Command execution logging
+- Tool execution logging
+- Session lifecycle management
+- Debug-level message inspection
 
 ### `cli` - CLI Display Utilities
 *Coming soon - will be extracted from simpaticoder*
@@ -87,12 +89,56 @@ The `EnvironmentLoader` handles:
 - System environment variable access
 - Provider selection via `LLM_PROVIDER`
 
+### Observability Feature
+
+```rust
+use abk::observability::Logger;
+use std::collections::HashMap;
+
+// Create a logger with custom path and log level
+let logger = Logger::new(
+    Some(Path::new("logs/agent.md")),
+    Some("DEBUG")
+).unwrap();
+
+// Or use default (temp directory, INFO level)
+let logger = Logger::default();
+
+// Log a session start
+let config = HashMap::new();
+logger.log_session_start("auto", &config).unwrap();
+
+// Log LLM interactions
+let messages = vec![]; // Your message history
+logger.log_llm_interaction(&messages, "Response text", "gpt-4").unwrap();
+
+// Log command executions
+logger.log_command_execution(
+    "cargo build",
+    "Compiling...",
+    "",
+    0,
+    "auto"
+).unwrap();
+
+// Log tool executions
+logger.log_tool_execution(
+    "search_file",
+    r#"{"pattern":"Logger"}"#,
+    "Found 5 matches",
+    true
+).unwrap();
+
+// Log completion
+logger.log_completion("Task completed successfully").unwrap();
+```
+
 ## Roadmap
 
 ABK is part of the larger Trustee ecosystem extraction from [simpaticoder](https://github.com/podtan/simpaticoder).
 
-- ✅ Phase 1: `config` feature (extracted from trustee-config)
-- ⏳ Phase 2: `observability` feature (extracting from simpaticoder/src/logger)
+- ✅ Phase 1: `config` feature (v0.1.0 - extracted from trustee-config)
+- ✅ Phase 2: `observability` feature (v0.1.1 - extracted from simpaticoder/src/logger)
 - ⏳ Phase 3: `cli` feature (extracting from simpaticoder/src/cli/commands/utils.rs)
 
 ## Why ABK?

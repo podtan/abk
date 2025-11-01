@@ -3,7 +3,28 @@
 //! This module provides structured logging, metrics, and tracing capabilities
 //! for LLM agents and related systems.
 //!
-//! **Note**: This module is currently a placeholder. Implementation will be added
-//! when the observability feature is extracted from simpaticoder.
+//! # Example
+//!
+//! ```no_run
+//! use abk::observability::Logger;
+//! use std::collections::HashMap;
+//!
+//! // Create a logger
+//! let logger = Logger::new(None, Some("DEBUG")).unwrap();
+//!
+//! // Log a session start
+//! let config = HashMap::new();
+//! logger.log_session_start("auto", &config).unwrap();
+//!
+//! // Log an LLM interaction
+//! let messages = vec![];
+//! logger.log_llm_interaction(&messages, "Hello, world!", "gpt-4").unwrap();
+//!
+//! // Log completion
+//! logger.log_completion("Task completed").unwrap();
+//! ```
 
-// Placeholder - will be populated when extracting from simpaticoder's src/logger/
+pub mod logger;
+
+// Re-export main types for convenience
+pub use logger::Logger;

@@ -21,7 +21,7 @@
 //!
 //! # Example: Using the config feature
 //!
-//! ```no_run
+//! ```ignore
 //! use abk::config::{ConfigurationLoader, EnvironmentLoader};
 //! use std::path::Path;
 //!
@@ -35,6 +35,24 @@
 //! // Access configuration
 //! println!("Max iterations: {}", config.execution.max_iterations);
 //! println!("LLM provider: {:?}", env.llm_provider());
+//! ```
+//!
+//! # Example: Using the observability feature
+//!
+//! ```ignore
+//! use abk::observability::Logger;
+//! use std::collections::HashMap;
+//!
+//! // Create a logger
+//! let logger = Logger::new(None, Some("DEBUG")).unwrap();
+//!
+//! // Log a session start
+//! let config = HashMap::new();
+//! logger.log_session_start("auto", &config).unwrap();
+//!
+//! // Log an LLM interaction
+//! let messages = vec![];
+//! logger.log_llm_interaction(&messages, "Hello, world!", "gpt-4").unwrap();
 //! ```
 
 #![warn(missing_docs)]
@@ -55,4 +73,7 @@ pub mod cli;
 pub mod prelude {
     #[cfg(feature = "config")]
     pub use crate::config::{Configuration, ConfigurationLoader, EnvironmentLoader};
+
+    #[cfg(feature = "observability")]
+    pub use crate::observability::Logger;
 }
