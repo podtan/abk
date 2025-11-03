@@ -6,4 +6,4 @@ pub mod tools;
 
 pub use internal::InternalMessage;
 pub use generate::GenerateConfig;
-pub use tools::InternalToolDefinition;
+pub use tools::{InternalToolDefinition, ToolChoice, ToolResult};

@@ -12,7 +12,7 @@ pub mod wasm;
 // Re-export main types
 pub use traits::{LlmProvider, GenerateResponse, ToolInvocation, StreamingResponse};
 pub use factory::ProviderFactory;
-pub use types::{InternalMessage, GenerateConfig, InternalToolDefinition};
+pub use types::{InternalMessage, GenerateConfig, InternalToolDefinition, ToolChoice, ToolResult};
 pub use adapters::{ChatMLAdapter, ToolAdapter};
 
 // Re-export streaming types from umf

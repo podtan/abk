@@ -3,7 +3,7 @@
 
 [package]
 name = "abk"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Agent Builder Kit - Modular utilities for building LLM agents (config, observability, CLI, checkpointing)"
 license = "MIT OR Apache-2.0"
