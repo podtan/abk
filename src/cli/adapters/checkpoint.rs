@@ -5,54 +5,45 @@
 use crate::cli::error::CliResult;
 use async_trait::async_trait;
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 
-/// Information about a checkpoint
-#[derive(Debug, Clone)]
-pub struct CheckpointInfo {
-    /// Unique identifier for the checkpoint
-    pub id: String,
-    /// Session ID this checkpoint belongs to
+/// Project metadata information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectMetadata {
+    pub name: String,
+    pub project_path: PathBuf,
+    pub project_hash: String,
+}
+
+/// Session metadata information (compatible with checkpoint module)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetadata {
     pub session_id: String,
-    /// Iteration number
-    pub iteration: usize,
-    /// Step within iteration
-    pub step: String,
-    /// Timestamp when created
-    pub timestamp: String,
-    /// Size in bytes
-    pub size: u64,
-    /// Path to checkpoint file
-    pub path: PathBuf,
-}
-
-/// Information about a session
-#[derive(Debug, Clone)]
-pub struct SessionInfo {
-    /// Unique session identifier
-    pub id: String,
-    /// Task description
-    pub task: String,
-    /// Session status
-    pub status: String,
-    /// Timestamp when created
-    pub created_at: String,
-    /// Timestamp when last modified
-    pub updated_at: String,
-    /// Number of iterations
-    pub iterations: usize,
-    /// Number of checkpoints
+    pub status: SessionStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_accessed: chrono::DateTime<chrono::Utc>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
     pub checkpoint_count: usize,
-    /// Path to session directory
-    pub path: PathBuf,
 }
 
-/// Checkpoint data for export/import
-#[derive(Debug, Clone)]
-pub struct CheckpointData {
-    /// Checkpoint metadata
-    pub info: CheckpointInfo,
-    /// Serialized checkpoint content
-    pub content: String,
+/// Session status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SessionStatus {
+    Active,
+    Completed,
+    Failed,
+    Archived,
+}
+
+/// Checkpoint metadata information (compatible with checkpoint module)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointMetadata {
+    pub checkpoint_id: String,
+    pub session_id: String,
+    pub workflow_step: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub iteration: usize,
 }
 
 /// Provides access to checkpoint and session management
@@ -82,27 +73,19 @@ pub struct CheckpointData {
 /// ```
 #[async_trait]
 pub trait CheckpointAccess: Send + Sync {
-    /// List all sessions
-    async fn list_sessions(&self) -> CliResult<Vec<SessionInfo>>;
+    /// List all projects with checkpoint data
+    async fn list_projects(&self) -> CliResult<Vec<ProjectMetadata>>;
 
-    /// Get detailed information about a specific session
-    async fn get_session(&self, session_id: &str) -> CliResult<SessionInfo>;
+    /// List sessions for a specific project
+    async fn list_sessions(&self, project_path: &PathBuf) -> CliResult<Vec<SessionMetadata>>;
 
-    /// List checkpoints for a session
-    async fn list_checkpoints(&self, session_id: &str) -> CliResult<Vec<CheckpointInfo>>;
+    /// List checkpoints for a session in a project
+    async fn list_checkpoints(&self, project_path: &PathBuf, session_id: &str) -> CliResult<Vec<CheckpointMetadata>>;
 
-    /// Get detailed information about a specific checkpoint
-    async fn get_checkpoint(&self, checkpoint_id: &str) -> CliResult<CheckpointInfo>;
+    /// Delete a session from a project
+    async fn delete_session(&self, project_path: &PathBuf, session_id: &str) -> CliResult<()>;
 
-    /// Load checkpoint data
-    async fn load_checkpoint(&self, checkpoint_id: &str) -> CliResult<CheckpointData>;
-
-    /// Export checkpoint to a file or string
-    async fn export_checkpoint(&self, checkpoint_id: &str, destination: Option<&PathBuf>) -> CliResult<PathBuf>;
-
-    /// Delete a checkpoint
-    async fn delete_checkpoint(&self, checkpoint_id: &str) -> CliResult<()>;
-
-    /// Delete an entire session
-    async fn delete_session(&self, session_id: &str) -> CliResult<()>;
+    /// Validate and optionally repair a session
+    /// Returns list of actions taken if repair=true, or issues found if repair=false
+    async fn validate_session(&self, project_path: &PathBuf, session_id: &str, repair: bool) -> CliResult<Vec<String>>;
 }

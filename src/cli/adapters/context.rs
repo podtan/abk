@@ -74,6 +74,71 @@ pub trait CommandContext {
     /// Log an error message
     fn log_error(&self, message: &str);
 
+    /// Log a success message
+    fn log_success(&self, message: &str);
+
+    /// Get terminal width for formatting
+    fn terminal_width(&self) -> CliResult<usize> {
+        Ok(80) // Default fallback
+    }
+
+    /// Format bytes for human-readable display
+    fn format_bytes(&self, bytes: u64) -> CliResult<String> {
+        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+        let mut size = bytes as f64;
+        let mut unit_index = 0;
+        
+        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+            size /= 1024.0;
+            unit_index += 1;
+        }
+        
+        Ok(if unit_index == 0 {
+            format!("{} {}", bytes, UNITS[0])
+        } else {
+            format!("{:.2} {}", size, UNITS[unit_index])
+        })
+    }
+
+    /// Format project name for display
+    fn format_project_name(&self, project_path: &Path) -> CliResult<String> {
+        Ok(project_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string())
+    }
+
+    /// Format session entry for display
+    fn format_session_entry(
+        &self,
+        session: &serde_json::Value,
+        project_name: &str,
+        _terminal_width: usize,
+    ) -> CliResult<String> {
+        let session_id = session.get("session_id")
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown");
+        let status = session.get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown");
+        let created = session.get("created_at")
+            .and_then(|c| c.as_str())
+            .unwrap_or("unknown");
+        
+        Ok(format!(
+            "  {} | {} | {} | {}",
+            session_id, project_name, status, created
+        ))
+    }
+
+    /// Prompt user for confirmation
+    fn confirm(&self, _prompt: &str) -> CliResult<bool> {
+        // Default implementation: assume no confirmation
+        // Real implementations should prompt the user
+        Ok(false)
+    }
+
     /// Check if a path exists
     fn path_exists(&self, path: &Path) -> bool {
         path.exists()

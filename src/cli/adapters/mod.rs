@@ -10,6 +10,12 @@ pub mod provider;
 pub mod tools;
 
 pub use context::CommandContext;
-pub use checkpoint::{CheckpointAccess, CheckpointInfo, SessionInfo, CheckpointData};
+pub use checkpoint::{
+    CheckpointAccess,
+    ProjectMetadata,
+    SessionMetadata,
+    SessionStatus,
+    CheckpointMetadata,
+};
 pub use provider::{ProviderFactory, ProviderInfo, ProviderConfig};
 pub use tools::{ToolRegistryAdapter, ToolInfo, ToolExecutionResult};

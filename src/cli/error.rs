@@ -40,6 +40,14 @@ pub enum CliError {
     #[error("Serialization error: {0}")]
     SerdeError(String),
 
+    /// Serialization error (alternative name for compatibility)
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
+    /// Validation error
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+
     /// Invalid argument or input
     #[error("Invalid input: {0}")]
     InvalidInput(String),
