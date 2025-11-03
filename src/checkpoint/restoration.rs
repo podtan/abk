@@ -1344,6 +1344,8 @@ mod tests {
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
             ChatMessage {
                 role: "user".to_string(),
@@ -1351,6 +1353,8 @@ mod tests {
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
             ChatMessage {
                 role: "tool".to_string(),
@@ -1358,6 +1362,8 @@ mod tests {
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
         ];
 
@@ -1392,6 +1398,8 @@ mod tests {
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
             ChatMessage {
                 role: "assistant".to_string(),
@@ -1399,6 +1407,8 @@ mod tests {
                 timestamp: Utc::now(),
                 token_count: Some(10),
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
         ];
 
