@@ -3,13 +3,9 @@
 //! Generic command implementations that work via adapter traits.
 //! Commands are organized by functionality and feature-gated appropriately.
 
-// Note: Command modules will be added incrementally during extraction phases
-// Phase 1: misc, utils, init, config
-// Phase 2: cache, checkpoints
-// Phase 3: sessions (read-only operations)
+pub mod misc;
 
-// Placeholder for future command modules
-// pub mod misc;
+// Future command modules (will be added during extraction)
 // pub mod utils;
 // pub mod init;
 // pub mod config;
