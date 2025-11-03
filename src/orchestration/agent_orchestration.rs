@@ -252,6 +252,9 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
     }
 
 /// Generate with retry logic
+}
+
+
 async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateResult> {
     let mut last_error = None;
     
