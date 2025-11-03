@@ -1,12 +1,13 @@
-//! CLI display utilities for agent-based systems.
+//! CLI utilities and commands for agent applications
 //!
-//! This module provides reusable CLI components including:
-//! - Panel and message box rendering
-//! - Time formatting utilities
-//! - Text truncation and formatting
+//! This module provides reusable CLI infrastructure for building agent applications,
+//! including:
+//! - Display utilities (panels, progress indicators, formatters)
+//! - File and directory utilities
 //! - Color and styling helpers
-//!
-//! **Note**: This module is currently a placeholder. Implementation will be added
-//! when the CLI utilities are extracted from simpaticoder.
 
-// Placeholder - will be populated when extracting from simpaticoder's src/cli/commands/utils.rs
+#[cfg(feature = "cli")]
+pub mod utils;
+
+#[cfg(feature = "cli")]
+pub use utils::*;

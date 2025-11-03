@@ -92,6 +92,10 @@ pub mod checkpoint;
 #[cfg(feature = "provider")]
 pub mod provider;
 
+/// Agent orchestration (enabled with the `orchestration` feature)
+#[cfg(feature = "orchestration")]
+pub mod orchestration;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]
@@ -110,5 +114,11 @@ pub mod prelude {
     pub use crate::provider::{
         LlmProvider, GenerateResponse, ToolInvocation, ProviderFactory,
         InternalMessage, GenerateConfig, InternalToolDefinition,
+    };
+
+    #[cfg(feature = "orchestration")]
+    pub use crate::orchestration::{
+        AgentRuntime, RuntimeConfig, WorkflowCoordinator, WorkflowStep, WorkflowStatus,
+        ToolCoordinator, ToolExecutionResult, ExecutionResult, ExecutionMode, AgentMode,
     };
 }
