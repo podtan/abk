@@ -88,6 +88,10 @@ pub mod cli;
 #[cfg(feature = "checkpoint")]
 pub mod checkpoint;
 
+/// LLM Provider abstraction (enabled with the `provider` feature)
+#[cfg(feature = "provider")]
+pub mod provider;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]
@@ -100,5 +104,11 @@ pub mod prelude {
     pub use crate::checkpoint::{
         get_storage_manager, Checkpoint, CheckpointError, CheckpointResult,
         CheckpointStorageManager, ProjectStorage, SessionStorage,
+    };
+
+    #[cfg(feature = "provider")]
+    pub use crate::provider::{
+        LlmProvider, GenerateResponse, ToolInvocation, ProviderFactory,
+        InternalMessage, GenerateConfig, InternalToolDefinition,
     };
 }

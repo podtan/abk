@@ -1,0 +1,123 @@
+package simpaticoder:provider@1.0.0;
+
+/// Generic provider adapter interface
+/// All WASM providers must implement this interface
+interface adapter {
+    /// Provider configuration from environment/metadata
+    record config {
+        /// Base URL for the API
+        base-url: string,
+        /// API key for authentication
+        api-key: string,
+        /// Default model to use
+        default-model: string,
+    }
+
+    /// Chat message
+    record message {
+        /// Message role (system, user, assistant, tool)
+        role: string,
+        /// Message content
+        content: string,
+    }
+
+    /// Tool definition (for tool calling)
+    record tool {
+        /// Tool/function name
+        name: string,
+        /// Tool description
+        description: string,
+        /// JSON Schema string for parameters
+        parameters: string,
+    }
+
+    /// Tool call definition (in response)
+    record tool-call {
+        /// Unique identifier for the tool call
+        id: string,
+        /// Name of the tool/function to call
+        name: string,
+        /// JSON string of arguments
+        arguments: string,
+    }
+
+    /// Assistant message response
+    record assistant-message {
+        /// Text content (if any)
+        content: option<string>,
+        /// Tool calls (if any)
+        tool-calls: list<tool-call>,
+    }
+
+    /// Content delta for streaming
+    record content-delta {
+        /// Text content delta (if any)
+        content: option<string>,
+        /// Tool call delta (if any)
+        tool-call-delta: option<string>,
+    }
+
+    /// HTTP header key-value pair
+    record header-pair {
+        /// Header name
+        key: string,
+        /// Header value
+        value: string,
+    }
+
+    /// Error type
+    record provider-error {
+        /// Error message
+        message: string,
+        /// Optional error code
+        code: option<string>,
+    }
+
+    /// Get provider metadata
+    /// Returns JSON with name, version, models, features, etc.
+    get-provider-metadata: func() -> string;
+
+    /// Build custom headers for API requests
+    /// x-request-id: Optional request ID (will generate if not provided)
+    build-headers: func(messages: list<message>, x-request-id: option<string>) -> list<header-pair>;
+
+    /// Format request for provider API
+    /// tools: Optional list of tools for tool calling
+    /// Returns JSON string ready to send as HTTP body
+    format-request: func(messages: list<message>, config: config, tools: option<list<tool>>) -> result<string, provider-error>;
+    
+    /// Format request from raw JSON messages (handles complex tool messages)
+    /// messages-json: JSON array of InternalMessage structures (with tool_calls, etc.)
+    /// model: Model string
+    /// tools-json: Optional JSON array of tool definitions
+    /// tool-choice-json: Optional JSON string for tool choice strategy ("auto", "required", "none", or {"name": "tool_name"})
+    /// enable-streaming: Whether to enable streaming mode in the API request
+    /// Returns JSON string ready to send as HTTP body
+    format-request-from-json: func(messages-json: string, model: string, tools-json: option<string>, tool-choice-json: option<string>, max-tokens: option<u32>, temperature: f32, enable-streaming: bool) -> result<string, provider-error>;
+    
+    /// Parse response from provider API
+    /// model: Model string for backend detection
+    /// Takes raw JSON response body, returns parsed assistant message
+    parse-response: func(body: string, model: string) -> result<assistant-message, provider-error>;
+    
+    /// Handle streaming chunk
+    /// Takes SSE chunk, returns content delta if chunk contains data
+    /// Returns none if chunk should be skipped (e.g., [DONE] marker)
+    handle-stream-chunk: func(chunk: string) -> option<content-delta>;
+    
+    /// Get the full API URL for a model (base_url + endpoint)
+    /// base-url: Base URL from configuration (e.g., "https://ai.tanbal.ir/v1")
+    /// model: Model string to determine endpoint
+    /// Returns full URL with appropriate endpoint appended
+    get-api-url: func(base-url: string, model: string) -> string;
+    
+    /// Check if streaming is supported for a model
+    /// model: Model string to check
+    /// Returns true if streaming is fully supported, false if fallback to non-streaming is recommended
+    supports-streaming: func(model: string) -> bool;
+}
+
+/// Generic provider world - all WASM providers implement this
+world provider {
+    export adapter;
+}
