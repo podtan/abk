@@ -84,6 +84,19 @@ pub trait AgentContext {
     /// * `name` - Optional assistant identifier
     fn add_assistant_message(&mut self, content: String, name: Option<String>);
 
+    /// Add an assistant message with tool calls to the conversation.
+    ///
+    /// # Arguments
+    /// * `content` - The message content
+    /// * `tool_calls` - Vector of tool calls made by the assistant
+    /// * `name` - Optional assistant identifier
+    fn add_assistant_message_with_tool_calls(
+        &mut self,
+        content: String,
+        tool_calls: Vec<umf::ToolCall>,
+        name: Option<String>,
+    );
+
     /// Add a tool result message to the conversation.
     ///
     /// # Arguments
@@ -266,6 +279,8 @@ mod tests {
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             });
         }
 
@@ -276,6 +291,8 @@ mod tests {
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             });
         }
 
@@ -286,16 +303,37 @@ mod tests {
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
+                tool_call_id: None,
+                name: None,
             });
         }
 
-        fn add_tool_message(&mut self, content: String, _tool_call_id: String, name: String) {
+        fn add_assistant_message_with_tool_calls(
+            &mut self,
+            content: String,
+            tool_calls: Vec<umf::ToolCall>,
+            _name: Option<String>,
+        ) {
+            self.messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content,
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                tool_calls: Some(tool_calls),
+                tool_call_id: None,
+                name: None,
+            });
+        }
+
+        fn add_tool_message(&mut self, content: String, tool_call_id: String, name: String) {
             self.messages.push(ChatMessage {
                 role: "tool".to_string(),
                 content: format!("[{}] {}", name, content),
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
+                tool_call_id: Some(tool_call_id),
+                name: Some(name),
             });
         }
 

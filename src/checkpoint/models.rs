@@ -137,11 +137,13 @@ pub struct ConversationSnapshot {
 /// Chat message structure
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChatMessage {
-    pub role: String,                                  // "system", "user", "assistant"
+    pub role: String,                                  // "system", "user", "assistant", "tool"
     pub content: String,                               // Message content
     pub timestamp: DateTime<Utc>,                      // When message was created
     pub token_count: Option<usize>,                    // Cached token count
-    pub tool_calls: Option<Vec<umf::ToolCall>>, // Tool calls for assistant messages
+    pub tool_calls: Option<Vec<umf::ToolCall>>,        // Tool calls for assistant messages
+    pub tool_call_id: Option<String>,                  // Tool call ID for tool response messages
+    pub name: Option<String>,                          // Message source name (user, assistant, or tool name)
 }
 
 /// Model configuration

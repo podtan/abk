@@ -425,25 +425,39 @@ impl SessionManager {
         for msg in &checkpoint.conversation_state.messages {
             match msg.role.as_str() {
                 "system" => {
-                    context.add_system_message(msg.content.clone(), Some("simpaticoder".to_string()));
+                    context.add_system_message(msg.content.clone(), msg.name.clone());
                 }
                 "user" => {
-                    context.add_user_message(msg.content.clone(), None);
+                    context.add_user_message(msg.content.clone(), msg.name.clone());
                 }
                 "assistant" => {
-                    context.add_assistant_message(msg.content.clone(), Some("assistant".to_string()));
+                    // Check if this assistant message has tool_calls
+                    if let Some(ref tool_calls) = msg.tool_calls {
+                        context.add_assistant_message_with_tool_calls(
+                            msg.content.clone(),
+                            tool_calls.clone(),
+                            msg.name.clone(),
+                        );
+                    } else {
+                        context.add_assistant_message(msg.content.clone(), msg.name.clone());
+                    }
                 }
                 "tool" => {
-                    // For restored tool messages, use a generic tool_call_id
+                    // Use the tool_call_id from the message, or fallback to a generic one
+                    let tool_call_id = msg.tool_call_id.clone().unwrap_or_else(|| {
+                        context.log_info("Tool message missing tool_call_id, using generic ID");
+                        "restored_tool_call".to_string()
+                    });
+                    let tool_name = msg.name.clone().unwrap_or_else(|| "tool".to_string());
                     context.add_tool_message(
                         msg.content.clone(),
-                        "restored_tool_call".to_string(),
-                        "tool".to_string(),
+                        tool_call_id,
+                        tool_name,
                     );
                 }
                 _ => {
                     // fallback to user message
-                    context.add_user_message(msg.content.clone(), None);
+                    context.add_user_message(msg.content.clone(), msg.name.clone());
                 }
             }
         }

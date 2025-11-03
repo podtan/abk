@@ -1,5 +1,6 @@
-[workspace]
+# [workspace]
 # This is a standalone crate, not part of the simpaticoder workspace
+# Workspace declaration commented out when used as path dependency
 
 [package]
 name = "abk"
