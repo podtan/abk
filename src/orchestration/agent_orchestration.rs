@@ -209,6 +209,15 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
         match agent.generate_with_provider(tools, max_tokens, true).await {
             Ok(result) => {
                 println!("📡 Streaming API call completed successfully");
+                
+                // Increment iteration after successful API call
+                agent.set_current_iteration(agent.current_iteration() + 1);
+                
+                // Check iteration limit
+                if agent.current_iteration() > max_iterations {
+                    return stop_session(agent, &format!("Maximum iterations ({}) reached", max_iterations)).await;
+                }
+                
                 match result {
                     GenerateResult::ToolCalls(tool_calls) => {
                         // Check for completion
@@ -240,14 +249,7 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 return Err(anyhow::anyhow!(err_msg)).context("Streaming workflow failed");
             }
         }
-
-        // Check iteration limit
-        agent.set_current_iteration(agent.current_iteration() + 1);
-        if agent.current_iteration() > max_iterations {
-            return stop_session(agent, &format!("Maximum iterations ({}) reached", max_iterations)).await;
-        }
     }
-}
 
 /// Generate with retry logic
 async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateResult> {

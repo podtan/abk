@@ -535,8 +535,12 @@ impl SessionManager {
     pub async fn create_checkpoint<C: AgentContext>(&mut self, context: &C) -> Result<()> {
         let iteration = context.get_current_iteration();
 
-        // Generate checkpoint ID based on iteration and current step
-        let checkpoint_id = format!("{:03}_{}", iteration, context.get_current_step());
+        // Increment checkpoint counter to ensure unique IDs
+        self.current_iteration += 1;
+        
+        // Generate checkpoint ID based on checkpoint counter (not iteration!)
+        // This ensures each checkpoint has a unique ID even if iteration doesn't change
+        let checkpoint_id = format!("{:03}_{}", self.current_iteration, context.get_current_step());
 
         // Build the checkpoint data
         let checkpoint = self.build_checkpoint(context, &checkpoint_id, iteration).await?;
