@@ -55,7 +55,7 @@ where
     C: CommandContext + ?Sized,
     A: CheckpointAccess + ?Sized,
 {
-    ctx.log_info("📋 Checkpoints List")?;
+    ctx.log_info("📋 Checkpoints List");
 
     let projects = checkpoint_access.list_projects().await?;
 
@@ -79,7 +79,7 @@ where
                 ))?;
 
                 if checkpoints.is_empty() {
-                    ctx.log_info("  No checkpoints found.")?;
+                    ctx.log_info("  No checkpoints found.");
                 } else {
                     for checkpoint in checkpoints {
                         ctx.log_info(&format!(
@@ -106,7 +106,7 @@ where
     } else {
         // List all checkpoints across all sessions
         if projects.is_empty() {
-            ctx.log_info("No projects found.")?;
+            ctx.log_info("No projects found.");
             return Ok(());
         }
 
@@ -303,7 +303,7 @@ where
         opts.output_path.display()
     ))?;
 
-    ctx.log_warning("Checkpoint export command not yet implemented")?;
+    ctx.log_warning("Checkpoint export command not yet implemented");
     Ok(())
 }
 
@@ -352,16 +352,16 @@ fn display_checkpoint_diff<C: CommandContext + ?Sized>(
     ctx: &C,
     diff: &CheckpointDiff,
 ) -> CliResult<()> {
-    ctx.log_info("\n📊 Checkpoint Comparison")?;
+    ctx.log_info("\n📊 Checkpoint Comparison");
 
     // Metadata
-    ctx.log_info("\n🏷️  Metadata:")?;
+    ctx.log_info("\n🏷️  Metadata:");
     ctx.log_info(&format!("  From: {}", diff.from_checkpoint_id))?;
     ctx.log_info(&format!("  To:   {}", diff.to_checkpoint_id))?;
     ctx.log_info(&format!("  Time difference: {} seconds", diff.time_difference_seconds.abs()))?;
 
     // Agent state
-    ctx.log_info("\n🤖 Agent State:")?;
+    ctx.log_info("\n🤖 Agent State:");
     if diff.mode_changed {
         ctx.log_info(&format!("  Mode: {} → {}", diff.mode_from, diff.mode_to))?;
     } else {
@@ -375,7 +375,7 @@ fn display_checkpoint_diff<C: CommandContext + ?Sized>(
     }
 
     // Conversation
-    ctx.log_info("\n💬 Conversation:")?;
+    ctx.log_info("\n💬 Conversation:");
     if diff.messages_diff != 0 {
         ctx.log_info(&format!("  Messages: {:+} messages", diff.messages_diff))?;
     } else {
@@ -389,7 +389,7 @@ fn display_checkpoint_diff<C: CommandContext + ?Sized>(
     }
 
     // File system
-    ctx.log_info("\n📁 File System:")?;
+    ctx.log_info("\n📁 File System:");
     if diff.files_diff != 0 {
         ctx.log_info(&format!("  Modified files: {:+} files", diff.files_diff))?;
     } else {
@@ -397,13 +397,13 @@ fn display_checkpoint_diff<C: CommandContext + ?Sized>(
     }
 
     if diff.working_directory_changed {
-        ctx.log_info("  Working directory: changed")?;
+        ctx.log_info("  Working directory: changed");
     } else {
         ctx.log_info("  Working directory: (unchanged)")?;
     }
 
     // Tool state
-    ctx.log_info("\n🔧 Tool State:")?;
+    ctx.log_info("\n🔧 Tool State:");
     if diff.commands_diff != 0 {
         ctx.log_info(&format!("  Commands executed: {:+} commands", diff.commands_diff))?;
     } else {
