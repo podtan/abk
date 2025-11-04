@@ -6,8 +6,9 @@
 pub mod misc;
 pub mod init;
 pub mod sessions;
+pub mod checkpoints;
+pub mod resume;
 
 // Future command modules (will be added during extraction)
 // pub mod config;
 // pub mod cache;
-// pub mod checkpoints;

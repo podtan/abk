@@ -72,7 +72,16 @@ pub trait CommandContext {
     fn log_warn(&self, message: &str);
 
     /// Log an error message
-    fn log_error(&self, message: &str);
+    fn log_error(&self, message: &str) -> CliResult<()> {
+        self.log_warn(message);
+        Ok(())
+    }
+
+    /// Log a warning message (convenience wrapper)
+    fn log_warning(&self, message: &str) -> CliResult<()> {
+        self.log_warn(message);
+        Ok(())
+    }
 
     /// Log a success message
     fn log_success(&self, message: &str);
@@ -142,5 +151,20 @@ pub trait CommandContext {
     /// Check if a path exists
     fn path_exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    /// Read a line from stdin with prompt
+    fn read_line(&self, prompt: &str) -> CliResult<String> {
+        use std::io::{self, Write};
+        print!("{}", prompt);
+        io::stdout().flush().map_err(|e| {
+            crate::cli::error::CliError::IoError(format!("Failed to flush stdout: {}", e))
+        })?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).map_err(|e| {
+            crate::cli::error::CliError::IoError(format!("Failed to read line: {}", e))
+        })?;
+        Ok(input)
     }
 }
