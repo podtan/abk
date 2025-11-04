@@ -9,31 +9,62 @@ use super::router::{CommandRouter, CommandHandler, ExecutionContext, AdapterRegi
 use super::adapters::AdapterFactory;
 use super::error::{DeclarativeError, DeclarativeResult};
 use std::path::Path;
+use std::sync::Arc;
+use std::collections::HashMap;
+
+// Type alias for command handler callbacks
+type CommandHandlerFn = Arc<dyn Fn(&clap::ArgMatches) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeclarativeResult<()>> + Send>> + Send + Sync>;
 
 /// Main declarative CLI type
 pub struct DeclarativeCli {
     config: CliConfig,
     router: CommandRouter,
     adapters: AdapterRegistry,
+    
+    // Handler registry for special handlers and ABK commands
+    special_handlers: HashMap<String, CommandHandlerFn>,
+    abk_handlers: HashMap<String, CommandHandlerFn>,
 }
 
 impl DeclarativeCli {
-    /// Create from configuration
+    /// Create new CLI from config
     pub fn new(config: CliConfig) -> DeclarativeResult<Self> {
-        // Validate adapter config
-        AdapterFactory::validate_config(&config.adapters)?;
-        
-        // Create router
         let router = CommandRouter::new();
-        
-        // Create adapter registry (initially empty, will be populated by app)
-        let adapters = AdapterFactory::create_adapters(&config.adapters)?;
+        let adapters = AdapterRegistry::new();
         
         Ok(Self {
             config,
             router,
             adapters,
+            special_handlers: HashMap::new(),
+            abk_handlers: HashMap::new(),
         })
+    }
+    
+    /// Register a special handler
+    pub fn register_special_handler<F, Fut>(mut self, name: impl Into<String>, handler: F) -> Self 
+    where
+        F: Fn(&clap::ArgMatches) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = DeclarativeResult<()>> + Send + 'static,
+    {
+        let handler = Arc::new(move |matches: &clap::ArgMatches| {
+            Box::pin(handler(matches)) as std::pin::Pin<Box<dyn std::future::Future<Output = DeclarativeResult<()>> + Send>>
+        });
+        self.special_handlers.insert(name.into(), handler);
+        self
+    }
+    
+    /// Register an ABK command handler
+    pub fn register_abk_handler<F, Fut>(mut self, name: impl Into<String>, handler: F) -> Self 
+    where
+        F: Fn(&clap::ArgMatches) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = DeclarativeResult<()>> + Send + 'static,
+    {
+        let handler = Arc::new(move |matches: &clap::ArgMatches| {
+            Box::pin(handler(matches)) as std::pin::Pin<Box<dyn std::future::Future<Output = DeclarativeResult<()>> + Send>>
+        });
+        self.abk_handlers.insert(name.into(), handler);
+        self
     }
     
     /// Create from TOML file
@@ -159,16 +190,44 @@ impl DeclarativeCli {
         if let Some(ctx) = context {
             match ctx.handler {
                 CommandHandler::AbkCommand { category, command } => {
+                    #[cfg(feature = "agent")]
+                    {
+                        // Execute ABK commands using the agent feature
+                        if category == "sessions" {
+                            return self.execute_sessions_command(&command, &ctx.matches).await;
+                        }
+                    }
+                    
+                    // Call registered ABK handler if available
+                    let handler_name = format!("{}::{}", category, command);
+                    if let Some(handler) = self.abk_handlers.get(&handler_name) {
+                        return handler(&ctx.matches).await;
+                    }
+                    
                     return Err(DeclarativeError::execution(format!(
-                        "ABK command execution not implemented in framework: {}::{}. \
-                        The consuming application must implement this.",
+                        "ABK command execution not implemented: {}::{}",
                         category, command
                     )));
                 }
                 CommandHandler::SpecialHandler { handler } => {
+                    #[cfg(feature = "agent")]
+                    {
+                        // Execute agent-specific special handlers
+                        match handler.as_str() {
+                            "agent_run" => return self.execute_agent_run(&ctx.matches).await,
+                            "init" => return self.execute_init(&ctx.matches).await,
+                            "resume" => return self.execute_resume(&ctx.matches).await,
+                            _ => {}
+                        }
+                    }
+                    
+                    // Call registered special handler if available
+                    if let Some(handler_fn) = self.special_handlers.get(handler.as_str()) {
+                        return handler_fn(&ctx.matches).await;
+                    }
+                    
                     return Err(DeclarativeError::execution(format!(
-                        "Special handler execution not implemented in framework: {}. \
-                        The consuming application must implement this.",
+                        "Special handler not implemented: {}",
                         handler
                     )));
                 }
@@ -268,11 +327,11 @@ impl DeclarativeCli {
             .map_err(|e| DeclarativeError::execution(format!("Failed to execute command '{}': {}", program, e)))?;
         
         // Print stdout/stderr
-        if !output.stdout.is_empty() {
-            print!("{}", String::from_utf8_lossy(&output.stdout));
-        }
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        
         if !output.stderr.is_empty() {
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            eprint!("{}", stderr_str);
         }
         
         // Check exit status
@@ -283,7 +342,122 @@ impl DeclarativeCli {
             )));
         }
         
+        // Try to parse stdout as JSON action
+        if let Ok(action) = serde_json::from_str::<serde_json::Value>(&stdout_str) {
+            if let Some(action_type) = action.get("action").and_then(|v| v.as_str()) {
+                // Execute the action based on type
+                #[cfg(feature = "agent")]
+                {
+                    return self.execute_action(action_type, &action, matches).await;
+                }
+            }
+        }
+        
+        // If not JSON action, just print stdout
+        if !output.stdout.is_empty() {
+            print!("{}", stdout_str);
+        }
+        
         Ok(())
+    }
+    
+    /// Execute an action from JSON response
+    #[cfg(feature = "agent")]
+    async fn execute_action(
+        &self,
+        action_type: &str,
+        action_data: &serde_json::Value,
+        _matches: &clap::ArgMatches
+    ) -> DeclarativeResult<()> {
+        match action_type {
+            "agent_start_session" => {
+                // Extract data from JSON
+                let task = action_data.get("task")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| DeclarativeError::execution("Missing 'task' in action".to_string()))?;
+                
+                // TODO: Create and run agent
+                // This requires simpaticoder to provide agent factory
+                println!("Would start agent session with task: {}", task);
+                Ok(())
+            }
+            _ => {
+                Err(DeclarativeError::execution(format!("Unknown action type: {}", action_type)))
+            }
+        }
+    }
+    
+    /// Execute agent run command (requires agent feature)
+    #[cfg(feature = "agent")]
+    async fn execute_agent_run(&self, matches: &clap::ArgMatches) -> DeclarativeResult<()> {
+        use crate::agent::{Agent, AgentMode};
+        use std::path::PathBuf;
+        
+        // Get agent config
+        let agent_config = self.config.agent.as_ref()
+            .ok_or_else(|| DeclarativeError::config("No [agent] section in CLI config"))?;
+        
+        // Extract task
+        let task: Vec<String> = matches
+            .get_many::<String>("task")
+            .map(|vals| vals.map(|s| s.clone()).collect())
+            .unwrap_or_default();
+        let task = task.join(" ");
+        
+        if task.is_empty() {
+            return Err(DeclarativeError::execution("No task specified".to_string()));
+        }
+        
+        // Get paths
+        let _config_path = matches.get_one::<PathBuf>("config")
+            .map(|p| p.as_path())
+            .or_else(|| agent_config.config_path.as_ref().map(|s| std::path::Path::new(s)));
+        let _env_path = matches.get_one::<PathBuf>("env")
+            .map(|p| p.as_path())
+            .or_else(|| agent_config.env_path.as_ref().map(|s| std::path::Path::new(s)));
+        
+        // Determine mode
+        let _mode = if matches.get_flag("yolo") {
+            Some(AgentMode::Yolo)
+        } else if let Some(mode_str) = matches.get_one::<String>("mode") {
+            Some(mode_str.parse().unwrap_or(AgentMode::Confirm))
+        } else if let Some(default_mode) = &agent_config.default_mode {
+            Some(default_mode.parse().unwrap_or(AgentMode::Confirm))
+        } else {
+            Some(AgentMode::Confirm)
+        };
+        
+        // This requires the application to register a factory that creates the agent
+        // For simpaticoder, this should call simpaticoder::agent_factory::create_agent_with_bases
+        
+        Err(DeclarativeError::execution(
+            "Agent construction requires application integration. \
+            Simpaticoder must call ABK with agent factory.".to_string()
+        ))
+    }
+    
+    /// Execute init command (requires agent feature)  
+    #[cfg(feature = "agent")]
+    async fn execute_init(&self, _matches: &clap::ArgMatches) -> DeclarativeResult<()> {
+        Err(DeclarativeError::execution(
+            "Init command not implemented in ABK framework".to_string()
+        ))
+    }
+    
+    /// Execute resume command (requires agent feature)
+    #[cfg(feature = "agent")]
+    async fn execute_resume(&self, _matches: &clap::ArgMatches) -> DeclarativeResult<()> {
+        Err(DeclarativeError::execution(
+            "Resume command not implemented in ABK framework".to_string()
+        ))
+    }
+    
+    /// Execute sessions command (requires agent feature)
+    #[cfg(feature = "agent")]
+    async fn execute_sessions_command(&self, subcommand: &str, _matches: &clap::ArgMatches) -> DeclarativeResult<()> {
+        Err(DeclarativeError::execution(
+            format!("Sessions command '{}' not implemented in ABK framework", subcommand)
+        ))
     }
 }
 
@@ -301,6 +475,7 @@ mod tests {
                 author: None,
                 about: None,
             },
+            agent: None,
             adapters: AdapterConfig::default(),
             global_args: vec![],
             commands: vec![],
@@ -320,6 +495,7 @@ mod tests {
                 author: None,
                 about: None,
             },
+            agent: None,
             adapters: AdapterConfig::default(),
             global_args: vec![],
             commands: vec![

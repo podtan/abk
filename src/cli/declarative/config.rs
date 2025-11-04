@@ -12,6 +12,10 @@ pub struct CliConfig {
     /// Application metadata
     pub app: AppConfig,
     
+    /// Agent configuration (for agent-based CLIs)
+    #[serde(default)]
+    pub agent: Option<AgentCliConfig>,
+    
     /// Adapter configuration for auto-instantiation
     #[serde(default)]
     pub adapters: AdapterConfig,
@@ -27,6 +31,25 @@ pub struct CliConfig {
     /// Schema version (for future migrations)
     #[serde(default = "default_version")]
     pub version: String,
+}
+
+/// Agent CLI configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCliConfig {
+    /// Path to agent configuration TOML
+    pub config_path: Option<String>,
+    
+    /// Path to environment file
+    pub env_path: Option<String>,
+    
+    /// Default interaction mode
+    pub default_mode: Option<String>,
+    
+    /// Enable streaming responses
+    pub enable_streaming: Option<bool>,
+    
+    /// Max workflow iterations
+    pub max_iterations: Option<u32>,
 }
 
 fn default_version() -> String {

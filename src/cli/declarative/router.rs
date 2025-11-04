@@ -167,10 +167,11 @@ impl CommandRouter {
         }
         
         if let Some(handler) = special_handler {
-            return self.registry
-                .get(handler)
-                .cloned()
-                .ok_or_else(|| DeclarativeError::HandlerNotFound(handler.to_string()));
+            // Return SpecialHandler variant directly - let the executor check if it's registered
+            // This allows applications to register their own handlers without modifying the router
+            return Ok(CommandHandler::SpecialHandler {
+                handler: handler.to_string(),
+            });
         }
         
         if let Some(command) = abk_command {

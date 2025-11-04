@@ -33,7 +33,7 @@ pub mod adapters;
 pub mod error;
 
 // Re-export main types
-pub use config::{CliConfig, CommandConfig, ArgumentConfig, AppConfig, AdapterConfig};
+pub use config::{CliConfig, CommandConfig, ArgumentConfig, AppConfig, AdapterConfig, AgentCliConfig};
 pub use builder::CliBuilder;
 pub use router::{CommandRouter, CommandHandler, ExecutionContext, AdapterRegistry};
 pub use executor::DeclarativeCli;
