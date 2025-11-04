@@ -61,6 +61,4 @@ anyhow = "1.0"
 async-trait = "0.1"
 umf = { version = "0.1.3", features = ["streaming"] }
 
-[workspace]
-# This is a standalone crate, not part of a workspace
 

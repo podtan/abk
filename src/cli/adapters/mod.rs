@@ -8,6 +8,7 @@ pub mod context;
 pub mod checkpoint;
 pub mod provider;
 pub mod tools;
+pub mod storage;
 
 pub use context::CommandContext;
 pub use checkpoint::{
@@ -30,3 +31,5 @@ pub use checkpoint::{
 };
 pub use provider::{ProviderFactory, ProviderInfo, ProviderConfig};
 pub use tools::{ToolRegistryAdapter, ToolInfo, ToolExecutionResult};
+pub use storage::{StorageAccess, StorageStats, ProjectStorageStats};
+

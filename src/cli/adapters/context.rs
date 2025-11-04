@@ -60,6 +60,17 @@ pub trait CommandContext {
     /// Typically ~/.simpaticoder or equivalent
     fn data_dir(&self) -> CliResult<PathBuf>;
 
+    /// Get the home directory
+    ///
+    /// Typically $HOME or equivalent
+    fn home_dir(&self) -> CliResult<PathBuf> {
+        std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| crate::cli::error::CliError::ConfigError(
+                "Could not determine home directory".to_string()
+            ))
+    }
+
     /// Get the cache directory
     ///
     /// Used for temporary files and cached data
