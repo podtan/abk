@@ -43,6 +43,9 @@ pub mod commands;
 #[cfg(feature = "cli")]
 pub mod utils;
 
+#[cfg(feature = "cli")]
+pub mod declarative;
+
 #[cfg(all(feature = "cli", test))]
 pub mod test_utils;
 
