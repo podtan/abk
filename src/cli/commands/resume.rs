@@ -40,7 +40,7 @@ where
     A: CheckpointAccess + ?Sized,
     R: RestorationAccess + ?Sized,
 {
-    let current_dir = ctx.working_dir();
+    let current_dir = ctx.working_dir()?;
 
     // Enhanced session discovery
     if opts.list || opts.session_id.is_none() || opts.interactive {
@@ -256,7 +256,7 @@ fn interactive_session_selection<C: CommandContext + ?Sized>(
     ctx.log_info("\nSelect a session to resume:");
     ctx.log_info("Enter the session number (or 'q' to quit): ");
 
-    let input = ctx.read_line("→ ");
+    let input = ctx.read_line("→ ")?;
     let input = input.trim();
 
     if input.eq_ignore_ascii_case("q") || input.eq_ignore_ascii_case("quit") {
