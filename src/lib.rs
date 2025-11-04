@@ -96,6 +96,10 @@ pub mod provider;
 #[cfg(feature = "orchestration")]
 pub mod orchestration;
 
+/// Agent runtime (enabled with the `agent` feature)
+#[cfg(feature = "agent")]
+pub mod agent;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]

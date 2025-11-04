@@ -19,7 +19,8 @@ cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "a
 checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "uname", "hostname"]
 provider = ["serde", "serde_json", "anyhow", "async-trait", "wasmtime", "wasmtime-wasi", "reqwest", "futures-util", "umf", "tokio", "config"]
 orchestration = ["anyhow", "tokio", "serde_json", "async-trait", "umf", "uuid", "futures-util", "provider"]
-all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration"]
+agent = ["config", "checkpoint", "provider", "orchestration", "observability", "anyhow", "tokio", "async-trait", "serde_json", "toml", "umf", "chrono", "cats", "regex"]
+all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration", "agent"]
 
 [dependencies]
 # Config feature dependencies
@@ -51,6 +52,10 @@ wasmtime = { version = "25", optional = true }
 wasmtime-wasi = { version = "25", optional = true }
 reqwest = { version = "0.11", features = ["stream"], optional = true }
 futures-util = { version = "0.3", optional = true }
+
+# Agent feature dependencies  
+cats = { version = "0.1.2", optional = true }
+regex = { version = "1.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

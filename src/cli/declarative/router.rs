@@ -30,6 +30,10 @@ pub enum CommandHandler {
     Builtin {
         action: String,
     },
+    /// Executable template - shell command with argument substitution
+    ExecTemplate {
+        template: String,
+    },
 }
 
 impl CommandRouter {
@@ -145,14 +149,21 @@ impl CommandRouter {
         abk_command: Option<&str>,
         special_handler: Option<&str>,
         builtin: Option<&str>,
+        exec_template: Option<&str>,
     ) -> DeclarativeResult<CommandHandler> {
-        // Priority: builtin > special_handler > abk_command
+        // Priority: builtin > exec_template > special_handler > abk_command
         if let Some(builtin_name) = builtin {
             let key = format!("builtin::{}", builtin_name);
             return self.registry
                 .get(&key)
                 .cloned()
                 .ok_or_else(|| DeclarativeError::routing(format!("Unknown builtin: {}", builtin_name)));
+        }
+        
+        if let Some(template) = exec_template {
+            return Ok(CommandHandler::ExecTemplate {
+                template: template.to_string(),
+            });
         }
         
         if let Some(handler) = special_handler {
@@ -249,7 +260,7 @@ mod tests {
     #[test]
     fn test_route_abk_command() {
         let router = CommandRouter::new();
-        let handler = router.route(Some("sessions::list"), None, None).unwrap();
+        let handler = router.route(Some("sessions::list"), None, None, None).unwrap();
         
         match handler {
             CommandHandler::AbkCommand { category, command } => {
@@ -263,7 +274,7 @@ mod tests {
     #[test]
     fn test_route_special_handler() {
         let router = CommandRouter::new();
-        let handler = router.route(None, Some("agent::run"), None).unwrap();
+        let handler = router.route(None, Some("agent::run"), None, None).unwrap();
         
         match handler {
             CommandHandler::SpecialHandler { handler } => {
@@ -276,7 +287,7 @@ mod tests {
     #[test]
     fn test_route_builtin() {
         let router = CommandRouter::new();
-        let handler = router.route(None, None, Some("echo")).unwrap();
+        let handler = router.route(None, None, Some("echo"), None).unwrap();
         
         match handler {
             CommandHandler::Builtin { action } => {
@@ -289,7 +300,7 @@ mod tests {
     #[test]
     fn test_route_unknown_command() {
         let router = CommandRouter::new();
-        let result = router.route(Some("unknown::command"), None, None);
+        let result = router.route(Some("unknown::command"), None, None, None);
         assert!(result.is_err());
     }
     

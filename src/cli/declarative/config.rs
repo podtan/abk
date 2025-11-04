@@ -94,6 +94,10 @@ pub struct CommandConfig {
     /// Built-in handler (echo, version, help)
     pub builtin: Option<String>,
     
+    /// Executable template - shell command with placeholders (e.g., "binary {arg1} --flag={arg2}")
+    /// This allows fully config-driven execution without requiring Rust code
+    pub exec_template: Option<String>,
+    
     /// Arguments for this command
     #[serde(default)]
     pub args: Vec<ArgumentConfig>,
