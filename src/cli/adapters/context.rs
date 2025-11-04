@@ -157,14 +157,10 @@ pub trait CommandContext {
     fn read_line(&self, prompt: &str) -> CliResult<String> {
         use std::io::{self, Write};
         print!("{}", prompt);
-        io::stdout().flush().map_err(|e| {
-            crate::cli::error::CliError::IoError(format!("Failed to flush stdout: {}", e))
-        })?;
+        io::stdout().flush()?;
         
         let mut input = String::new();
-        io::stdin().read_line(&mut input).map_err(|e| {
-            crate::cli::error::CliError::IoError(format!("Failed to read line: {}", e))
-        })?;
+        io::stdin().read_line(&mut input)?;
         Ok(input)
     }
 }
