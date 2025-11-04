@@ -76,7 +76,7 @@ where
                     "Session: {} ({})",
                     session_id,
                     project_metadata.project_path.display()
-                ))?;
+                ));
 
                 if checkpoints.is_empty() {
                     ctx.log_info("  No checkpoints found.");
@@ -87,11 +87,11 @@ where
                             checkpoint.checkpoint_id,
                             checkpoint.workflow_step,
                             checkpoint.created_at.format("%Y-%m-%d %H:%M:%S")
-                        ))?;
+                        ));
 
                         if opts.verbose {
                             if let Some(description) = &checkpoint.description {
-                                ctx.log_info(&format!("    Description: {}", description))?;
+                                ctx.log_info(&format!("    Description: {}", description));
                             }
                         }
                     }
@@ -101,7 +101,7 @@ where
         }
 
         if !session_found {
-            ctx.log_error(&format!("Session '{}' not found", session_id))?;
+            ctx.log_error(&format!("Session '{}' not found", session_id));
         }
     } else {
         // List all checkpoints across all sessions
@@ -114,7 +114,7 @@ where
             let sessions = checkpoint_access.list_sessions(&project_metadata.project_path).await?;
 
             if !sessions.is_empty() {
-                ctx.log_info(&format!("Project: {}", project_metadata.project_path.display()))?;
+                ctx.log_info(&format!("Project: {}", project_metadata.project_path.display()));
 
                 for session in sessions {
                     let checkpoints = checkpoint_access
@@ -126,7 +126,7 @@ where
                             "  Session: {} ({} checkpoints)",
                             session.session_id,
                             checkpoints.len()
-                        ))?;
+                        ));
                     }
                 }
             }
@@ -149,7 +149,7 @@ where
     ctx.log_info(&format!(
         "📄 Checkpoint Details: {}/{}",
         opts.session_id, opts.checkpoint_id
-    ))?;
+    ));
 
     // Find the session and checkpoint
     let projects = checkpoint_access.list_projects().await?;
@@ -165,7 +165,7 @@ where
             {
                 Ok(checkpoint) => {
                     checkpoint_found = true;
-                    display_checkpoint_details(ctx, &project_metadata.project_path, &opts.session_id, &checkpoint)?;
+                    display_checkpoint_details(ctx, &project_metadata.project_path, &opts.session_id, &checkpoint);
                     break;
                 }
                 Err(_) => continue, // Try next project
@@ -177,7 +177,7 @@ where
         ctx.log_error(&format!(
             "Checkpoint '{}/{}' not found",
             opts.session_id, opts.checkpoint_id
-        ))?;
+        ));
     }
 
     Ok(())
@@ -196,7 +196,7 @@ where
     ctx.log_info(&format!(
         "🗑️  Delete Checkpoint: {}/{}",
         opts.session_id, opts.checkpoint_id
-    ))?;
+    ));
 
     // Find and delete the checkpoint
     let projects = checkpoint_access.list_projects().await?;
@@ -215,14 +215,14 @@ where
                     ctx.log_success(&format!(
                         "Checkpoint '{}/{}' deleted successfully",
                         opts.session_id, opts.checkpoint_id
-                    ))?;
+                    ));
                     break;
                 }
                 Err(e) => {
                     ctx.log_error(&format!(
                         "Failed to delete checkpoint '{}/{}': {}",
                         opts.session_id, opts.checkpoint_id, e
-                    ))?;
+                    ));
                     return Err(e);
                 }
             }
@@ -233,7 +233,7 @@ where
         ctx.log_error(&format!(
             "Checkpoint '{}/{}' not found",
             opts.session_id, opts.checkpoint_id
-        ))?;
+        ));
     }
 
     Ok(())
@@ -252,7 +252,7 @@ where
     ctx.log_info(&format!(
         "🔍 Compare Checkpoints: {}/{} -> {}/{}",
         opts.session_id, opts.from_checkpoint_id, opts.session_id, opts.to_checkpoint_id
-    ))?;
+    ));
 
     // Find the checkpoints and get diff
     let projects = checkpoint_access.list_projects().await?;
@@ -271,18 +271,18 @@ where
                 .await
             {
                 Ok(diff) => {
-                    display_checkpoint_diff(ctx, &diff)?;
+                    display_checkpoint_diff(ctx, &diff);
                     return Ok(());
                 }
                 Err(e) => {
-                    ctx.log_error(&format!("Failed to compute diff: {}", e))?;
+                    ctx.log_error(&format!("Failed to compute diff: {}", e));
                     return Err(e);
                 }
             }
         }
     }
 
-    ctx.log_error(&format!("Session '{}' not found", opts.session_id))?;
+    ctx.log_error(&format!("Session '{}' not found", opts.session_id));
     Ok(())
 }
 
@@ -301,7 +301,7 @@ where
         opts.session_id,
         opts.checkpoint_id,
         opts.output_path.display()
-    ))?;
+    ));
 
     ctx.log_warning("Checkpoint export command not yet implemented");
     Ok(())
@@ -315,35 +315,35 @@ fn display_checkpoint_details<C: CommandContext + ?Sized>(
     session_id: &str,
     checkpoint: &CheckpointData,
 ) -> CliResult<()> {
-    ctx.log_info(&format!("  Project: {}", project_path.display()))?;
-    ctx.log_info(&format!("  Session: {}", session_id))?;
-    ctx.log_info(&format!("  Checkpoint ID: {}", checkpoint.metadata.checkpoint_id))?;
-    ctx.log_info(&format!("  Workflow Step: {}", checkpoint.metadata.workflow_step))?;
+    ctx.log_info(&format!("  Project: {}", project_path.display()));
+    ctx.log_info(&format!("  Session: {}", session_id));
+    ctx.log_info(&format!("  Checkpoint ID: {}", checkpoint.metadata.checkpoint_id));
+    ctx.log_info(&format!("  Workflow Step: {}", checkpoint.metadata.workflow_step));
     ctx.log_info(&format!(
         "  Created: {}",
         checkpoint.metadata.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-    ))?;
+    ));
 
     if let Some(description) = &checkpoint.metadata.description {
-        ctx.log_info(&format!("  Description: {}", description))?;
+        ctx.log_info(&format!("  Description: {}", description));
     }
 
-    ctx.log_info(&format!("  Tags: {}", checkpoint.metadata.tags.join(", ")))?;
+    ctx.log_info(&format!("  Tags: {}", checkpoint.metadata.tags.join(", ")));
 
     // Agent state info
-    ctx.log_info(&format!("  Agent Mode: {}", checkpoint.agent_state.current_mode))?;
-    ctx.log_info(&format!("  Current Step: {}", checkpoint.agent_state.current_step))?;
+    ctx.log_info(&format!("  Agent Mode: {}", checkpoint.agent_state.current_mode));
+    ctx.log_info(&format!("  Current Step: {}", checkpoint.agent_state.current_step));
 
     // Conversation info
-    ctx.log_info(&format!("  Messages: {}", checkpoint.conversation_state.message_count))?;
-    ctx.log_info(&format!("  Token Count: {}", checkpoint.conversation_state.total_tokens))?;
+    ctx.log_info(&format!("  Messages: {}", checkpoint.conversation_state.message_count));
+    ctx.log_info(&format!("  Token Count: {}", checkpoint.conversation_state.total_tokens));
 
     // File system info
     ctx.log_info(&format!(
         "  Working Directory: {}",
         checkpoint.file_system_state.working_directory.display()
-    ))?;
-    ctx.log_info(&format!("  Modified Files: {}", checkpoint.file_system_state.modified_files.len()))?;
+    ));
+    ctx.log_info(&format!("  Modified Files: {}", checkpoint.file_system_state.modified_files.len()));
 
     Ok(())
 }
@@ -356,58 +356,58 @@ fn display_checkpoint_diff<C: CommandContext + ?Sized>(
 
     // Metadata
     ctx.log_info("\n🏷️  Metadata:");
-    ctx.log_info(&format!("  From: {}", diff.from_checkpoint_id))?;
-    ctx.log_info(&format!("  To:   {}", diff.to_checkpoint_id))?;
-    ctx.log_info(&format!("  Time difference: {} seconds", diff.time_difference_seconds.abs()))?;
+    ctx.log_info(&format!("  From: {}", diff.from_checkpoint_id));
+    ctx.log_info(&format!("  To:   {}", diff.to_checkpoint_id));
+    ctx.log_info(&format!("  Time difference: {} seconds", diff.time_difference_seconds.abs()));
 
     // Agent state
     ctx.log_info("\n🤖 Agent State:");
     if diff.mode_changed {
-        ctx.log_info(&format!("  Mode: {} → {}", diff.mode_from, diff.mode_to))?;
+        ctx.log_info(&format!("  Mode: {} → {}", diff.mode_from, diff.mode_to));
     } else {
-        ctx.log_info(&format!("  Mode: {} (unchanged)", diff.mode_from))?;
+        ctx.log_info(&format!("  Mode: {} (unchanged)", diff.mode_from));
     }
 
     if diff.step_changed {
-        ctx.log_info(&format!("  Step: {} → {}", diff.step_from, diff.step_to))?;
+        ctx.log_info(&format!("  Step: {} → {}", diff.step_from, diff.step_to));
     } else {
-        ctx.log_info(&format!("  Step: {} (unchanged)", diff.step_from))?;
+        ctx.log_info(&format!("  Step: {} (unchanged)", diff.step_from));
     }
 
     // Conversation
     ctx.log_info("\n💬 Conversation:");
     if diff.messages_diff != 0 {
-        ctx.log_info(&format!("  Messages: {:+} messages", diff.messages_diff))?;
+        ctx.log_info(&format!("  Messages: {:+} messages", diff.messages_diff));
     } else {
-        ctx.log_info("  Messages: (unchanged)")?;
+        ctx.log_info("  Messages: (unchanged)");
     }
 
     if diff.tokens_diff != 0 {
-        ctx.log_info(&format!("  Tokens: {:+} tokens", diff.tokens_diff))?;
+        ctx.log_info(&format!("  Tokens: {:+} tokens", diff.tokens_diff));
     } else {
-        ctx.log_info("  Tokens: (unchanged)")?;
+        ctx.log_info("  Tokens: (unchanged)");
     }
 
     // File system
     ctx.log_info("\n📁 File System:");
     if diff.files_diff != 0 {
-        ctx.log_info(&format!("  Modified files: {:+} files", diff.files_diff))?;
+        ctx.log_info(&format!("  Modified files: {:+} files", diff.files_diff));
     } else {
-        ctx.log_info("  Modified files: (unchanged)")?;
+        ctx.log_info("  Modified files: (unchanged)");
     }
 
     if diff.working_directory_changed {
         ctx.log_info("  Working directory: changed");
     } else {
-        ctx.log_info("  Working directory: (unchanged)")?;
+        ctx.log_info("  Working directory: (unchanged)");
     }
 
     // Tool state
     ctx.log_info("\n🔧 Tool State:");
     if diff.commands_diff != 0 {
-        ctx.log_info(&format!("  Commands executed: {:+} commands", diff.commands_diff))?;
+        ctx.log_info(&format!("  Commands executed: {:+} commands", diff.commands_diff));
     } else {
-        ctx.log_info("  Commands executed: (unchanged)")?;
+        ctx.log_info("  Commands executed: (unchanged)");
     }
 
     Ok(())

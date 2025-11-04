@@ -40,7 +40,7 @@ where
     A: CheckpointAccess + ?Sized,
     R: RestorationAccess + ?Sized,
 {
-    let current_dir = ctx.working_dir()?;
+    let current_dir = ctx.working_dir();
 
     // Enhanced session discovery
     if opts.list || opts.session_id.is_none() || opts.interactive {
@@ -51,7 +51,7 @@ where
             return Ok(());
         }
 
-        display_resume_candidates(ctx, &sessions_info)?;
+        display_resume_candidates(ctx, &sessions_info);
 
         if opts.session_id.is_none() && !opts.interactive {
             return Ok(());
@@ -112,7 +112,7 @@ where
         let project_path = match project_path {
             Some(path) => path,
             None => {
-                ctx.log_error(&format!("Session '{}' not found", session_id))?;
+                ctx.log_error(&format!("Session '{}' not found", session_id));
                 ctx.log_info("Use 'simpaticoder resume --list' to see available sessions");
                 return Ok(());
             }
@@ -200,7 +200,7 @@ fn display_resume_candidates<C: CommandContext + ?Sized>(
     if !current_project_sessions.is_empty() {
         ctx.log_info("🎯 Current Project");
         for (i, session) in current_project_sessions.iter().enumerate() {
-            display_session_info(ctx, i + 1, session)?;
+            display_session_info(ctx, i + 1, session);
         }
         ctx.log_info("");
     }
@@ -210,7 +210,7 @@ fn display_resume_candidates<C: CommandContext + ?Sized>(
         ctx.log_info("📁 Other Projects");
         let start_index = current_project_sessions.len();
         for (i, session) in other_project_sessions.iter().enumerate() {
-            display_session_info(ctx, start_index + i + 1, session)?;
+            display_session_info(ctx, start_index + i + 1, session);
         }
     }
 
@@ -233,7 +233,7 @@ fn display_session_info<C: CommandContext + ?Sized>(
     ctx.log_info(&format!(
         "  {}. {} {} checkpoints",
         index, session_id_display, session.checkpoint_count
-    ))?;
+    ));
 
     let desc = if let Some(desc) = &session.description {
         truncate_with_ellipsis(desc, 40)
@@ -244,7 +244,7 @@ fn display_session_info<C: CommandContext + ?Sized>(
     ctx.log_info(&format!(
         "     {} • {} • {}",
         session.project_name, time_ago, desc
-    ))?;
+    ));
 
     Ok(())
 }
@@ -254,9 +254,9 @@ fn interactive_session_selection<C: CommandContext + ?Sized>(
     sessions_info: &[ResumeSessionInfo],
 ) -> CliResult<Option<(String, PathBuf)>> {
     ctx.log_info("\nSelect a session to resume:");
-    ctx.log_info("Enter the session number (or 'q' to quit): ")?;
+    ctx.log_info("Enter the session number (or 'q' to quit): ");
 
-    let input = ctx.read_line("→ ")?;
+    let input = ctx.read_line("→ ");
     let input = input.trim();
 
     if input.eq_ignore_ascii_case("q") || input.eq_ignore_ascii_case("quit") {
@@ -291,10 +291,10 @@ where
     A: CheckpointAccess + ?Sized,
     R: RestorationAccess + ?Sized,
 {
-    ctx.log_info(&format!("🔄 Resume Session: {}", session_id))?;
+    ctx.log_info(&format!("🔄 Resume Session: {}", session_id));
 
     if let Some(ref checkpoint_id) = checkpoint {
-        ctx.log_info(&format!("  From checkpoint: {}", checkpoint_id))?;
+        ctx.log_info(&format!("  From checkpoint: {}", checkpoint_id));
     }
 
     // Find the session
@@ -303,7 +303,7 @@ where
     let session_meta = match sessions.iter().find(|s| s.session_id == session_id) {
         Some(session) => session,
         None => {
-            ctx.log_error(&format!("Session '{}' not found", session_id))?;
+            ctx.log_error(&format!("Session '{}' not found", session_id));
             return Ok(());
         }
     };
@@ -333,7 +333,7 @@ where
         }
     };
 
-    ctx.log_info(&format!("  Restoring from checkpoint: {}", checkpoint_id))?;
+    ctx.log_info(&format!("  Restoring from checkpoint: {}", checkpoint_id));
 
     // Restore the checkpoint
     match restoration_access
@@ -348,10 +348,10 @@ where
             ctx.log_info(&format!(
                 "  Restoration completed in {}ms",
                 metadata.restore_duration_ms
-            ))?;
+            ));
 
             if metadata.warnings_count > 0 {
-                ctx.log_warning(&format!("{} warnings during restoration", metadata.warnings_count))?;
+                ctx.log_warning(&format!("{} warnings during restoration", metadata.warnings_count));
             }
 
             // Try to perform agent restoration
@@ -365,18 +365,18 @@ where
                         if !agent_result.warnings.is_empty() {
                             ctx.log_info("  Warnings:");
                             for warning in &agent_result.warnings {
-                                ctx.log_warning(&format!("    - {}", warning))?;
+                                ctx.log_warning(&format!("    - {}", warning));
                             }
                         }
                     } else {
                         ctx.log_warning("Agent restoration completed with errors:");
                         for error in &agent_result.errors {
-                            ctx.log_error(&format!("    - {}", error))?;
+                            ctx.log_error(&format!("    - {}", error));
                         }
                     }
                 }
                 Err(e) => {
-                    ctx.log_warning(&format!("Agent restoration failed: {}", e))?;
+                    ctx.log_warning(&format!("Agent restoration failed: {}", e));
                 }
             }
 
@@ -393,7 +393,7 @@ where
             };
 
             if let Err(e) = restoration_access.store_resume_context(&resume_context).await {
-                ctx.log_warning(&format!("Failed to store resume context: {}", e))?;
+                ctx.log_warning(&format!("Failed to store resume context: {}", e));
             } else {
                 ctx.log_success("Resume context stored for future agent sessions");
             }
@@ -401,14 +401,14 @@ where
             // Display restored checkpoint information
             let checkpoint = &restored_checkpoint.checkpoint;
             ctx.log_info("\n📋 Restored Session Information");
-            ctx.log_info(&format!("  Session ID: {}", session_meta.session_id))?;
-            ctx.log_info(&format!("  Checkpoint: {}", checkpoint.metadata.checkpoint_id))?;
-            ctx.log_info(&format!("  Workflow Step: {}", checkpoint.metadata.workflow_step))?;
-            ctx.log_info(&format!("  Iteration: {}", checkpoint.metadata.iteration))?;
+            ctx.log_info(&format!("  Session ID: {}", session_meta.session_id));
+            ctx.log_info(&format!("  Checkpoint: {}", checkpoint.metadata.checkpoint_id));
+            ctx.log_info(&format!("  Workflow Step: {}", checkpoint.metadata.workflow_step));
+            ctx.log_info(&format!("  Iteration: {}", checkpoint.metadata.iteration));
             ctx.log_info(&format!(
                 "  Working Directory: {}",
                 checkpoint.agent_state.working_directory.display()
-            ))?;
+            ));
 
             // Next steps guidance
             ctx.log_info("\n🎯 Next Steps");
@@ -418,21 +418,21 @@ where
             ctx.log_info(&format!(
                 "  • Check status with: simpaticoder checkpoints list --session {}",
                 session_id
-            ))?;
+            ));
             ctx.log_info(&format!(
                 "  • View session details: simpaticoder sessions show {}",
                 session_id
-            ))?;
+            ));
 
             // Store checkpoint info for potential agent continuation
             ctx.log_info("\n💡 Resume Information");
-            ctx.log_info(&format!("  Project Path: {}", project_path.display()))?;
-            ctx.log_info(&format!("  Session ID: {}", session_id))?;
-            ctx.log_info(&format!("  Checkpoint ID: {}", checkpoint_id))?;
+            ctx.log_info(&format!("  Project Path: {}", project_path.display()));
+            ctx.log_info(&format!("  Session ID: {}", session_id));
+            ctx.log_info(&format!("  Checkpoint ID: {}", checkpoint_id));
             ctx.log_info("  Use these details if you need to manually create an agent with restored context.");
         }
         Err(e) => {
-            ctx.log_error(&format!("Failed to restore checkpoint: {}", e))?;
+            ctx.log_error(&format!("Failed to restore checkpoint: {}", e));
         }
     }
 
