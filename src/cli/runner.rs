@@ -290,27 +290,32 @@ enable_streaming = true
             let link = simpaticoder_dir.join("providers").join(&entry_name);
 
             if target.is_dir() {
+                // Only create symlink if the link doesn't exist or we're in force mode
+                if link.exists() {
+                    if force {
+                        // Remove existing link/directory
+                        if link.is_dir() {
+                            std::fs::remove_dir_all(&link)?;
+                        } else {
+                            std::fs::remove_file(&link)?;
+                        }
+                    } else {
+                        // Skip if not in force mode
+                        continue;
+                    }
+                }
+
                 // Create symlink to directory
                 #[cfg(unix)]
                 {
-                    if link.exists() && force {
-                        std::fs::remove_file(&link)?;
-                    }
-                    if !link.exists() {
-                        std::os::unix::fs::symlink(&target, &link)?;
-                        ctx.log_info(&format!("Created symlink: {} -> {}", link.display(), target.display()));
-                    }
+                    std::os::unix::fs::symlink(&target, &link)?;
+                    ctx.log_info(&format!("Created symlink: {} -> {}", link.display(), target.display()));
                 }
                 #[cfg(windows)]
                 {
-                    // On Windows, create junction or copy
-                    if link.exists() && force {
-                        std::fs::remove_dir_all(&link)?;
-                    }
-                    if !link.exists() {
-                        std::os::windows::fs::symlink_dir(&target, &link)?;
-                        ctx.log_info(&format!("Created directory symlink: {} -> {}", link.display(), target.display()));
-                    }
+                    // On Windows, create junction
+                    std::os::windows::fs::symlink_dir(&target, &link)?;
+                    ctx.log_info(&format!("Created directory symlink: {} -> {}", link.display(), target.display()));
                 }
             }
         }
