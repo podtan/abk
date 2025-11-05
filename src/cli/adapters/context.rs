@@ -177,4 +177,7 @@ pub trait CommandContext {
         io::stdin().read_line(&mut input)?;
         Ok(input)
     }
+
+    /// Create an agent instance for executing tasks
+    fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error>>;
 }
