@@ -42,6 +42,9 @@ pub trait CommandContext {
     /// Get the path to the configuration file
     fn config_path(&self) -> CliResult<PathBuf>;
 
+    /// Get the configuration object
+    fn config(&self) -> &crate::config::Configuration;
+
     /// Load configuration as a typed object
     ///
     /// Returns the raw config value that can be deserialized by the caller

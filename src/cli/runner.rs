@@ -220,6 +220,10 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
         ctx.log_info("Force mode enabled - overwriting existing files");
     }
 
+    // Get installation configuration
+    let install_config = ctx.config().installation.as_ref()
+        .ok_or_else(|| CliError::ConfigError("Installation configuration not found".to_string()))?;
+
     // Create ~/.simpaticoder directory structure
     let home_dir = dirs::home_dir()
         .ok_or_else(|| CliError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?;
@@ -236,6 +240,11 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
 
     std::fs::create_dir_all(&simpaticoder_dir)?;
     ctx.log_info(&format!("Created directory: {}", simpaticoder_dir.display()));
+
+    // Create bin directory for the binary
+    let bin_dir = simpaticoder_dir.join("bin");
+    std::fs::create_dir_all(&bin_dir)?;
+    ctx.log_info(&format!("Created directory: {}", bin_dir.display()));
 
     // Create subdirectories
     let subdirs = vec![
@@ -254,6 +263,26 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
         let dir_path = simpaticoder_dir.join(subdir);
         std::fs::create_dir_all(&dir_path)?;
         ctx.log_info(&format!("Created directory: {}", dir_path.display()));
+    }
+
+    // Copy binary to ~/.simpaticoder/bin/
+    let binary_source = PathBuf::from(&install_config.binary_source_path);
+    let binary_dest = bin_dir.join(&install_config.binary_name);
+
+    if binary_source.exists() {
+        std::fs::copy(&binary_source, &binary_dest)?;
+        ctx.log_info(&format!("Copied binary: {} -> {}", binary_source.display(), binary_dest.display()));
+
+        // Make binary executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&binary_dest)?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&binary_dest, perms)?;
+        }
+    } else {
+        ctx.log_warn(&format!("Binary source not found: {}", binary_source.display()));
     }
 
     // Create default config file
@@ -278,6 +307,35 @@ enable_streaming = true
 "#;
         std::fs::write(&config_file, default_config)?;
         ctx.log_info(&format!("Created config file: {}", config_file.display()));
+    }
+
+    // Create symlink in ~/.local/bin/
+    let local_bin_path = shellexpand::tilde(&install_config.local_bin_path).to_string();
+    let local_bin_dir = PathBuf::from(local_bin_path);
+    std::fs::create_dir_all(&local_bin_dir)?;
+
+    let local_bin_symlink = local_bin_dir.join(&install_config.binary_name);
+
+    if local_bin_symlink.exists() {
+        if force {
+            std::fs::remove_file(&local_bin_symlink)?;
+        } else {
+            ctx.log_warn(&format!("Symlink already exists: {}", local_bin_symlink.display()));
+        }
+    }
+
+    if !local_bin_symlink.exists() {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&binary_dest, &local_bin_symlink)?;
+            ctx.log_info(&format!("Created symlink: {} -> {}", local_bin_symlink.display(), binary_dest.display()));
+        }
+        #[cfg(windows)]
+        {
+            // On Windows, create a copy instead of symlink for better compatibility
+            std::fs::copy(&binary_dest, &local_bin_symlink)?;
+            ctx.log_info(&format!("Created binary copy: {} -> {}", binary_dest.display(), local_bin_symlink.display()));
+        }
     }
 
     // Create symlinks to project providers if they exist
@@ -323,6 +381,8 @@ enable_streaming = true
 
     ctx.log_success("Simpaticoder initialized successfully");
     ctx.log_info(&format!("Configuration directory: {}", simpaticoder_dir.display()));
+    ctx.log_info(&format!("Binary installed to: {}", binary_dest.display()));
+    ctx.log_info(&format!("Symlink created: {}", local_bin_symlink.display()));
     Ok(())
 }
 

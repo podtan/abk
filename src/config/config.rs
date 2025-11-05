@@ -7,10 +7,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Installation configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallationConfig {
+    pub binary_name: String,
+    pub binary_source_path: String,
+    pub local_bin_path: String,
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Configuration {
     pub agent: AgentConfig,
+    pub installation: Option<InstallationConfig>,
     pub templates: TemplateConfig,
     pub logging: LoggingConfig,
     pub execution: ExecutionConfig,
@@ -278,6 +287,11 @@ impl ConfigurationLoader {
                 default_mode: "confirm".to_string(),
                 enable_task_classification: Some(false), // Default to false for backward compatibility
             },
+            installation: Some(InstallationConfig {
+                binary_name: "simpaticoder".to_string(),
+                binary_source_path: "target/release/simpaticoder".to_string(),
+                local_bin_path: "~/.local/bin".to_string(),
+            }),
             // Templates are now loaded from lifecycle WASM plugin
             // These paths are kept for backward compatibility but not used
             templates: TemplateConfig {
