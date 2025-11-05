@@ -96,6 +96,18 @@ pub mod provider;
 #[cfg(feature = "orchestration")]
 pub mod orchestration;
 
+/// Agent implementation (enabled with the `agent` feature)
+#[cfg(feature = "agent")]
+pub mod agent;
+
+/// Executor implementation (enabled with the `agent` feature)
+#[cfg(feature = "agent")]
+pub mod executor;
+
+/// Lifecycle implementation (enabled with the `agent` feature)
+#[cfg(feature = "agent")]
+pub mod lifecycle;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]
