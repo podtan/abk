@@ -101,7 +101,12 @@ pub enum ArgType {
 impl CliConfig {
     /// Load CLI config from a simpaticoder configuration
     pub fn from_simpaticoder_config(config: &crate::config::Configuration) -> Self {
-        // Start with defaults
+        // If CLI config is provided in the simpaticoder config, use it
+        if let Some(cli_config) = &config.cli {
+            return cli_config.clone();
+        }
+
+        // Otherwise, fall back to hardcoded defaults
         let mut cli_config = CliConfig {
             name: config.agent.name.clone(),
             about: "A terminal-first software engineering agent".to_string(),

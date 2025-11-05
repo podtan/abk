@@ -18,6 +18,7 @@ pub struct Configuration {
     pub tools: ToolsConfig,
     pub search_filtering: Option<SearchFilteringConfig>,
     pub llm: Option<LlmConfig>,
+    pub cli: Option<crate::cli::config::CliConfig>,
 }
 
 /// Tools configuration
@@ -332,6 +333,7 @@ impl ConfigurationLoader {
                     auto_execute: false,
                 },
             },
+            cli: None,
         }
     }
 

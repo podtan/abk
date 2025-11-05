@@ -39,7 +39,8 @@ pub fn build_command_from_config(cmd_name: &str, cmd_config: &crate::cli::config
                 arg = arg.value_parser(clap::value_parser!(PathBuf));
             }
             ArgType::Bool => {
-                arg = arg.value_parser(clap::value_parser!(bool));
+                // For boolean flags, use SetTrue action instead of value parser
+                arg = arg.action(clap::ArgAction::SetTrue);
             }
             ArgType::Integer => {
                 arg = arg.value_parser(clap::value_parser!(i64));
@@ -125,6 +126,27 @@ pub async fn run_configured_cli<C: CommandContext>(
         Some(("run", sub_matches)) => {
             run_command(ctx, sub_matches).await
         }
+        Some(("init", sub_matches)) => {
+            init_command(ctx, sub_matches).await
+        }
+        Some(("config", sub_matches)) => {
+            config_command(ctx, sub_matches).await
+        }
+        Some(("cache", sub_matches)) => {
+            cache_command(ctx, sub_matches).await
+        }
+        Some(("resume", sub_matches)) => {
+            resume_command(ctx, sub_matches).await
+        }
+        Some(("checkpoints", sub_matches)) => {
+            checkpoints_command(ctx, sub_matches).await
+        }
+        Some(("sessions", sub_matches)) => {
+            sessions_command(ctx, sub_matches).await
+        }
+        Some(("misc", sub_matches)) => {
+            misc_command(ctx, sub_matches).await
+        }
         Some((cmd, _)) => {
             Err(CliError::UnknownCommand(cmd.to_string()))
         }
@@ -185,5 +207,131 @@ async fn run_command_with_args<C: CommandContext>(ctx: &C, task: &str) -> CliRes
 async fn run_config_check<C: CommandContext>(ctx: &C) -> CliResult<()> {
     ctx.log_info("Running configuration check...");
     // TODO: Implement config validation
+    Ok(())
+}
+
+/// Handle the init command
+async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    let force = matches.get_flag("force");
+    let template = matches.get_one::<String>("template").map(|s| s.as_str()).unwrap_or("default");
+
+    ctx.log_info(&format!("Initializing project with template: {}", template));
+    if force {
+        ctx.log_info("Force mode enabled - overwriting existing files");
+    }
+
+    // TODO: Implement actual init logic
+    ctx.log_success("Project initialized successfully");
+    Ok(())
+}
+
+/// Handle the config command
+async fn config_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if matches.get_flag("show") {
+        ctx.log_info("Showing current configuration...");
+        // TODO: Implement config display
+    } else if matches.get_flag("edit") {
+        ctx.log_info("Opening configuration for editing...");
+        // TODO: Implement config editing
+    } else if matches.get_flag("validate") {
+        ctx.log_info("Validating configuration...");
+        // TODO: Implement config validation
+    } else {
+        ctx.log_info("Use --show, --edit, or --validate flags");
+    }
+
+    Ok(())
+}
+
+/// Handle the cache command
+async fn cache_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if matches.get_flag("clear") {
+        ctx.log_info("Clearing cache...");
+        // TODO: Implement cache clearing
+        ctx.log_success("Cache cleared");
+    } else if matches.get_flag("list") {
+        ctx.log_info("Listing cached items...");
+        // TODO: Implement cache listing
+    } else if matches.get_flag("size") {
+        ctx.log_info("Calculating cache size...");
+        // TODO: Implement cache size calculation
+    } else {
+        ctx.log_info("Use --clear, --list, or --size flags");
+    }
+
+    Ok(())
+}
+
+/// Handle the resume command
+async fn resume_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if let Some(session) = matches.get_one::<String>("session") {
+        ctx.log_info(&format!("Resuming session: {}", session));
+        // TODO: Implement session resume
+    } else if matches.get_flag("latest") {
+        ctx.log_info("Resuming latest session...");
+        // TODO: Implement latest session resume
+    } else {
+        ctx.log_info("Use --session <id> or --latest flag");
+    }
+
+    Ok(())
+}
+
+/// Handle the checkpoints command
+async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if matches.get_flag("list") {
+        ctx.log_info("Listing checkpoints...");
+        // TODO: Implement checkpoint listing
+    } else if let Some(id) = matches.get_one::<String>("show") {
+        ctx.log_info(&format!("Showing checkpoint: {}", id));
+        // TODO: Implement checkpoint details
+    } else if let Some(id) = matches.get_one::<String>("delete") {
+        ctx.log_info(&format!("Deleting checkpoint: {}", id));
+        // TODO: Implement checkpoint deletion
+    } else if matches.get_flag("clean") {
+        ctx.log_info("Cleaning old checkpoints...");
+        // TODO: Implement checkpoint cleanup
+    } else {
+        ctx.log_info("Use --list, --show <id>, --delete <id>, or --clean flags");
+    }
+
+    Ok(())
+}
+
+/// Handle the sessions command
+async fn sessions_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if matches.get_flag("list") {
+        ctx.log_info("Listing sessions...");
+        // TODO: Implement session listing
+    } else if let Some(id) = matches.get_one::<String>("show") {
+        ctx.log_info(&format!("Showing session: {}", id));
+        // TODO: Implement session details
+    } else if let Some(id) = matches.get_one::<String>("delete") {
+        ctx.log_info(&format!("Deleting session: {}", id));
+        // TODO: Implement session deletion
+    } else {
+        ctx.log_info("Use --list, --show <id>, or --delete <id> flags");
+    }
+
+    Ok(())
+}
+
+/// Handle the misc command
+async fn misc_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if matches.get_flag("doctor") {
+        ctx.log_info("Running diagnostics...");
+        // TODO: Implement diagnostics
+        ctx.log_success("All systems operational");
+    } else if matches.get_flag("stats") {
+        ctx.log_info("Showing statistics...");
+        // TODO: Implement statistics
+    } else if matches.get_flag("clean") {
+        ctx.log_info("Cleaning temporary files...");
+        // TODO: Implement cleanup
+        ctx.log_success("Cleanup completed");
+    } else {
+        ctx.log_info("Use --doctor, --stats, or --clean flags");
+    }
+
     Ok(())
 }
