@@ -582,23 +582,49 @@ async fn resume_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> Cli
 
 /// Handle the checkpoints command
 async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    if matches.get_flag("list") {
-        ctx.log_info("Listing checkpoints...");
-        // TODO: Implement checkpoint listing
-    } else if let Some(id) = matches.get_one::<String>("show") {
-        ctx.log_info(&format!("Showing checkpoint: {}", id));
-        // TODO: Implement checkpoint details
-    } else if let Some(id) = matches.get_one::<String>("delete") {
-        ctx.log_info(&format!("Deleting checkpoint: {}", id));
-        // TODO: Implement checkpoint deletion
-    } else if matches.get_flag("clean") {
-        ctx.log_info("Cleaning old checkpoints...");
-        // TODO: Implement checkpoint cleanup
-    } else {
-        ctx.log_info("Use --list, --show <id>, --delete <id>, or --clean flags");
-    }
+    let checkpoint_access = AbkCheckpointAccess::new();
 
-    Ok(())
+    if matches.get_flag("list") {
+        let opts = crate::cli::commands::checkpoints::ListOptions {
+            session_id: None, // List all checkpoints
+            verbose: false,
+        };
+        crate::cli::commands::checkpoints::list_checkpoints(ctx, &checkpoint_access, opts).await
+    } else if let Some(id) = matches.get_one::<String>("show") {
+        // Parse session_id/checkpoint_id from the format "session_id/checkpoint_id"
+        let parts: Vec<&str> = id.split('/').collect();
+        if parts.len() != 2 {
+            ctx.log_error("Invalid checkpoint ID format. Use: session_id/checkpoint_id")?;
+            return Ok(());
+        }
+
+        let opts = crate::cli::commands::checkpoints::ShowOptions {
+            session_id: parts[0].to_string(),
+            checkpoint_id: parts[1].to_string(),
+        };
+        crate::cli::commands::checkpoints::show_checkpoint(ctx, &checkpoint_access, opts).await
+    } else if let Some(id) = matches.get_one::<String>("delete") {
+        // Parse session_id/checkpoint_id from the format "session_id/checkpoint_id"
+        let parts: Vec<&str> = id.split('/').collect();
+        if parts.len() != 2 {
+            ctx.log_error("Invalid checkpoint ID format. Use: session_id/checkpoint_id")?;
+            return Ok(());
+        }
+
+        let opts = crate::cli::commands::checkpoints::DeleteOptions {
+            session_id: parts[0].to_string(),
+            checkpoint_id: parts[1].to_string(),
+            confirm: true, // CLI commands should be confirmed
+        };
+        crate::cli::commands::checkpoints::delete_checkpoint(ctx, &checkpoint_access, opts).await
+    } else if matches.get_flag("clean") {
+        ctx.log_warning("Checkpoint cleanup not yet implemented")?;
+        ctx.log_info("Use individual checkpoint deletion with --delete instead");
+        Ok(())
+    } else {
+        ctx.log_info("Use --list, --show <session_id/checkpoint_id>, --delete <session_id/checkpoint_id>, or --clean flags");
+        Ok(())
+    }
 }
 
 /// Handle the sessions command
