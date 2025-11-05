@@ -10,6 +10,131 @@ use std::path::PathBuf;
 use crate::cli::config::{ArgType, CliConfig};
 use crate::cli::error::{CliError, CliResult};
 use crate::cli::adapters::CommandContext;
+use crate::cli::adapters::checkpoint::{
+    CheckpointAccess, RestorationAccess, ProjectMetadata, SessionMetadata, SessionStatus,
+    CheckpointMetadata, CheckpointData, CheckpointDiff, RestoredCheckpoint, AgentResult,
+    ResumeContext,
+};
+use async_trait::async_trait;
+
+/// Concrete implementation of CheckpointAccess using abk::checkpoint
+struct AbkCheckpointAccess;
+
+impl AbkCheckpointAccess {
+    fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl CheckpointAccess for AbkCheckpointAccess {
+    async fn list_projects(&self) -> CliResult<Vec<ProjectMetadata>> {
+        let manager = crate::checkpoint::get_storage_manager()
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        
+        let projects = manager.list_projects().await
+            .map_err(|e| CliError::CheckpointError(format!("Failed to list projects: {}", e)))?;
+        
+        Ok(projects.into_iter().map(|p| ProjectMetadata {
+            name: p.name,
+            project_path: p.project_path,
+            project_hash: p.project_hash,
+        }).collect())
+    }
+
+    async fn list_sessions(&self, project_path: &PathBuf) -> CliResult<Vec<SessionMetadata>> {
+        let manager = crate::checkpoint::get_storage_manager()
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        
+        let project_storage = manager.get_project_storage(project_path).await
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get project storage: {}", e)))?;
+        
+        let sessions = project_storage.list_sessions().await
+            .map_err(|e| CliError::CheckpointError(format!("Failed to list sessions: {}", e)))?;
+        
+        Ok(sessions.into_iter().map(|s| SessionMetadata {
+            session_id: s.session_id,
+            status: match s.status {
+                crate::checkpoint::SessionStatus::Active => SessionStatus::Active,
+                crate::checkpoint::SessionStatus::Completed => SessionStatus::Completed,
+                crate::checkpoint::SessionStatus::Failed => SessionStatus::Failed,
+                crate::checkpoint::SessionStatus::Archived => SessionStatus::Archived,
+            },
+            created_at: s.created_at,
+            last_accessed: s.last_accessed,
+            description: s.description,
+            tags: s.tags,
+            checkpoint_count: s.checkpoint_count as usize,
+        }).collect())
+    }
+
+    async fn list_checkpoints(&self, _project_path: &PathBuf, _session_id: &str) -> CliResult<Vec<CheckpointMetadata>> {
+        // TODO: Implement proper checkpoint listing
+        // For now, return a dummy checkpoint so resume can work
+        use chrono::Utc;
+        Ok(vec![CheckpointMetadata {
+            checkpoint_id: "latest".to_string(),
+            session_id: _session_id.to_string(),
+            workflow_step: "unknown".to_string(),
+            created_at: Utc::now(),
+            iteration: 1,
+            description: Some("Latest checkpoint".to_string()),
+            tags: vec![],
+        }])
+    }
+
+    async fn delete_session(&self, _project_path: &PathBuf, _session_id: &str) -> CliResult<()> {
+        // TODO: Implement session deletion
+        Err(CliError::CheckpointError("Session deletion not implemented".to_string()))
+    }
+
+    async fn validate_session(&self, _project_path: &PathBuf, _session_id: &str, _repair: bool) -> CliResult<Vec<String>> {
+        // TODO: Implement session validation
+        Ok(vec![])
+    }
+
+    async fn load_checkpoint(&self, _project_path: &PathBuf, _session_id: &str, _checkpoint_id: &str) -> CliResult<CheckpointData> {
+        // TODO: Implement checkpoint loading
+        Err(CliError::CheckpointError("Checkpoint loading not implemented".to_string()))
+    }
+
+    async fn delete_checkpoint(&self, _project_path: &PathBuf, _session_id: &str, _checkpoint_id: &str) -> CliResult<()> {
+        // TODO: Implement checkpoint deletion
+        Err(CliError::CheckpointError("Checkpoint deletion not implemented".to_string()))
+    }
+
+    async fn get_checkpoint_diff(&self, _project_path: &PathBuf, _session_id: &str, _from_checkpoint_id: &str, _to_checkpoint_id: &str) -> CliResult<CheckpointDiff> {
+        // TODO: Implement checkpoint diff
+        Err(CliError::CheckpointError("Checkpoint diff not implemented".to_string()))
+    }
+}
+
+/// Concrete implementation of RestorationAccess using abk::checkpoint
+struct AbkRestorationAccess;
+
+impl AbkRestorationAccess {
+    fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl RestorationAccess for AbkRestorationAccess {
+    async fn restore_checkpoint(&self, _project_path: &PathBuf, _session_id: &str, _checkpoint_id: &str) -> CliResult<RestoredCheckpoint> {
+        // TODO: Implement checkpoint restoration
+        Err(CliError::CheckpointError("Checkpoint restoration not implemented".to_string()))
+    }
+
+    async fn restore_agent(&self, _project_path: &PathBuf, _session_id: &str, _checkpoint_id: &str) -> CliResult<AgentResult> {
+        // TODO: Implement agent restoration
+        Err(CliError::CheckpointError("Agent restoration not implemented".to_string()))
+    }
+
+    async fn store_resume_context(&self, _context: &ResumeContext) -> CliResult<()> {
+        // TODO: Implement resume context storage
+        Ok(())
+    }
+}
 
 /// Build a clap Command from configuration
 pub fn build_command_from_config(cmd_name: &str, cmd_config: &crate::cli::config::CommandConfig) -> Command {
@@ -435,17 +560,24 @@ async fn cache_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliR
 
 /// Handle the resume command
 async fn resume_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    if let Some(session) = matches.get_one::<String>("session") {
-        ctx.log_info(&format!("Resuming session: {}", session));
-        // TODO: Implement session resume
-    } else if matches.get_flag("latest") {
-        ctx.log_info("Resuming latest session...");
-        // TODO: Implement latest session resume
-    } else {
-        ctx.log_info("Use --session <id> or --latest flag");
-    }
+    let session_id = matches.get_one::<String>("session").cloned();
+    let checkpoint_id = matches.get_one::<String>("checkpoint").cloned();
+    let list = matches.get_flag("list");
+    let interactive = matches.get_flag("interactive");
 
-    Ok(())
+    let opts = crate::cli::commands::resume::ResumeOptions {
+        session_id,
+        checkpoint_id,
+        list,
+        interactive,
+        quiet: false,
+    };
+
+    // Create concrete adapter implementations
+    let checkpoint_access = AbkCheckpointAccess::new();
+    let restoration_access = AbkRestorationAccess::new();
+
+    crate::cli::commands::resume::resume_session(ctx, &checkpoint_access, &restoration_access, opts).await
 }
 
 /// Handle the checkpoints command

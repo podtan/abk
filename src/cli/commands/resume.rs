@@ -26,6 +26,7 @@ pub struct ResumeOptions {
     pub checkpoint_id: Option<String>,
     pub list: bool,
     pub interactive: bool,
+    pub quiet: bool,
 }
 
 /// Resume a session
