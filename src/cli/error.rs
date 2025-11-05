@@ -55,6 +55,14 @@ pub enum CliError {
     /// Resource not found
     #[error("Not found: {0}")]
     NotFound(String),
+
+    /// Command execution error
+    #[error("Command failed with exit code {0}: {1}")]
+    CommandError(i32, String),
+
+    /// Unknown command
+    #[error("Unknown command: {0}")]
+    UnknownCommand(String),
 }
 
 // Conversions from common error types

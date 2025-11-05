@@ -41,6 +41,12 @@ pub mod adapters;
 pub mod commands;
 
 #[cfg(feature = "cli")]
+pub mod config;
+
+#[cfg(feature = "cli")]
+pub mod runner;
+
+#[cfg(feature = "cli")]
 pub mod utils;
 
 #[cfg(all(feature = "cli", test))]
@@ -52,6 +58,12 @@ pub use error::{CliError, CliResult};
 
 #[cfg(feature = "cli")]
 pub use adapters::{CommandContext, CheckpointAccess, ProviderFactory, ToolRegistryAdapter};
+
+#[cfg(feature = "cli")]
+pub use config::*;
+
+#[cfg(feature = "cli")]
+pub use runner::*;
 
 #[cfg(feature = "cli")]
 pub use utils::*;
