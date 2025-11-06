@@ -1,8 +1,8 @@
 [package]
 name = "abk"
-version = "0.1.22"
+version = "0.1.23"
 edition = "2021"
-description = "Agent Builder Kit - Modular utilities for building LLM agents (config, observability, CLI, checkpointing, orchestration)"
+description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
 authors = ["simpaticoder Team"]
 keywords = ["agent", "llm", "config", "observability", "cli"]
@@ -19,7 +19,8 @@ cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "a
 checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "uname", "hostname"]
 provider = ["serde", "serde_json", "anyhow", "async-trait", "wasmtime", "wasmtime-wasi", "reqwest", "futures-util", "umf", "tokio", "config"]
 orchestration = ["anyhow", "tokio", "serde_json", "async-trait", "umf", "uuid", "futures-util", "provider"]
-agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "wasmtime", "wasmtime-wasi", "config", "observability", "checkpoint", "provider", "orchestration"]
+agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "wasmtime", "wasmtime-wasi", "config", "observability", "checkpoint", "provider", "orchestration", "executor"]
+executor = ["anyhow", "tokio"]
 all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration", "agent"]
 
 [dependencies]
@@ -67,5 +68,9 @@ serde_json = "1.0"
 anyhow = "1.0"
 async-trait = "0.1"
 umf = { version = "0.1.3", features = ["streaming"] }
+
+
+[workspace]
+# Empty workspace to prevent being included in parent workspace
 
 

@@ -5,6 +5,94 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.23] - 2025-11-06
+
+### Added
+- **Provider feature**: Complete LLM provider abstraction with WASM support
+  - `LlmProvider` trait for unified provider interface
+  - `ProviderFactory` for creating providers from configuration
+  - `ChatMLAdapter` for message format conversion
+  - `ToolAdapter` for tool representation conversion
+  - `WasmProvider` for WebAssembly-based provider loading
+  - Support for OpenAI, GitHub Copilot, and Anthropic backends
+  - Streaming response support with SSE parsing
+  - Environment-driven configuration via API keys and base URLs
+  - Multi-backend routing through single WASM provider
+
+- **Executor feature**: Command execution with timeout and validation
+  - `CommandExecutor` for safe shell command execution
+  - Configurable timeout handling
+  - Command validation and safety checks
+  - Retry logic with exponential backoff
+  - Execution result tracking with stdout/stderr capture
+  - Working directory management
+  - Async execution with tokio
+
+- **Orchestration feature**: Workflow coordination and session management
+  - `AgentOrchestration` trait for workflow management
+  - `WorkflowCoordinator` for coordinating agent workflows
+  - `ToolCoordinator` for tool execution orchestration
+  - Session lifecycle management
+  - Workflow step tracking and state management
+  - Message accumulation and delta handling
+  - Template loading and rendering via WASM plugins
+
+- **Lifecycle feature**: WASM lifecycle plugin integration
+  - `LifecyclePlugin` for loading WASM lifecycle modules
+  - Template management and rendering
+  - Plugin discovery from filesystem locations
+  - Async template operations
+  - Error handling and validation
+
+- **Agent feature**: Complete agent implementation
+  - `Agent` struct with full agent functionality
+  - Integration of all ABK features (config, observability, checkpoint, provider, executor, orchestration, lifecycle)
+  - Tool registry management with CATS integration
+  - Session management and checkpoint integration
+  - Workflow execution and state tracking
+  - Command execution coordination
+  - Provider abstraction usage
+
+- **CLI feature enhancements**: Complete command-line interface utilities
+  - Command delegation and context management
+  - CLI command implementations (run, init, config, cache, resume, checkpoints, sessions, misc)
+  - Display utilities and formatting helpers
+  - Table rendering and color output
+  - Progress indicators and status displays
+
+### Changed
+- Updated package description to reflect comprehensive agent building kit
+- Expanded feature set from 3 to 9 feature-gated modules
+- Updated documentation to cover all new features
+- Enhanced README with comprehensive usage examples
+- Updated keywords and categories for broader applicability
+
+### Features
+- `config` - Configuration and environment loading
+- `observability` - Logging and metrics
+- `checkpoint` - Session and checkpoint management
+- `provider` - LLM provider abstraction with WASM support
+- `executor` - Command execution with timeout and validation
+- `orchestration` - Workflow coordination and session management
+- `lifecycle` - WASM lifecycle plugin integration
+- `cli` - Command-line interface utilities and formatting
+- `agent` - Complete agent implementation with all dependencies
+- `all` - Enable all features
+
+### Dependencies
+- Added `async-trait` ^0.1 (optional, for provider and orchestration)
+- Added `wasmtime` ^25 and `wasmtime-wasi` ^25 (optional, for provider and lifecycle)
+- Added `reqwest` ^0.11 with stream feature (optional, for provider)
+- Added `futures-util` ^0.3 (optional, for provider)
+- Added `cats` ^0.1.2 (optional, for agent)
+- Added `regex` ^1.0 (optional, for agent)
+- Added `clap` ^4.0 with derive feature (optional, for cli)
+- Added `comfy-table` ^7.0 (optional, for cli)
+- Added `colored` ^2.0 (optional, for cli)
+- Added `unicode-width` ^0.1 (optional, for cli)
+- Added `dirs` ^5.0 (optional, for cli)
+- Added `shellexpand` ^3.0 (optional, for cli)
+
 ## [0.1.2] - 2025-11-01
 
 ### Added

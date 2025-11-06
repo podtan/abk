@@ -100,8 +100,8 @@ pub mod orchestration;
 #[cfg(feature = "agent")]
 pub mod agent;
 
-/// Executor implementation (enabled with the `agent` feature)
-#[cfg(feature = "agent")]
+/// Executor implementation (enabled with the `executor` feature)
+#[cfg(feature = "executor")]
 pub mod executor;
 
 /// Lifecycle implementation (enabled with the `agent` feature)

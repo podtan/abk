@@ -4,31 +4,33 @@
 
 ABK is a feature-gated Rust crate providing essential utilities for building LLM-based agents. Choose only the components you need via Cargo features.
 
+# ABK (Agent Builder Kit)
+
+**Complete modular agent building blocks with feature-gated modules**
+
+ABK is a comprehensive Rust crate providing feature-gated modules for building LLM-based agents. Choose only the components you need via Cargo features to keep your builds lean and focused.
+
 ## Features
 
-ABK provides three main feature modules:
+ABK provides feature-gated modules organized by functionality:
 
-### `config` - Configuration Management
-- TOML configuration file parsing
-- Environment variable loading via `.env` files
-- Type-safe configuration structures
-- Path resolution helpers
-- Validation and defaults
+### Core Features
+- **`config`** - TOML configuration loading and environment variable resolution
+- **`observability`** - Structured logging with file/console output
+- **`checkpoint`** - Session persistence and resume capabilities
 
-### `observability` - Logging & Metrics
-- Markdown-formatted logging for agent sessions
-- LLM interaction tracking
-- Command execution logging
-- Tool execution logging
-- Session lifecycle management
-- Debug-level message inspection
+### Execution Features
+- **`executor`** - Command execution with timeout and validation
+- **`orchestration`** - Workflow coordination and session management
+- **`lifecycle`** - WASM lifecycle plugin integration
 
-### `cli` - CLI Display Utilities
-*Coming soon - will be extracted from simpaticoder*
-- Panel and message box rendering
-- Time formatting utilities
-- Text truncation and formatting
-- Color and styling helpers
+### High-Level Features
+- **`cli`** - Command-line interface utilities and formatting
+- **`provider`** - LLM provider abstraction with WASM support
+- **`agent`** - Complete agent implementation with all dependencies
+
+### Composite Features
+- **`all`** - Enables all features for complete functionality
 
 ## Installation
 
@@ -37,13 +39,13 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # Enable only the features you need:
-abk = { version = "0.1", features = ["config"] }
+abk = { version = "0.1.23", features = ["config"] }
 
 # Or enable multiple features:
-abk = { version = "0.1", features = ["config", "observability"] }
+abk = { version = "0.1.23", features = ["config", "observability", "executor"] }
 
 # Or enable everything:
-abk = { version = "0.1", features = ["all"] }
+abk = { version = "0.1.23", features = ["all"] }
 ```
 
 ## Usage
@@ -68,27 +70,6 @@ println!("Max iterations: {}", config.execution.max_iterations);
 println!("LLM provider: {:?}", env.llm_provider());
 ```
 
-### Configuration Structure
-
-The `Configuration` struct includes:
-
-- **Agent**: Core agent settings (name, version, user agent)
-- **Templates**: Template paths and settings
-- **Logging**: Logging configuration (level, format, targets)
-- **Execution**: Execution limits (timeout, retries, max iterations)
-- **Modes**: Operation modes (auto-approve, dry-run, verbose)
-- **Tools**: Tool-specific configuration (file window size, result limits)
-- **Search Filtering**: Directory and file filtering for search operations
-- **LLM**: LLM provider configuration (endpoint, streaming)
-
-### Environment Variables
-
-The `EnvironmentLoader` handles:
-
-- `.env` file loading (if provided)
-- System environment variable access
-- Provider selection via `LLM_PROVIDER`
-
 ### Observability Feature
 
 ```rust
@@ -101,54 +82,126 @@ let logger = Logger::new(
     Some("DEBUG")
 ).unwrap();
 
-// Or use default (temp directory, INFO level)
-let logger = Logger::default();
-
-// Log a session start
+// Log session lifecycle
 let config = HashMap::new();
 logger.log_session_start("auto", &config).unwrap();
 
 // Log LLM interactions
-let messages = vec![]; // Your message history
+let messages = vec![];
 logger.log_llm_interaction(&messages, "Response text", "gpt-4").unwrap();
-
-// Log command executions
-logger.log_command_execution(
-    "cargo build",
-    "Compiling...",
-    "",
-    0,
-    "auto"
-).unwrap();
-
-// Log tool executions
-logger.log_tool_execution(
-    "search_file",
-    r#"{"pattern":"Logger"}"#,
-    "Found 5 matches",
-    true
-).unwrap();
 
 // Log completion
 logger.log_completion("Task completed successfully").unwrap();
 ```
 
+### Executor Feature
+
+```rust
+use abk::executor::CommandExecutor;
+
+// Create executor with timeout and validation
+let mut executor = CommandExecutor::new(
+    120, // 120 second timeout
+    Some(Path::new(".")), // working directory
+    true // enable validation
+);
+
+// Execute commands
+let result = executor.execute_command("cargo build", None).await?;
+println!("Exit code: {}", result.return_code);
+println!("Output: {}", result.stdout);
+```
+
+### Checkpoint Feature
+
+```rust
+use abk::checkpoint::{get_storage_manager, CheckpointResult};
+
+// Initialize checkpoint storage
+let manager = get_storage_manager()?;
+let project_path = Path::new(".");
+let project_storage = manager.get_project_storage(project_path).await?;
+
+// Create a new session
+let session_storage = project_storage.create_session("my-task").await?;
+```
+
+### Provider Feature
+
+```rust
+use abk::provider::ProviderFactory;
+
+// Create LLM provider from environment
+let provider = ProviderFactory::create(&env)?;
+
+// Generate text
+let config = GenerateConfig {
+    max_tokens: 100,
+    temperature: 0.7,
+    ..Default::default()
+};
+let response = provider.generate(&messages, &config).await?;
+```
+
+### Agent Feature
+
+```rust
+use abk::agent::Agent;
+
+// Create a complete agent
+let mut agent = Agent::new(
+    Some(Path::new("config.toml")),
+    Some(Path::new(".env")),
+    Some(AgentMode::Confirm)
+)?;
+
+// Agent has access to all features:
+// - Configuration via agent.config
+// - Executor via agent.executor
+// - Logger via agent.logger
+// - Provider via agent.provider
+// - Checkpoint manager via agent.session_manager
+```
+
 ## Roadmap
 
-ABK is part of the larger Trustee ecosystem extraction from [simpaticoder](https://github.com/podtan/simpaticoder).
+ABK has evolved from a simple configuration utility to a comprehensive **Agent Builder Kit**:
 
-- ✅ Phase 1: `config` feature (v0.1.0 - extracted from trustee-config)
-- ✅ Phase 2: `observability` feature (v0.1.1 - extracted from simpaticoder/src/logger)
-- ⏳ Phase 3: `cli` feature (extracting from simpaticoder/src/cli/commands/utils.rs)
+- ✅ **Phase 1**: `config` feature (v0.1.0 - configuration management)
+- ✅ **Phase 2**: `observability` feature (v0.1.1 - logging and metrics)
+- ✅ **Phase 3**: `checkpoint` feature (v0.1.2 - session persistence)
+- ✅ **Phase 4**: `provider` feature (v0.1.3+ - LLM provider abstraction)
+- ✅ **Phase 5**: `executor` feature (v0.1.23 - command execution)
+- ✅ **Phase 6**: `orchestration` feature (v0.1.23 - workflow management)
+- ✅ **Phase 7**: `lifecycle` feature (v0.1.23 - WASM plugin integration)
+- ✅ **Phase 8**: `cli` feature (v0.1.23 - command-line utilities)
+- ✅ **Phase 9**: `agent` feature (v0.1.23 - complete agent implementation)
 
 ## Why ABK?
 
-Instead of maintaining separate `trustee-config`, `trustee-observability`, and `trustee-cli` crates, ABK unifies them under one package with feature flags. This provides:
+ABK provides a **unified, modular foundation** for building LLM agents:
 
+### 🏗️ **Modular Architecture**
+- **Feature-gated modules**: Only compile what you need
+- **Clean separation**: Each feature has focused responsibilities
+- **Composable design**: Mix and match components as needed
+
+### 📦 **Unified Package**
+Instead of maintaining separate crates for each component, ABK unifies them under one package with feature flags:
 - **Unified versioning** - One version number for all infrastructure utilities
-- **Simplified dependencies** - Import one crate instead of three
-- **Modular builds** - Only compile what you use
+- **Simplified dependencies** - Import one crate instead of nine
 - **Coordinated releases** - Breaking changes managed together
+
+### 🚀 **Production Ready**
+- **Comprehensive testing** - Extensive test coverage for all features
+- **Error handling** - Robust error types and recovery mechanisms
+- **Performance optimized** - Efficient implementations with async support
+- **Well documented** - Complete API documentation and examples
+
+### 🔧 **Developer Experience**
+- **Type safety** - Strongly typed APIs with compile-time guarantees
+- **Intuitive APIs** - Easy-to-use interfaces following Rust conventions
+- **Extensible design** - Easy to add new features and providers
 
 ## License
 
