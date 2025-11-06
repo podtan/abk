@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.24] - 2025-11-06
+
+### Added
+- **CLI Convenience Function**: One-liner CLI execution for simple applications
+  - `run_configured_cli_from_config()` function for config-file-based CLI execution
+  - `DefaultCommandContext` struct providing standard `CommandContext` implementation
+  - Enables "10-line agent" goal with single function call
+  - Maintains full `CommandContext` trait for advanced customization
+  - Two-tier API: convenience function for 80% of use cases, full trait for 20%
+
+### Changed
+- Updated CLI module exports to include new convenience functions
+
 ## [0.1.23] - 2025-11-06
 
 ### Added

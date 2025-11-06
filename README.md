@@ -25,7 +25,7 @@ ABK provides feature-gated modules organized by functionality:
 - **`lifecycle`** - WASM lifecycle plugin integration
 
 ### High-Level Features
-- **`cli`** - Command-line interface utilities and formatting
+- **`cli`** - Command-line interface utilities and formatting with convenience functions
 - **`provider`** - LLM provider abstraction with WASM support
 - **`agent`** - Complete agent implementation with all dependencies
 
@@ -39,13 +39,13 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # Enable only the features you need:
-abk = { version = "0.1.23", features = ["config"] }
+abk = { version = "0.1.24", features = ["config"] }
 
 # Or enable multiple features:
-abk = { version = "0.1.23", features = ["config", "observability", "executor"] }
+abk = { version = "0.1.24", features = ["config", "observability", "executor"] }
 
 # Or enable everything:
-abk = { version = "0.1.23", features = ["all"] }
+abk = { version = "0.1.24", features = ["all"] }
 ```
 
 ## Usage
@@ -94,25 +94,30 @@ logger.log_llm_interaction(&messages, "Response text", "gpt-4").unwrap();
 logger.log_completion("Task completed successfully").unwrap();
 ```
 
-### Executor Feature
+### CLI Feature
 
 ```rust
-use abk::executor::CommandExecutor;
+use abk::cli::{run_configured_cli_from_config, CommandContext};
 
-// Create executor with timeout and validation
-let mut executor = CommandExecutor::new(
-    120, // 120 second timeout
-    Some(Path::new(".")), // working directory
-    true // enable validation
-);
+// Option 1: One-liner convenience function (recommended for simple apps)
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    run_configured_cli_from_config("config/agent.toml").await
+}
 
-// Execute commands
-let result = executor.execute_command("cargo build", None).await?;
-println!("Exit code: {}", result.return_code);
-println!("Output: {}", result.stdout);
+// Option 2: Full customization with CommandContext trait
+struct MyContext { /* custom implementation */ }
+impl CommandContext for MyContext { /* implement all methods */ }
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let context = MyContext::new();
+    let cli_config = CliConfig::from_simpaticoder_config(&context.config);
+    run_configured_cli(&context, &cli_config).await
+}
 ```
 
-### Checkpoint Feature
+### Provider Feature
 
 ```rust
 use abk::checkpoint::{get_storage_manager, CheckpointResult};
