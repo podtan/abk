@@ -15,6 +15,7 @@ use crate::cli::adapters::checkpoint::{
     CheckpointMetadata, CheckpointData, CheckpointDiff, RestoredCheckpoint, AgentResult,
     ResumeContext,
 };
+use crate::cli::adapters::storage::{StorageAccess, AbkStorageAccess};
 use async_trait::async_trait;
 
 /// Concrete implementation of CheckpointAccess using abk::checkpoint
@@ -92,9 +93,17 @@ impl CheckpointAccess for AbkCheckpointAccess {
         }).collect())
     }
 
-    async fn delete_session(&self, _project_path: &PathBuf, _session_id: &str) -> CliResult<()> {
-        // TODO: Implement session deletion
-        Err(CliError::CheckpointError("Session deletion not implemented".to_string()))
+    async fn delete_session(&self, project_path: &PathBuf, session_id: &str) -> CliResult<()> {
+        let manager = crate::checkpoint::get_storage_manager()
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        
+        let project_storage = manager.get_project_storage(project_path).await
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get project storage: {}", e)))?;
+        
+        project_storage.delete_session(session_id).await
+            .map_err(|e| CliError::CheckpointError(format!("Failed to delete session: {}", e)))?;
+        
+        Ok(())
     }
 
     async fn validate_session(&self, _project_path: &PathBuf, _session_id: &str, _repair: bool) -> CliResult<Vec<String>> {
@@ -608,38 +617,48 @@ enable_streaming = true
 /// Handle the config command
 async fn config_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
     if matches.get_flag("show") {
-        ctx.log_info("Showing current configuration...");
-        // TODO: Implement config display
+        let opts = crate::cli::commands::config::ConfigShowOptions {
+            detailed: false,
+        };
+        crate::cli::commands::config::config_show(ctx, opts)
     } else if matches.get_flag("edit") {
-        ctx.log_info("Opening configuration for editing...");
-        // TODO: Implement config editing
+        ctx.log_error("Config editing not yet implemented")?;
+        Ok(())
     } else if matches.get_flag("validate") {
-        ctx.log_info("Validating configuration...");
-        // TODO: Implement config validation
+        crate::cli::commands::config::config_validate(ctx, false)
     } else {
         ctx.log_info("Use --show, --edit, or --validate flags");
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Handle the cache command
 async fn cache_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    let storage_access = AbkStorageAccess::new();
+
     if matches.get_flag("clear") {
-        ctx.log_info("Clearing cache...");
-        // TODO: Implement cache clearing
-        ctx.log_success("Cache cleared");
+        let opts = crate::cli::commands::cache::CacheCleanOptions {
+            dry_run: false,
+            older_than_days: None,
+            max_size_gb: None,
+        };
+        crate::cli::commands::cache::cache_clean(ctx, &storage_access, opts).await
     } else if matches.get_flag("list") {
-        ctx.log_info("Listing cached items...");
-        // TODO: Implement cache listing
+        let opts = crate::cli::commands::cache::CacheListOptions {
+            sort_by_size: false,
+            min_size_mb: None,
+        };
+        crate::cli::commands::cache::cache_list(ctx, &storage_access, opts).await
     } else if matches.get_flag("size") {
-        ctx.log_info("Calculating cache size...");
-        // TODO: Implement cache size calculation
+        let opts = crate::cli::commands::cache::CacheSizeOptions {
+            human_readable: true,
+            sort_by_size: false,
+        };
+        crate::cli::commands::cache::cache_size(ctx, &storage_access, opts).await
     } else {
         ctx.log_info("Use --clear, --list, or --size flags");
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Handle the resume command
@@ -713,38 +732,56 @@ async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -
 
 /// Handle the sessions command
 async fn sessions_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    let checkpoint_access = AbkCheckpointAccess::new();
+
     if matches.get_flag("list") {
-        ctx.log_info("Listing sessions...");
-        // TODO: Implement session listing
+        let opts = crate::cli::commands::sessions::ListOptions {
+            project: None,
+            all: true,
+            verbose: false,
+            page: 0,
+            page_size: 50,
+        };
+        crate::cli::commands::sessions::list_sessions(ctx, &checkpoint_access, opts).await
     } else if let Some(id) = matches.get_one::<String>("show") {
-        ctx.log_info(&format!("Showing session: {}", id));
-        // TODO: Implement session details
+        let opts = crate::cli::commands::sessions::ShowOptions {
+            session_id: id.clone(),
+            checkpoints: true,
+        };
+        crate::cli::commands::sessions::show_session(ctx, &checkpoint_access, opts).await
     } else if let Some(id) = matches.get_one::<String>("delete") {
-        ctx.log_info(&format!("Deleting session: {}", id));
-        // TODO: Implement session deletion
+        let opts = crate::cli::commands::sessions::DeleteOptions {
+            session_id: id.clone(),
+            confirm: true,
+        };
+        crate::cli::commands::sessions::delete_session(ctx, &checkpoint_access, opts).await
     } else {
         ctx.log_info("Use --list, --show <id>, or --delete <id> flags");
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Handle the misc command
 async fn misc_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
     if matches.get_flag("doctor") {
-        ctx.log_info("Running diagnostics...");
-        // TODO: Implement diagnostics
-        ctx.log_success("All systems operational");
+        let opts = crate::cli::commands::misc::DoctorOptions {
+            verbose: false,
+        };
+        crate::cli::commands::misc::run_doctor(ctx, opts).await
     } else if matches.get_flag("stats") {
-        ctx.log_info("Showing statistics...");
-        // TODO: Implement statistics
+        let storage_access = AbkStorageAccess::new();
+        let opts = crate::cli::commands::misc::StatsOptions {
+            detailed: false,
+        };
+        crate::cli::commands::misc::show_stats(ctx, &storage_access, opts).await
     } else if matches.get_flag("clean") {
-        ctx.log_info("Cleaning temporary files...");
-        // TODO: Implement cleanup
-        ctx.log_success("Cleanup completed");
+        let opts = crate::cli::commands::misc::CleanOptions {
+            dry_run: false,
+            temp_only: true,
+        };
+        crate::cli::commands::misc::clean_temp(ctx, opts).await
     } else {
         ctx.log_info("Use --doctor, --stats, or --clean flags");
+        Ok(())
     }
-
-    Ok(())
 }

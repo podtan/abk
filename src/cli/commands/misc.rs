@@ -5,12 +5,34 @@
 //! - version: Show version information
 //! - count: Count tokens in a file
 //! - config_check: Validate configuration
+//! - doctor: Run diagnostics
+//! - stats: Show statistics
+//! - clean: Clean temporary files
 
 use crate::cli::error::{CliError, CliResult};
-use crate::cli::adapters::CommandContext;
+use crate::cli::adapters::{CommandContext, StorageAccess};
 use colored::*;
 use std::fs;
 use std::path::PathBuf;
+
+/// Doctor command options
+#[derive(Debug, Clone)]
+pub struct DoctorOptions {
+    pub verbose: bool,
+}
+
+/// Stats command options
+#[derive(Debug, Clone)]
+pub struct StatsOptions {
+    pub detailed: bool,
+}
+
+/// Clean command options
+#[derive(Debug, Clone)]
+pub struct CleanOptions {
+    pub dry_run: bool,
+    pub temp_only: bool,
+}
 
 /// Echo command - prints a message
 pub fn echo<C: CommandContext>(_ctx: &C, message: &[String]) -> CliResult<()> {
@@ -101,6 +123,151 @@ pub fn config_check<C: CommandContext>(
         }
     } else {
         println!("{}", "No environment file specified".yellow());
+    }
+
+    Ok(())
+}
+
+/// Run diagnostics
+pub async fn run_doctor<C>(
+    ctx: &C,
+    opts: DoctorOptions,
+) -> CliResult<()>
+where
+    C: CommandContext,
+{
+    ctx.log_info("🔍 Running diagnostics");
+
+    let mut issues = Vec::new();
+
+    // Check configuration
+    let config_path = ctx.config_path()?;
+    if !config_path.exists() {
+        issues.push("Configuration file not found".to_string());
+    } else {
+        match ctx.load_config() {
+            Ok(_) => {
+                if opts.verbose {
+                    println!("✅ Configuration file is valid");
+                }
+            }
+            Err(e) => {
+                issues.push(format!("Configuration file is invalid: {}", e));
+            }
+        }
+    }
+
+    // Check data directory
+    let data_dir = ctx.data_dir()?;
+    if !data_dir.exists() {
+        issues.push("Data directory not found".to_string());
+    } else {
+        if opts.verbose {
+            println!("✅ Data directory exists");
+        }
+    }
+
+    // Check for temporary files
+    let temp_path = data_dir.join("temp");
+    if temp_path.exists() {
+        if let Ok(entries) = std::fs::read_dir(&temp_path) {
+            let temp_files: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+            if !temp_files.is_empty() {
+                issues.push(format!("{} temporary files found", temp_files.len()));
+            }
+        }
+    }
+
+    if issues.is_empty() {
+        ctx.log_success("All systems operational");
+    } else {
+        ctx.log_warning("Issues found:");
+        for issue in issues {
+            println!("  • {}", issue);
+        }
+    }
+
+    Ok(())
+}
+
+/// Show statistics
+pub async fn show_stats<C, S>(
+    ctx: &C,
+    storage: &S,
+    opts: StatsOptions,
+) -> CliResult<()>
+where
+    C: CommandContext,
+    S: StorageAccess,
+{
+    ctx.log_info("📊 Showing statistics");
+
+    let stats = storage.calculate_storage_usage().await?;
+
+    println!("Storage Statistics:");
+    println!("  Total size: {} bytes", stats.total_size);
+    println!("  Projects: {}", stats.project_count);
+    println!("  Sessions: {}", stats.session_count);
+    println!("  Checkpoints: {}", stats.checkpoint_count);
+
+    if opts.detailed {
+        println!("\nProject Details:");
+        for project in stats.projects {
+            println!("  {}: {} bytes, {} sessions, {} checkpoints",
+                project.project_path.display(),
+                project.size_bytes,
+                project.session_count,
+                project.checkpoint_count
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Clean temporary files
+pub async fn clean_temp<C>(
+    ctx: &C,
+    opts: CleanOptions,
+) -> CliResult<()>
+where
+    C: CommandContext,
+{
+    ctx.log_info("🧹 Cleaning temporary files");
+
+    let data_dir = ctx.data_dir()?;
+    let temp_path = data_dir.join("temp");
+
+    if !temp_path.exists() {
+        ctx.log_info("No temporary files to clean");
+        return Ok(());
+    }
+
+    let mut cleaned_files = 0;
+    let mut cleaned_bytes = 0u64;
+
+    if let Ok(entries) = std::fs::read_dir(&temp_path) {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                cleaned_bytes += metadata.len();
+
+                if !opts.dry_run {
+                    if let Err(e) = std::fs::remove_file(entry.path()) {
+                        ctx.log_warning(&format!("Failed to remove {}: {}", entry.path().display(), e));
+                        continue;
+                    }
+                }
+
+                cleaned_files += 1;
+            }
+        }
+    }
+
+    if opts.dry_run {
+        println!("Would clean {} files ({} bytes)", cleaned_files, cleaned_bytes);
+    } else {
+        println!("Cleaned {} files ({} bytes)", cleaned_files, cleaned_bytes);
+        ctx.log_success("Cleanup completed");
     }
 
     Ok(())
