@@ -18,6 +18,132 @@ use crate::cli::adapters::checkpoint::{
 use crate::cli::adapters::storage::{StorageAccess, AbkStorageAccess};
 use async_trait::async_trait;
 
+/// Default implementation of CommandContext for simple use cases
+///
+/// This provides a standard implementation that loads configuration from a file
+/// and provides basic logging and filesystem operations. For advanced use cases,
+/// implement the CommandContext trait directly.
+pub struct DefaultCommandContext {
+    config_path: std::path::PathBuf,
+    config: crate::config::Configuration,
+    logger: crate::observability::Logger,
+    working_dir: std::path::PathBuf,
+}
+
+impl DefaultCommandContext {
+    /// Create a new default command context from a config file path
+    pub fn from_config_path(config_path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let config_loader = crate::config::ConfigurationLoader::new(Some(config_path))?;
+        let config = config_loader.config;
+        
+        let logger = crate::observability::Logger::new(None, None)
+            .unwrap_or_else(|_| {
+                crate::observability::Logger::new(Some(std::path::Path::new("simpaticoder.log")), Some("INFO"))
+                    .expect("Failed to create fallback logger")
+            });
+
+        let working_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+        Ok(Self {
+            config_path: config_path.to_path_buf(),
+            config,
+            logger,
+            working_dir,
+        })
+    }
+}
+
+impl CommandContext for DefaultCommandContext {
+    fn config_path(&self) -> CliResult<std::path::PathBuf> {
+        Ok(self.config_path.clone())
+    }
+
+    fn config(&self) -> &crate::config::Configuration {
+        &self.config
+    }
+
+    fn load_config(&self) -> CliResult<serde_json::Value> {
+        Ok(serde_json::json!({
+            "name": self.config.agent.name,
+            "version": self.config.agent.version
+        }))
+    }
+
+    fn working_dir(&self) -> CliResult<std::path::PathBuf> {
+        Ok(self.working_dir.clone())
+    }
+
+    fn project_hash(&self) -> CliResult<String> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        self.working_dir.hash(&mut hasher);
+        Ok(format!("{:x}", hasher.finish()))
+    }
+
+    fn data_dir(&self) -> CliResult<std::path::PathBuf> {
+        let home = std::env::var("HOME")
+            .map_err(|_| CliError::ConfigError("Could not determine home directory".to_string()))?;
+        Ok(std::path::PathBuf::from(home).join(".simpaticoder"))
+    }
+
+    fn cache_dir(&self) -> CliResult<std::path::PathBuf> {
+        self.data_dir()
+    }
+
+    fn log_info(&self, message: &str) {
+        println!("{}", message);
+    }
+
+    fn log_warn(&self, message: &str) {
+        eprintln!("Warning: {}", message);
+    }
+
+    fn log_error(&self, message: &str) -> CliResult<()> {
+        eprintln!("Error: {}", message);
+        Ok(())
+    }
+
+    fn log_success(&self, message: &str) {
+        println!("✓ {}", message);
+    }
+
+    fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error>> {
+        let config_path = Some(self.config_path.as_path());
+        Ok(crate::agent::Agent::new(config_path, None, None)?)
+    }
+}
+
+/// Convenience function for running CLI from a config file path
+///
+/// This is the one-liner function that enables the 10-line agent goal.
+/// For simple applications, this eliminates the need to implement CommandContext.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     abk::cli::run_configured_cli_from_config("config/simpaticoder.toml").await
+/// }
+/// ```
+pub async fn run_configured_cli_from_config(
+    config_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create default context from config path
+    let context = DefaultCommandContext::from_config_path(std::path::Path::new(config_path))?;
+    
+    // Convert config to CLI config
+    let cli_config = CliConfig::from_simpaticoder_config(&context.config);
+    
+    // Run the CLI
+    run_configured_cli(&context, &cli_config).await?;
+    
+    Ok(())
+}
+
 /// Concrete implementation of CheckpointAccess using abk::checkpoint
 struct AbkCheckpointAccess;
 

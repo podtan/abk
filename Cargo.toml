@@ -70,7 +70,3 @@ async-trait = "0.1"
 umf = { version = "0.1.3", features = ["streaming"] }
 
 
-[workspace]
-# Empty workspace to prevent being included in parent workspace
-
-
