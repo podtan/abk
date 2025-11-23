@@ -36,9 +36,15 @@ impl DefaultCommandContext {
         let config_loader = crate::config::ConfigurationLoader::new(Some(config_path))?;
         let config = config_loader.config;
         
+        let agent_name = &config.agent.name;
+        
+        // Set the ABK_AGENT_NAME environment variable so checkpoint and other systems can use it
+        std::env::set_var("ABK_AGENT_NAME", agent_name);
+        
+        let log_file_name = format!("{}.log", agent_name);
         let logger = crate::observability::Logger::new(None, None)
             .unwrap_or_else(|_| {
-                crate::observability::Logger::new(Some(std::path::Path::new("simpaticoder.log")), Some("INFO"))
+                crate::observability::Logger::new(Some(std::path::Path::new(&log_file_name)), Some("INFO"))
                     .expect("Failed to create fallback logger")
             });
 
@@ -86,7 +92,8 @@ impl CommandContext for DefaultCommandContext {
     fn data_dir(&self) -> CliResult<std::path::PathBuf> {
         let home = std::env::var("HOME")
             .map_err(|_| CliError::ConfigError("Could not determine home directory".to_string()))?;
-        Ok(std::path::PathBuf::from(home).join(".simpaticoder"))
+        let agent_name = &self.config.agent.name;
+        Ok(std::path::PathBuf::from(home).join(format!(".{}", agent_name)))
     }
 
     fn cache_dir(&self) -> CliResult<std::path::PathBuf> {
@@ -561,7 +568,8 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
     let force = matches.get_flag("force");
     let template = matches.get_one::<String>("template").map(|s| s.as_str()).unwrap_or("default");
 
-    ctx.log_info(&format!("Initializing simpaticoder with template: {}", template));
+    let agent_name = &ctx.config().agent.name;
+    ctx.log_info(&format!("Initializing {} with template: {}", agent_name, template));
     if force {
         ctx.log_info("Force mode enabled - overwriting existing files");
     }
@@ -570,25 +578,26 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
     let install_config = ctx.config().installation.as_ref()
         .ok_or_else(|| CliError::ConfigError("Installation configuration not found".to_string()))?;
 
-    // Create ~/.simpaticoder directory structure
+    // Create ~/.{agent_name} directory structure
     let home_dir = dirs::home_dir()
         .ok_or_else(|| CliError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?;
 
-    let simpaticoder_dir = home_dir.join(".simpaticoder");
+    let agent_dir = home_dir.join(format!(".{}", agent_name));
 
     // Create main directory
-    if simpaticoder_dir.exists() && !force {
+    if agent_dir.exists() && !force {
         return Err(CliError::ValidationError(format!(
-            "Simpaticoder directory already exists: {}. Use --force to overwrite.",
-            simpaticoder_dir.display()
+            "{} directory already exists: {}. Use --force to overwrite.",
+            agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..],
+            agent_dir.display()
         )));
     }
 
-    std::fs::create_dir_all(&simpaticoder_dir)?;
-    ctx.log_info(&format!("Created directory: {}", simpaticoder_dir.display()));
+    std::fs::create_dir_all(&agent_dir)?;
+    ctx.log_info(&format!("Created directory: {}", agent_dir.display()));
 
     // Create bin directory for the binary
-    let bin_dir = simpaticoder_dir.join("bin");
+    let bin_dir = agent_dir.join("bin");
     std::fs::create_dir_all(&bin_dir)?;
     ctx.log_info(&format!("Created directory: {}", bin_dir.display()));
 
@@ -606,12 +615,12 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
     ];
 
     for subdir in subdirs {
-        let dir_path = simpaticoder_dir.join(subdir);
+        let dir_path = agent_dir.join(subdir);
         std::fs::create_dir_all(&dir_path)?;
         ctx.log_info(&format!("Created directory: {}", dir_path.display()));
     }
 
-    // Copy binary to ~/.simpaticoder/bin/
+    // Copy binary to ~/.{agent_name}/bin/
     let binary_source = PathBuf::from(&install_config.binary_source_path);
     let binary_dest = bin_dir.join(&install_config.binary_name);
 
@@ -632,20 +641,21 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
     }
 
     // Create default config file by copying from project config
-    let config_file = simpaticoder_dir.join("config/simpaticoder.toml");
+    let config_file_name = format!("{}.toml", agent_name);
+    let config_file = agent_dir.join("config").join(&config_file_name);
     if !config_file.exists() || force {
-        // Try to copy from the project's config/simpaticoder.toml
-        let project_config = std::env::current_dir()?.join("config/simpaticoder.toml");
+        // Try to copy from the project's config/{agent_name}.toml
+        let project_config = std::env::current_dir()?.join("config").join(&config_file_name);
         if project_config.exists() {
             std::fs::copy(&project_config, &config_file)?;
             ctx.log_info(&format!("Copied config file: {} -> {}", project_config.display(), config_file.display()));
         } else {
             // Fallback to default config if project config doesn't exist
-            let default_config = r#"# Simpaticoder Configuration
-# This file was generated by 'simpaticoder init'
+            let default_config = format!(r#"# {} Configuration
+# This file was generated by '{} init'
 
 [agent]
-name = "simpaticoder"
+name = "{}"
 version = "0.1.0"
 default_mode = "confirm"
 
@@ -657,7 +667,7 @@ max_tokens = 4000
 [llm]
 endpoint = "chat/completions"
 enable_streaming = true
-"#;
+"#, agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..], agent_name, agent_name);
             std::fs::write(&config_file, default_config)?;
             ctx.log_info(&format!("Created default config file: {}", config_file.display()));
         }
@@ -699,7 +709,7 @@ enable_streaming = true
             let entry = entry?;
             let entry_name = entry.file_name();
             let target = entry.path();
-            let link = simpaticoder_dir.join("providers").join(&entry_name);
+            let link = agent_dir.join("providers").join(&entry_name);
 
             if target.is_dir() {
                 // Only create symlink if the link doesn't exist or we're in force mode
@@ -733,8 +743,8 @@ enable_streaming = true
         }
     }
 
-    ctx.log_success("Simpaticoder initialized successfully");
-    ctx.log_info(&format!("Configuration directory: {}", simpaticoder_dir.display()));
+    ctx.log_success(&format!("{} initialized successfully", agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..]));
+    ctx.log_info(&format!("Configuration directory: {}", agent_dir.display()));
     ctx.log_info(&format!("Binary installed to: {}", binary_dest.display()));
     ctx.log_info(&format!("Symlink created: {}", local_bin_symlink.display()));
     Ok(())

@@ -128,7 +128,7 @@ impl CliConfig {
         });
 
         cli_config.commands.insert("run".to_string(), CommandConfig {
-            description: "Run simpaticoder with the specified task".to_string(),
+            description: format!("Run {} with the specified task", config.agent.name),
             args: vec![
                 ArgConfig {
                     name: "task".to_string(),

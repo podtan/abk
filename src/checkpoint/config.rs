@@ -298,17 +298,21 @@ pub struct MigrationReport {
     pub errors: Vec<String>,       // Errors encountered during migration
 }
 
-/// Get the default storage location (~/.simpaticoder)
+/// Get the default storage location (~/.{agent_name})
+/// Uses ABK_AGENT_NAME environment variable, defaults to "simpaticoder" for backward compatibility
 fn get_default_storage_location() -> PathBuf {
+    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "simpaticoder".to_string());
+    let dir_name = format!(".{}", agent_name);
+    
     if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".simpaticoder")
+        PathBuf::from(home).join(&dir_name)
     } else {
         // Fallback for Windows
         if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            PathBuf::from(userprofile).join(".simpaticoder")
+            PathBuf::from(userprofile).join(&dir_name)
         } else {
             // Last resort fallback
-            PathBuf::from("/tmp").join(".simpaticoder")
+            PathBuf::from("/tmp").join(&dir_name)
         }
     }
 }

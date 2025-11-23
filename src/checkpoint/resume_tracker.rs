@@ -30,10 +30,13 @@ pub struct ResumeTracker {
 impl ResumeTracker {
     /// Create a new resume tracker
     pub fn new() -> CheckpointResult<Self> {
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "simpaticoder".to_string());
+        let dir_name = format!(".{}", agent_name);
+        
         let home_dir = std::env::var("HOME")
             .map_err(|_| CheckpointError::storage("Could not determine home directory"))?;
         let tracker_file = PathBuf::from(home_dir)
-            .join(".simpaticoder")
+            .join(&dir_name)
             .join("last_resume.json");
 
         // Ensure parent directory exists

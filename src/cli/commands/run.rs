@@ -36,15 +36,19 @@ pub async fn execute_run<C: CommandContext>(
     // Determine paths based on run mode
     let (config_path, env_path, template_base, log_base) = match run_mode.as_str() {
         "global" => {
+            // Get agent name from context config
+            let agent_name = &ctx.config().agent.name;
+            
             // Get home directory
             let home_dir = env::var("HOME").map_err(|_| {
                 CliError::ConfigError("Could not determine home directory from HOME environment variable".to_string())
             })?;
             let home_path = PathBuf::from(home_dir);
-            let share_dir = home_path.join(".simpaticoder");
+            let share_dir = home_path.join(format!(".{}", agent_name));
 
             // Global paths
-            let config_path = share_dir.join("config").join("simpaticoder.toml");
+            let config_file_name = format!("{}.toml", agent_name);
+            let config_path = share_dir.join("config").join(&config_file_name);
             let env_path = share_dir.join(".env");
             let template_base = share_dir.join("templates");
 

@@ -731,12 +731,16 @@ pub fn ensure_global_storage_directories() -> CheckpointResult<()> {
     Ok(())
 }
 
-/// Get the home checkpoint directory (~/.simpaticoder)
+/// Get the home checkpoint directory (~/.{agent_name})
+/// Uses ABK_AGENT_NAME environment variable, defaults to "simpaticoder" for backward compatibility
 fn get_home_checkpoint_dir() -> CheckpointResult<PathBuf> {
+    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "simpaticoder".to_string());
+    let dir_name = format!(".{}", agent_name);
+    
     if let Ok(home) = std::env::var("HOME") {
-        Ok(PathBuf::from(home).join(".simpaticoder"))
+        Ok(PathBuf::from(home).join(&dir_name))
     } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        Ok(PathBuf::from(userprofile).join(".simpaticoder"))
+        Ok(PathBuf::from(userprofile).join(&dir_name))
     } else {
         Err(CheckpointError::config(
             "Unable to determine home directory",
