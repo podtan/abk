@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.1.28"
+version = "0.1.29"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -70,5 +70,6 @@ async-trait = "0.1"
 umf = { version = "0.1.3", features = ["streaming"] }
 
 
-
+[workspace]
+# Empty workspace to prevent being included in parent workspace
 

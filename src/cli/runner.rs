@@ -128,6 +128,10 @@ impl CommandContext for DefaultCommandContext {
 /// This is the one-liner function that enables the 10-line agent goal.
 /// For simple applications, this eliminates the need to implement CommandContext.
 ///
+/// This function intelligently determines which config to load based on the command:
+/// - `init` command: Uses the provided project config path (for setup)
+/// - All other commands: Uses global user config (~/.{agent-name}/config/{agent-name}.toml)
+///
 /// # Example
 ///
 /// ```rust,ignore
@@ -139,8 +143,47 @@ impl CommandContext for DefaultCommandContext {
 pub async fn run_configured_cli_from_config(
     config_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Create default context from config path
-    let context = DefaultCommandContext::from_config_path(std::path::Path::new(config_path))?;
+    // Parse command line args to detect which command is being run
+    let args: Vec<String> = std::env::args().collect();
+    let command = args.get(1).map(|s| s.as_str());
+    
+    // Determine actual config path based on command
+    let actual_config_path = match command {
+        Some("init") => {
+            // Init command uses project config to set up ~/.{agent-name}/
+            std::path::PathBuf::from(config_path)
+        }
+        _ => {
+            // All other commands use global config
+            // For non-init commands, we need to extract the agent name from the config filename
+            // The config_path is expected to be in format "config/{agent-name}.toml"
+            let config_path_buf = std::path::PathBuf::from(config_path);
+            let agent_name = config_path_buf
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| format!("Invalid config path format: {}", config_path))?;
+            
+            // Construct global config path: ~/.{agent-name}/config/{agent-name}.toml
+            let home = std::env::var("HOME")
+                .map_err(|e| format!("Could not determine home directory: {}", e))?;
+            let global_config = std::path::PathBuf::from(home)
+                .join(format!(".{}", agent_name))
+                .join("config")
+                .join(format!("{}.toml", agent_name));
+            
+            // Check if global config exists, provide helpful error if not
+            if !global_config.exists() {
+                eprintln!("Error: Global configuration not found at: {}", global_config.display());
+                eprintln!("\nRun '{} init --force' to set up your environment.", agent_name);
+                std::process::exit(1);
+            }
+            
+            global_config
+        }
+    };
+    
+    // Create default context from determined config path
+    let context = DefaultCommandContext::from_config_path(&actual_config_path)?;
     
     // Convert config to CLI config
     let cli_config = CliConfig::from_agent_config(&context.config);

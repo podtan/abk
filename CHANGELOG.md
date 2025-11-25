@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.29] - 2024-11-25
+
+### Added
+- **Smart Config Path Selection**: `run_configured_cli_from_config()` now automatically selects the appropriate config path based on the command being executed
+  - `init` command: Uses project config (e.g., `config/agent.toml`) for setting up global environment
+  - All other commands: Use global user config (`~/.{agent-name}/config/{agent-name}.toml`)
+  - Agent name is extracted from config filename pattern (e.g., "trustee.toml" → "trustee")
+  - Provides helpful error message if global config doesn't exist
+  - **Impact**: Agents can now run from any directory without requiring a local config file
+
+### Changed
+- CLI runner now parses command line arguments early to determine config path strategy
+- Error messages now suggest running `{agent-name} init --force` when global config is missing
+
+### Fixed
+- Config path inconsistency where `run` command incorrectly used project config instead of global config
+- Agents can now properly execute commands from any directory after running `init`
+
 ## [0.1.28] - 2024-11-25
 
 ### Changed
