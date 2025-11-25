@@ -20,13 +20,13 @@ pub struct InstallationConfig {
 pub struct Configuration {
     pub agent: AgentConfig,
     pub installation: Option<InstallationConfig>,
-    pub templates: TemplateConfig,
     pub logging: LoggingConfig,
     pub execution: ExecutionConfig,
     pub modes: ModesConfig,
     pub tools: ToolsConfig,
     pub search_filtering: Option<SearchFilteringConfig>,
     pub llm: Option<LlmConfig>,
+    #[cfg(feature = "cli")]
     pub cli: Option<crate::cli::config::CliConfig>,
 }
 
@@ -120,20 +120,6 @@ pub struct AgentConfig {
     pub enable_task_classification: Option<bool>,
 }
 
-/// Template configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TemplateConfig {
-    pub system_template: String,
-    pub system_classification_template: String,
-    pub bug_fix_template: String,
-    pub fallback_template: String,
-    pub feature_template: String,
-    pub maintenance_template: String,
-    pub query_template: String,
-    pub action_observation_template: String,
-    pub format_error_template: String,
-}
-
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -207,46 +193,9 @@ impl ConfigurationLoader {
             Self::get_default_config()
         };
 
-        // Update paths if base paths are provided
-        if let Some(template_base) = template_base {
-            config.templates.system_template = template_base
-                .join("system.md")
-                .to_string_lossy()
-                .to_string();
-            // Use distinct classification template when template base is provided
-            config.templates.system_classification_template = template_base
-                .join("system_classification.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.bug_fix_template = template_base
-                .join("task/bug_fix.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.fallback_template = template_base
-                .join("task/fallback.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.feature_template = template_base
-                .join("task/feature.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.maintenance_template = template_base
-                .join("task/maintenance.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.query_template = template_base
-                .join("task/query.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.action_observation_template = template_base
-                .join("action_observation.md")
-                .to_string_lossy()
-                .to_string();
-            config.templates.format_error_template = template_base
-                .join("format_error.md")
-                .to_string_lossy()
-                .to_string();
-        }
+        // template_base parameter kept for backward compatibility but templates
+        // are now handled by lifecycle WASM plugins
+        let _ = template_base; // Suppress unused variable warning
 
         if let Some(log_base) = log_base {
             // Use agent name from config for log directory
@@ -295,19 +244,7 @@ impl ConfigurationLoader {
                 binary_source_path: "target/release/agent".to_string(),
                 local_bin_path: "~/.local/bin".to_string(),
             }),
-            // Templates are now loaded from lifecycle WASM plugin
-            // These paths are kept for backward compatibility but not used
-            templates: TemplateConfig {
-                system_template: "lifecycle:system".to_string(),
-                system_classification_template: "lifecycle:system_classification".to_string(),
-                bug_fix_template: "lifecycle:task/bug_fix".to_string(),
-                fallback_template: "lifecycle:task/fallback".to_string(),
-                feature_template: "lifecycle:task/feature".to_string(),
-                maintenance_template: "lifecycle:task/maintenance".to_string(),
-                query_template: "lifecycle:task/query".to_string(),
-                action_observation_template: "lifecycle:action_observation".to_string(),
-                format_error_template: "lifecycle:format_error".to_string(),
-            },
+            // Templates removed - now handled by lifecycle WASM plugins
             logging: LoggingConfig {
                 log_file: std::env::temp_dir()
                     .join("agent")
@@ -367,23 +304,16 @@ impl ConfigurationLoader {
                     .unwrap_or(false)
                     .to_string(),
             ),
-            "templates.system_template" => Some(self.config.templates.system_template.clone()),
-            "templates.system_classification_template" => {
-                Some(self.config.templates.system_classification_template.clone())
-            }
-            "templates.bug_fix_template" => Some(self.config.templates.bug_fix_template.clone()),
-            "templates.fallback_template" => Some(self.config.templates.fallback_template.clone()),
-            "templates.feature_template" => Some(self.config.templates.feature_template.clone()),
-            "templates.maintenance_template" => {
-                Some(self.config.templates.maintenance_template.clone())
-            }
-            "templates.query_template" => Some(self.config.templates.query_template.clone()),
-            "templates.action_observation_template" => {
-                Some(self.config.templates.action_observation_template.clone())
-            }
-            "templates.format_error_template" => {
-                Some(self.config.templates.format_error_template.clone())
-            }
+            // Template configuration removed - now handled by lifecycle WASM plugins
+            "templates.system_template" => None,
+            "templates.system_classification_template" => None,
+            "templates.bug_fix_template" => None,
+            "templates.fallback_template" => None,
+            "templates.feature_template" => None,
+            "templates.maintenance_template" => None,
+            "templates.query_template" => None,
+            "templates.action_observation_template" => None,
+            "templates.format_error_template" => None,
             "logging.log_file" => Some(self.config.logging.log_file.clone()),
             "logging.log_level" => Some(self.config.logging.log_level.clone()),
             _ => None,
@@ -420,90 +350,7 @@ impl ConfigurationLoader {
         }
     }
 
-    /// Get path to template file.
-    pub fn get_template_path(&self, template_name: &str) -> Result<PathBuf> {
-        let template_path = match template_name {
-            "system_template" => &self.config.templates.system_template,
-            "system_classification_template" => {
-                &self.config.templates.system_classification_template
-            }
-            "bug_fix_template" => &self.config.templates.bug_fix_template,
-            "fallback_template" => &self.config.templates.fallback_template,
-            "feature_template" => &self.config.templates.feature_template,
-            "maintenance_template" => &self.config.templates.maintenance_template,
-            "query_template" => &self.config.templates.query_template,
-            "action_observation_template" => &self.config.templates.action_observation_template,
-            "format_error_template" => &self.config.templates.format_error_template,
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Template '{}' not found in configuration",
-                    template_name
-                ))
-            }
-        };
-
-        Ok(PathBuf::from(template_path))
-    }
-
-    /// Get path to task-specific template file.
-    pub fn get_task_template_path(&self, task_type: &str) -> Result<PathBuf> {
-        let template_name = match task_type {
-            "bug_fix" => "bug_fix_template",
-            "feature" => "feature_template",
-            "maintenance" => "maintenance_template",
-            "query" => "query_template",
-            _ => "fallback_template",
-        };
-
-        self.get_template_path(template_name)
-    }
-
-    /// Get all template paths.
-    pub fn get_all_template_paths(&self) -> HashMap<String, PathBuf> {
-        let mut templates = HashMap::new();
-        templates.insert(
-            "system_template".to_string(),
-            PathBuf::from(&self.config.templates.system_template),
-        );
-        templates.insert(
-            "system_classification_template".to_string(),
-            PathBuf::from(&self.config.templates.system_classification_template),
-        );
-        templates.insert(
-            "bug_fix_template".to_string(),
-            PathBuf::from(&self.config.templates.bug_fix_template),
-        );
-        templates.insert(
-            "fallback_template".to_string(),
-            PathBuf::from(&self.config.templates.fallback_template),
-        );
-        templates.insert(
-            "feature_template".to_string(),
-            PathBuf::from(&self.config.templates.feature_template),
-        );
-        templates.insert(
-            "maintenance_template".to_string(),
-            PathBuf::from(&self.config.templates.maintenance_template),
-        );
-        templates.insert(
-            "query_template".to_string(),
-            PathBuf::from(&self.config.templates.query_template),
-        );
-        templates.insert(
-            "action_observation_template".to_string(),
-            PathBuf::from(&self.config.templates.action_observation_template),
-        );
-        templates.insert(
-            "format_error_template".to_string(),
-            PathBuf::from(&self.config.templates.format_error_template),
-        );
-        templates
-    }
-
-    /// Get the template base path.
-    pub fn get_template_base(&self) -> Option<&Path> {
-        self.template_base.as_deref()
-    }
+    // Template-related methods removed - templates are now handled by lifecycle WASM plugins
 
     /// Get LLM endpoint configuration.
     pub fn get_llm_endpoint(&self) -> String {

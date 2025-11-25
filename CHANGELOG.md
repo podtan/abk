@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.30] - 2024-11-25
+
+### Removed
+- **Template Configuration**: Completely removed template-related code from ABK
+  - Removed `templates` field from `Configuration` struct (now `Option` field removed entirely)
+  - Removed `TemplateConfig` struct and all template path methods
+  - Removed `get_template_path()`, `get_task_template_path()`, `get_all_template_paths()` methods
+  - **Breaking Change**: `[templates]` section no longer required in config files
+  - **Rationale**: Templates are now exclusively handled by lifecycle WASM plugins (e.g., coder-lifecycle)
+  - **Impact**: Agents must remove `[templates]` section from their TOML config files
+
+### Changed
+- Template configuration lookups now return `None` for backward compatibility
+- `template_base` parameter in `ConfigurationLoader::new_with_bases()` is now ignored (templates handled by plugins)
+
 ## [0.1.29] - 2024-11-25
 
 ### Added
