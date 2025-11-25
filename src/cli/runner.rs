@@ -612,6 +612,8 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
         "sessions",
         "logs",
         "templates",
+        "projects",  // Required by checkpoint system
+        "temp",      // Required by checkpoint system
     ];
 
     for subdir in subdirs {

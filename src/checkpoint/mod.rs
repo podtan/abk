@@ -64,7 +64,7 @@ pub use storage::{CheckpointStorageManager, ProjectStorage, SessionStorage};
 
 /// Initialize the checkpoint system
 pub fn initialize() -> CheckpointResult<()> {
-    // Create the global ~/.simpaticoder directory structure
+    // Create the global ~/.{agent_name} directory structure
     storage::ensure_global_storage_directories()?;
     Ok(())
 }

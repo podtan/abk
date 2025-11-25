@@ -12,7 +12,7 @@ use tokio::fs;
 
 /// Global checkpoint storage manager
 pub struct CheckpointStorageManager {
-    home_dir: PathBuf, // ~/.simpaticoder/
+    home_dir: PathBuf, // ~/.{agent_name}/
     #[allow(dead_code)]
     current_project: Option<ProjectHash>, // Currently active project
     config: GlobalCheckpointConfig,
@@ -24,6 +24,9 @@ impl CheckpointStorageManager {
         let home_dir = get_home_checkpoint_dir()?;
         let config = GlobalCheckpointConfig::default();
 
+        // Ensure storage directories exist
+        ensure_global_storage_directories()?;
+
         Ok(Self {
             home_dir,
             current_project: None,
@@ -34,6 +37,9 @@ impl CheckpointStorageManager {
     /// Create a new storage manager with custom config
     pub fn with_config(config: GlobalCheckpointConfig) -> CheckpointResult<Self> {
         let home_dir = config.storage_location.clone();
+
+        // Ensure storage directories exist
+        ensure_global_storage_directories()?;
 
         Ok(Self {
             home_dir,
@@ -262,7 +268,7 @@ pub struct ProjectStorage {
     project_hash: ProjectHash,
     #[allow(dead_code)]
     project_path: PathBuf,
-    storage_path: PathBuf, // ~/.simpaticoder/projects/<hash>/
+    storage_path: PathBuf, // ~/.{agent_name}/projects/<hash>/
     #[allow(dead_code)]
     metadata: ProjectMetadata,
     #[allow(dead_code)]

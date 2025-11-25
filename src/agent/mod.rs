@@ -155,10 +155,11 @@ impl Agent {
         // Initialize session manager with checkpoint support
         // Load checkpoint configuration directly from TOML
         let checkpointing_enabled = {
+            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
             let home_dir = std::env::var("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("."));
-            let config_path = home_dir.join(".simpaticoder/config/simpaticoder.toml");
+            let config_path = home_dir.join(format!(".{}/config/{}.toml", agent_name, agent_name));
 
             if config_path.exists() {
                 match std::fs::read_to_string(&config_path) {
