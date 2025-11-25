@@ -1,4 +1,4 @@
-package simpaticoder:lifecycle@0.1.0;
+package abk:lifecycle@0.2.0;
 
 /// Template lifecycle management interface
 /// Handles template loading, rendering, and task classification

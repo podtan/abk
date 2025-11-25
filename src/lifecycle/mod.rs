@@ -134,7 +134,7 @@ impl LifecyclePlugin {
             .with_context(|| "Failed to instantiate lifecycle plugin")?;
 
         let result = instance
-            .simpaticoder_lifecycle_adapter()
+            .abk_lifecycle_adapter()
             .call_load_template(&mut store, template_name)
             .await
             .with_context(|| format!("Failed to call load_template for: {}", template_name))?;
@@ -185,7 +185,7 @@ impl LifecyclePlugin {
             .map(|(k, v)| {
                 (
                     k.clone(),
-                    exports::simpaticoder::lifecycle::adapter::TemplateVariable {
+                    exports::abk::lifecycle::adapter::TemplateVariable {
                         key: k.clone(),
                         value: v.clone(),
                     },
@@ -199,7 +199,7 @@ impl LifecyclePlugin {
             .collect();
 
         let result = instance
-            .simpaticoder_lifecycle_adapter()
+            .abk_lifecycle_adapter()
             .call_render_template(&mut store, template_content, &wasm_vars_slice)
             .await
             .with_context(|| "Failed to call render_template")?;
@@ -233,7 +233,7 @@ impl LifecyclePlugin {
             .with_context(|| "Failed to instantiate lifecycle plugin")?;
 
         let result = instance
-            .simpaticoder_lifecycle_adapter()
+            .abk_lifecycle_adapter()
             .call_classify_task(&mut store, task_description)
             .await
             .with_context(|| "Failed to call classify_task")?;
@@ -274,7 +274,7 @@ impl LifecyclePlugin {
             .with_context(|| "Failed to instantiate lifecycle plugin")?;
 
         let result = instance
-            .simpaticoder_lifecycle_adapter()
+            .abk_lifecycle_adapter()
             .call_get_system_info_variables(&mut store)
             .await
             .with_context(|| "Failed to call get_system_info_variables")?;
@@ -310,7 +310,7 @@ impl LifecyclePlugin {
             .with_context(|| "Failed to instantiate lifecycle plugin")?;
 
         let result = instance
-            .simpaticoder_lifecycle_adapter()
+            .abk_lifecycle_adapter()
             .call_load_useful_commands(&mut store)
             .await
             .with_context(|| "Failed to call load_useful_commands")?;
@@ -345,7 +345,7 @@ impl LifecyclePlugin {
             .with_context(|| "Failed to instantiate lifecycle plugin")?;
 
         let metadata = instance
-            .simpaticoder_lifecycle_adapter()
+            .abk_lifecycle_adapter()
             .call_get_lifecycle_metadata(&mut store)
             .await
             .with_context(|| "Failed to call get_lifecycle_metadata")?;

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.28] - 2024-11-25
+
+### Changed
+- **WIT Interface Namespace Migration**: Migrated from `simpaticoder:*` to `abk:*` namespace
+  - Updated `wit/lifecycle/lifecycle.wit`: `simpaticoder:lifecycle@0.1.0` → `abk:lifecycle@0.2.0`
+  - Updated `wit/provider/provider.wit`: `simpaticoder:provider@1.0.0` → `abk:provider@0.2.0`
+  - Updated all binding references: `.simpaticoder_*_adapter()` → `.abk_*_adapter()`
+  - Updated type paths: `exports::simpaticoder::*` → `exports::abk::*`
+  - **Breaking Change**: All WASM plugins must be rebuilt with new WIT definitions
+  - **Result**: Zero "simpaticoder" references in codebase ✅
+
 ## [0.1.27] - 2024-11-25
 
 ### Fixed

@@ -1,4 +1,4 @@
-package simpaticoder:provider@1.0.0;
+package abk:provider@0.2.0;
 
 /// Generic provider adapter interface
 /// All WASM providers must implement this interface

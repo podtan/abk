@@ -161,7 +161,7 @@ impl WasmProvider {
                 .context("Failed to instantiate WASM component")?;
             
             // Call get_provider_metadata export
-            let metadata_json = instance.simpaticoder_provider_adapter()
+            let metadata_json = instance.abk_provider_adapter()
                 .call_get_provider_metadata(&mut store)
                 .await
                 .context("Failed to call get_provider_metadata")?;
@@ -230,7 +230,7 @@ impl WasmProvider {
             .context("Failed to instantiate WASM component for headers")?;
         
         // Convert InternalMessage to simple Message format for headers
-        let wasm_messages: Vec<crate::provider::wasm::exports::simpaticoder::provider::adapter::Message> = messages
+        let wasm_messages: Vec<crate::provider::wasm::exports::abk::provider::adapter::Message> = messages
             .iter()
             .map(|m| {
                 let content = match &m.content {
@@ -245,7 +245,7 @@ impl WasmProvider {
                     }
                 };
                 
-                crate::provider::wasm::exports::simpaticoder::provider::adapter::Message {
+                crate::provider::wasm::exports::abk::provider::adapter::Message {
                     role: m.role.as_str().to_string(),
                     content,
                 }
@@ -253,7 +253,7 @@ impl WasmProvider {
             .collect();
         
         // Call WASM to build headers
-        let header_pairs = instance.simpaticoder_provider_adapter()
+        let header_pairs = instance.abk_provider_adapter()
             .call_build_headers(&mut store, &wasm_messages, x_request_id)
             .await
             .context("Failed to call build-headers")?;
@@ -354,7 +354,7 @@ impl LlmProvider for WasmProvider {
             .await
             .context("Failed to instantiate WASM component")?;
         
-        let request_body = instance.simpaticoder_provider_adapter()
+        let request_body = instance.abk_provider_adapter()
             .call_format_request_from_json(
                 &mut store,
                 &messages_json,
@@ -379,7 +379,7 @@ impl LlmProvider for WasmProvider {
                 .await
                 .context("Failed to instantiate WASM component")?;
             
-            instance.simpaticoder_provider_adapter()
+            instance.abk_provider_adapter()
                 .call_get_api_url(&mut store, &base_url, &model)
                 .await
                 .context("Failed to call get-api-url")?
@@ -416,7 +416,7 @@ impl LlmProvider for WasmProvider {
             .context("Failed to instantiate WASM component")?;
         
         // WASM will parse the model string and determine backend itself
-        let result = instance.simpaticoder_provider_adapter()
+        let result = instance.abk_provider_adapter()
             .call_parse_response(&mut store, &response_body, &model)
             .await
             .context("Failed to call parse-response")?
@@ -477,7 +477,7 @@ impl LlmProvider for WasmProvider {
                 .await
                 .context("Failed to instantiate WASM component")?;
             
-            instance.simpaticoder_provider_adapter()
+            instance.abk_provider_adapter()
                 .call_supports_streaming(&mut store, &model)
                 .await
                 .context("Failed to call supports-streaming")?
@@ -557,7 +557,7 @@ impl LlmProvider for WasmProvider {
             .await
             .context("Failed to instantiate WASM component")?;
         
-        let request_body = instance.simpaticoder_provider_adapter()
+        let request_body = instance.abk_provider_adapter()
             .call_format_request_from_json(
                 &mut store,
                 &messages_json,
@@ -589,7 +589,7 @@ impl LlmProvider for WasmProvider {
                 .await
                 .context("Failed to instantiate WASM component")?;
             
-            instance.simpaticoder_provider_adapter()
+            instance.abk_provider_adapter()
                 .call_get_api_url(&mut store, &base_url, &model)
                 .await
                 .context("Failed to call get-api-url")?
@@ -734,7 +734,7 @@ async fn process_stream_chunk(
     component: &wasmtime::component::Component,
     engine: &Arc<wasmtime::Engine>,
     chunk: &str,
-) -> Result<exports::simpaticoder::provider::adapter::ContentDelta> {
+) -> Result<exports::abk::provider::adapter::ContentDelta> {
     // Create store and linker
     let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new().inherit_env().build();
     let state = ComponentState {
@@ -753,7 +753,7 @@ async fn process_stream_chunk(
         .context("Failed to instantiate WASM component for streaming")?;
     
     // Call handle_stream_chunk
-    let result = instance.simpaticoder_provider_adapter()
+    let result = instance.abk_provider_adapter()
         .call_handle_stream_chunk(&mut store, chunk)
         .await
         .context("Failed to call handle-stream-chunk")?;
