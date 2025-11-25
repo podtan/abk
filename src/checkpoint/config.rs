@@ -299,9 +299,9 @@ pub struct MigrationReport {
 }
 
 /// Get the default storage location (~/.{agent_name})
-/// Uses ABK_AGENT_NAME environment variable, defaults to "simpaticoder" for backward compatibility
+/// Uses ABK_AGENT_NAME environment variable, defaults to "NO_AGENT_NAME" if not set
 fn get_default_storage_location() -> PathBuf {
-    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "simpaticoder".to_string());
+    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     let dir_name = format!(".{}", agent_name);
     
     if let Ok(home) = std::env::var("HOME") {

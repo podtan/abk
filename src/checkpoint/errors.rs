@@ -150,24 +150,27 @@ impl CheckpointError {
 
     /// Get a user-friendly error message with recovery suggestions
     pub fn user_friendly_message(&self) -> String {
+        // Try to get agent name from environment, fallback to generic "agent"
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+        
         match self {
             CheckpointError::Config { message } => {
                 format!(
-                    "Configuration error: {}. Please check your simpaticoder configuration.",
-                    message
+                    "Configuration error: {}. Please check your {} configuration.",
+                    message, agent_name
                 )
             }
             CheckpointError::ProjectNotFound { path } => {
-                format!("Project not found at {}. Make sure you're running simpaticoder in a valid project directory.", path.display())
+                format!("Project not found at {}. Make sure you're running {} in a valid project directory.", path.display(), agent_name)
             }
             CheckpointError::SessionNotFound { session_id } => {
-                format!("Session '{}' not found. Use 'simpaticoder sessions list' to see available sessions.", session_id)
+                format!("Session '{}' not found. Use '{} sessions list' to see available sessions.", session_id, agent_name)
             }
             CheckpointError::CheckpointNotFound {
                 checkpoint_id,
                 session_id,
             } => {
-                format!("Checkpoint '{}' not found in session '{}'. Use 'simpaticoder checkpoints list --session {}' to see available checkpoints.", checkpoint_id, session_id, session_id)
+                format!("Checkpoint '{}' not found in session '{}'. Use '{} checkpoints list --session {}' to see available checkpoints.", checkpoint_id, session_id, agent_name, session_id)
             }
             CheckpointError::PermissionDenied { path } => {
                 format!(
@@ -179,7 +182,7 @@ impl CheckpointError {
                 current_size,
                 max_size,
             } => {
-                format!("Storage quota exceeded ({} bytes > {} bytes). Use 'simpaticoder cache clean' to free up space.", current_size, max_size)
+                format!("Storage quota exceeded ({} bytes > {} bytes). Use '{} cache clean' to free up space.", current_size, max_size, agent_name)
             }
             CheckpointError::CorruptedData { message } => {
                 format!("Corrupted checkpoint data: {}. You may need to delete and recreate this checkpoint.", message)

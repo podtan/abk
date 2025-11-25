@@ -143,7 +143,7 @@ pub async fn run_configured_cli_from_config(
     let context = DefaultCommandContext::from_config_path(std::path::Path::new(config_path))?;
     
     // Convert config to CLI config
-    let cli_config = CliConfig::from_simpaticoder_config(&context.config);
+    let cli_config = CliConfig::from_agent_config(&context.config);
     
     // Run the CLI
     run_configured_cli(&context, &cli_config).await?;

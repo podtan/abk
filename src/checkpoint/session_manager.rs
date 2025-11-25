@@ -311,8 +311,9 @@ impl SessionManager {
         );
 
         // Initialize chat with system message and classification+task request
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
         context.clear_messages();
-        context.add_system_message(execution_system_content, Some("simpaticoder".to_string()));
+        context.add_system_message(execution_system_content, Some(agent_name));
         context.add_user_message(initial_message, Some("user".to_string()));
 
         Ok(format!(
@@ -369,8 +370,9 @@ impl SessionManager {
             .context("Failed to render task template")?;
 
         // Initialize chat with system and task messages
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
         context.clear_messages();
-        context.add_system_message(system_content, Some("simpaticoder".to_string()));
+        context.add_system_message(system_content, Some(agent_name));
         context.add_user_message(task_content, Some("user".to_string()));
 
         Ok(format!(

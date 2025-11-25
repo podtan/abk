@@ -199,7 +199,7 @@ impl ConfigurationLoader {
     ) -> Result<Self> {
         let config_path = config_path
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("config/simpaticoder.toml"));
+            .unwrap_or_else(|| PathBuf::from("config/agent.toml"));
 
         let mut config = if config_path.exists() {
             Self::load_config(&config_path)?
@@ -249,16 +249,19 @@ impl ConfigurationLoader {
         }
 
         if let Some(log_base) = log_base {
-            let simp_dir = log_base.join("simpaticoder");
-            fs::create_dir_all(&simp_dir).with_context(|| {
-                format!("Failed to create log directory: {}", simp_dir.display())
+            // Use agent name from config for log directory
+            let agent_name = &config.agent.name;
+            let log_dir = log_base.join(agent_name);
+            fs::create_dir_all(&log_dir).with_context(|| {
+                format!("Failed to create log directory: {}", log_dir.display())
             })?;
             let filename = format!(
-                "simpaticoder_{}_{}.md",
+                "{}_{}_{}.md",
+                agent_name,
                 Utc::now().timestamp_millis(),
                 std::process::id()
             );
-            config.logging.log_file = simp_dir.join(filename).to_string_lossy().to_string();
+            config.logging.log_file = log_dir.join(filename).to_string_lossy().to_string();
         }
 
         Ok(Self {
@@ -282,14 +285,14 @@ impl ConfigurationLoader {
     fn get_default_config() -> Configuration {
         Configuration {
             agent: AgentConfig {
-                name: "simpaticoder".to_string(),
+                name: "NO_AGENT_NAME".to_string(),
                 version: "0.1.0".to_string(),
                 default_mode: "confirm".to_string(),
                 enable_task_classification: Some(false), // Default to false for backward compatibility
             },
             installation: Some(InstallationConfig {
-                binary_name: "simpaticoder".to_string(),
-                binary_source_path: "target/release/simpaticoder".to_string(),
+                binary_name: "agent".to_string(),
+                binary_source_path: "target/release/agent".to_string(),
                 local_bin_path: "~/.local/bin".to_string(),
             }),
             // Templates are now loaded from lifecycle WASM plugin

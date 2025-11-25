@@ -99,9 +99,9 @@ pub enum ArgType {
 }
 
 impl CliConfig {
-    /// Load CLI config from a simpaticoder configuration
-    pub fn from_simpaticoder_config(config: &crate::config::Configuration) -> Self {
-        // If CLI config is provided in the simpaticoder config, use it
+    /// Load CLI config from agent configuration
+    pub fn from_agent_config(config: &crate::config::Configuration) -> Self {
+        // If CLI config is provided in the agent config, use it
         if let Some(cli_config) = &config.cli {
             return cli_config.clone();
         }

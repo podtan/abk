@@ -113,8 +113,9 @@ where
         let project_path = match project_path {
             Some(path) => path,
             None => {
+                let agent_name = ctx.config().agent.name.clone();
                 ctx.log_error(&format!("Session '{}' not found", session_id));
-                ctx.log_info("Use 'simpaticoder resume --list' to see available sessions");
+                ctx.log_info(&format!("Use '{} resume --list' to see available sessions", agent_name));
                 return Ok(());
             }
         };
@@ -412,17 +413,18 @@ where
             ));
 
             // Next steps guidance
+            let agent_name = &ctx.config().agent.name;
             ctx.log_info("\n🎯 Next Steps");
             ctx.log_info("  The checkpoint has been restored. You can now:");
-            ctx.log_info("  • Continue with: simpaticoder run \"continue the task\"");
+            ctx.log_info(&format!("  • Continue with: {} run \"continue the task\"", agent_name));
             ctx.log_info("  • Or create a new agent to continue from checkpoint context");
             ctx.log_info(&format!(
-                "  • Check status with: simpaticoder checkpoints list --session {}",
-                session_id
+                "  • Check status with: {} checkpoints list --session {}",
+                agent_name, session_id
             ));
             ctx.log_info(&format!(
-                "  • View session details: simpaticoder sessions show {}",
-                session_id
+                "  • View session details: {} sessions show {}",
+                agent_name, session_id
             ));
 
             // Store checkpoint info for potential agent continuation

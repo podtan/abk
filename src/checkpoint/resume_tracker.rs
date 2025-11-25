@@ -30,7 +30,7 @@ pub struct ResumeTracker {
 impl ResumeTracker {
     /// Create a new resume tracker
     pub fn new() -> CheckpointResult<Self> {
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "simpaticoder".to_string());
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
         let dir_name = format!(".{}", agent_name);
         
         let home_dir = std::env::var("HOME")
