@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.26] - 2024-11-25
+
+### Fixed
+- **Agent-Agnostic Refactoring**: Removed all hardcoded "simpaticoder" references
+  - Changed all fallback values from "simpaticoder" to "NO_AGENT_NAME"
+  - Fixed hardcoded config path in agent initialization (`.simpaticoder/config/simpaticoder.toml` → dynamic `.{agent_name}/config/{agent_name}.toml`)
+  - Updated default config values (agent name, binary name, config path)
+  - Renamed `from_simpaticoder_config()` to `from_agent_config()`
+  - Made error messages use dynamic agent name from `ABK_AGENT_NAME`
+  - Added "projects" and "temp" to init command directory creation
+  - Fixed runtime directory auto-creation (now works when directories are deleted)
+  - Updated documentation to use `{agent_name}` placeholder
+
+### Changed
+- Checkpoint system now properly initializes when `ABK_AGENT_NAME` is set
+- SessionManager initialization respects agent-specific config paths
+- All paths and error messages dynamically use agent name from environment
+
 ## [0.1.24] - 2025-11-06
 
 ### Added
