@@ -73,7 +73,7 @@ impl ToolAdapter {
     /// * `invocation` - Tool invocation from provider
     ///
     /// # Returns
-    /// ToolCall in simpaticoder format
+    /// ToolCall in ABK format
     pub fn invocation_to_tool_call(invocation: &ToolInvocation) -> Result<ToolCall> {
         let arguments = serde_json::to_string(&invocation.arguments)?;
 
@@ -104,7 +104,7 @@ impl ToolAdapter {
     /// Convert ToolCall to ToolInvocation
     ///
     /// # Arguments
-    /// * `tool_call` - Tool call in simpaticoder format
+    /// * `tool_call` - Tool call in ABK format
     ///
     /// # Returns
     /// Tool invocation
