@@ -160,7 +160,7 @@ pub async fn execute_run<C: CommandContext>(
     let max_iterations = ctx.config().execution.max_iterations;
 
     let workflow_result = if streaming_enabled {
-        ctx.log_info("🚀 Using modern streaming workflow (like Zed/Copilot)");
+        ctx.log_info("🚀 Using streaming workflow");
         crate::orchestration::run_workflow_streaming(&mut agent, max_iterations).await
     } else {
         ctx.log_info("📞 Using traditional iterative workflow");

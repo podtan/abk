@@ -86,7 +86,7 @@ impl super::Agent {
     /// Run workflow using streaming approach.
     ///
     /// Delegates to ABK orchestration streaming function which handles:
-    /// - Unified streaming workflow (like Zed/Copilot)
+    /// - Unified streaming workflow
     /// - Tool calls within streaming responses
     /// - Classification and template loading
     /// - Completion detection via submit or markers

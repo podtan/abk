@@ -435,7 +435,7 @@ where
             return self.run_workflow().await;
         }
 
-        println!("🚀 Starting TRUE unified streaming workflow (One API call like Zed/Copilot)");
+        println!("🚀 Starting TRUE unified streaming workflow (One API call)");
 
         let max_iterations = self.config.max_iterations;
         
