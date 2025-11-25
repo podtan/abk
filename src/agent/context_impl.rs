@@ -1,7 +1,7 @@
 //! AgentContext trait implementation for Agent
 //!
 //! This module implements the `abk::checkpoint::AgentContext` trait for the
-//! simpaticoder Agent, enabling it to use the generic SessionManager.
+//! ABK Agent, enabling it to use the generic SessionManager.
 
 use crate::agent::Agent;
 use crate::checkpoint::models::{ChatMessage, SystemInfo, WorkflowStep};

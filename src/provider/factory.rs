@@ -35,8 +35,8 @@ impl ProviderFactory {
     ///
     /// # Example
     /// ```ignore
-    /// use simpaticoder::model::factory::ProviderFactory;
-    /// use simpaticoder::environment::EnvironmentLoader;
+    /// use abk::provider::ProviderFactory;
+    /// use abk::config::EnvironmentLoader;
     ///
     /// let env = EnvironmentLoader::load()?;
     /// let provider = ProviderFactory::create(&env)?;
@@ -66,10 +66,12 @@ impl ProviderFactory {
 
     /// Find WASM provider in installed or development location
     fn find_wasm_provider(provider_name: &str) -> Result<PathBuf> {
-        // 1. Try installed location: ~/.simpaticoder/providers/{name}/provider.wasm
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+        
+        // 1. Try installed location: ~/.{agent_name}/providers/{name}/provider.wasm
         if let Ok(home_dir) = std::env::var("HOME") {
             let installed_path = PathBuf::from(home_dir)
-                .join(".simpaticoder")
+                .join(format!(".{}", agent_name))
                 .join("providers")
                 .join(provider_name)
                 .join("provider.wasm");
@@ -92,12 +94,12 @@ impl ProviderFactory {
         anyhow::bail!(
             "Unknown provider '{}'. WASM provider not found.\n\
             Tried:\n\
-            - ~/.simpaticoder/providers/{}/provider.wasm (installed)\n\
+            - ~/.{}/providers/{}/provider.wasm (installed)\n\
             - ./providers/{}/provider.wasm (development)\n\
             \n\
             Supported built-in providers: openai, anthropic, github\n\
-            For WASM providers, run 'simpaticoder init' to install.",
-            provider_name, provider_name, provider_name
+            For WASM providers, ensure provider.wasm is in the correct location.",
+            provider_name, agent_name, provider_name, provider_name
         )
     }
 }

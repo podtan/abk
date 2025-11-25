@@ -1,5 +1,5 @@
 // Sophisticated Agent Session Orchestration
-// Extracted from simpaticoder - refactored to be reusable for any agent
+// Refactored to be reusable for any agent
 //
 // This module provides advanced orchestration capabilities including:
 // - Task classification workflow

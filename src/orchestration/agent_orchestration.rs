@@ -1,7 +1,7 @@
 //! Orchestration functions for agents with integrated state
 //!
 //! Unlike the trait-based AgentSession, these functions work with agents
-//! that have tightly coupled components (like simpaticoder's Agent).
+//! that have tightly coupled components (like ABK's Agent).
 //!
 //! This provides the orchestration logic extraction without forcing
 //! architectural changes on the consuming agent.
@@ -104,7 +104,7 @@ pub trait AgentContext {
     fn extract_tool_calls(&self, response: &str) -> Result<Vec<umf::ToolCall>>;
 }
 
-/// Run non-streaming workflow - extracted from simpaticoder
+/// Run non-streaming workflow - reusable for any agent
 pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -> Result<String> {
     if !agent.is_running() {
         return Ok("Agent session not started. Call start_session() first.".to_string());

@@ -1180,7 +1180,7 @@ mod tests {
                     pid: 12345,
                     parent_pid: Some(1234),
                     start_time: Utc::now(),
-                    command_line: vec!["simpaticoder".to_string()],
+                    command_line: vec!["agent".to_string()],
                     working_directory: std::env::temp_dir(),
                 },
                 resource_usage: ResourceUsage {

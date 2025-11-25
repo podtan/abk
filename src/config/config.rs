@@ -310,9 +310,9 @@ impl ConfigurationLoader {
             },
             logging: LoggingConfig {
                 log_file: std::env::temp_dir()
-                    .join("simpaticoder")
+                    .join("agent")
                     .join(format!(
-                        "simpaticoder_{}_{}.md",
+                        "agent_{}_{}.md",
                         Utc::now().timestamp_millis(),
                         std::process::id()
                     ))
@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ConfigurationLoader::get_default_config();
-        assert_eq!(config.agent.name, "simpaticoder");
+        assert_eq!(config.agent.name, "NO_AGENT_NAME");
         assert_eq!(config.agent.default_mode, "confirm");
         assert_eq!(config.execution.timeout_seconds, 120);
         assert_eq!(config.execution.max_tokens, 4000);
@@ -552,7 +552,7 @@ mod tests {
         let loader = ConfigurationLoader::new(None).unwrap();
         assert_eq!(
             loader.get_string("agent.name"),
-            Some("simpaticoder".to_string())
+            Some("NO_AGENT_NAME".to_string())
         );
         assert_eq!(loader.get_u64("execution.timeout_seconds"), Some(120));
         assert_eq!(loader.get_u64("execution.max_tokens"), Some(4000));

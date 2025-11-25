@@ -60,7 +60,7 @@ pub trait CommandContext {
 
     /// Get the data directory for storing agent data
     ///
-    /// Typically ~/.simpaticoder or equivalent
+    /// Typically ~/.{agent_name} or equivalent
     fn data_dir(&self) -> CliResult<PathBuf>;
 
     /// Get the home directory

@@ -9,7 +9,7 @@
 //! - Project isolation via hash-based directories
 //! - Atomic file operations
 //!
-//! All data is stored centrally in `~/.simpaticoder/` to avoid project directory pollution.
+//! All data is stored centrally in `~/.{agent_name}/` to avoid project directory pollution.
 //!
 //! ## Usage
 //!

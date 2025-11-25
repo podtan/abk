@@ -357,10 +357,12 @@ impl LifecyclePlugin {
 
 /// Find and load the lifecycle plugin
 pub fn find_lifecycle_plugin() -> Result<LifecyclePlugin> {
+    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+    
     // Try multiple locations
     let possible_paths = vec![
         PathBuf::from("providers/lifecycle/lifecycle.wasm"),
-        PathBuf::from("~/.simpaticoder/providers/lifecycle/lifecycle.wasm").expand_home()?,
+        PathBuf::from(format!("~/.{}/providers/lifecycle/lifecycle.wasm", agent_name)).expand_home()?,
     ];
 
     for path in possible_paths {

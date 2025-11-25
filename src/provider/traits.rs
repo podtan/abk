@@ -49,9 +49,9 @@ pub type StreamingResponse = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Se
 /// # Example
 ///
 /// ```ignore
-/// use simpaticoder::model::provider::LlmProvider;
-/// use simpaticoder::model::config::GenerateConfig;
-/// use simpaticoder::model::internal::InternalMessage;
+/// use abk::provider::LlmProvider;
+/// use abk::provider::GenerateConfig;
+/// use abk::provider::InternalMessage;
 ///
 /// async fn use_provider(provider: &dyn LlmProvider) -> Result<()> {
 ///     let messages = vec![/* ... */];

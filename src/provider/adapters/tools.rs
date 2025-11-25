@@ -1,6 +1,6 @@
 //! Tool format adapter for converting between different tool representations.
 //!
-//! This module provides conversion between simpaticoder's Tool format and
+//! This module provides conversion between ABK's Tool format and
 //! the provider-agnostic InternalToolDefinition format.
 
 use crate::provider::types::tools::InternalToolDefinition;
@@ -12,10 +12,10 @@ use anyhow::Result;
 pub struct ToolAdapter;
 
 impl ToolAdapter {
-    /// Convert simpaticoder Tool to InternalToolDefinition
+    /// Convert ABK Tool to InternalToolDefinition
     ///
     /// # Arguments
-    /// * `tool` - Tool in simpaticoder format
+    /// * `tool` - Tool in ABK format
     ///
     /// # Returns
     /// Internal tool definition
@@ -30,7 +30,7 @@ impl ToolAdapter {
     /// Convert multiple tools to internal format
     ///
     /// # Arguments
-    /// * `tools` - Vector of tools in simpaticoder format
+    /// * `tools` - Vector of tools in ABK format
     ///
     /// # Returns
     /// Vector of internal tool definitions
@@ -38,13 +38,13 @@ impl ToolAdapter {
         tools.iter().map(Self::to_internal).collect()
     }
 
-    /// Convert InternalToolDefinition back to simpaticoder Tool
+    /// Convert InternalToolDefinition back to ABK Tool
     ///
     /// # Arguments
     /// * `internal` - Internal tool definition
     ///
     /// # Returns
-    /// Tool in simpaticoder format
+    /// Tool in ABK format
     pub fn from_internal(internal: &InternalToolDefinition) -> Tool {
         Tool {
             r#type: "function".to_string(),
@@ -56,13 +56,13 @@ impl ToolAdapter {
         }
     }
 
-    /// Convert multiple internal tools back to simpaticoder format
+    /// Convert multiple internal tools back to ABK format
     ///
     /// # Arguments
     /// * `internals` - Vector of internal tool definitions
     ///
     /// # Returns
-    /// Vector of tools in simpaticoder format
+    /// Vector of tools in ABK format
     pub fn tools_from_internal(internals: &[InternalToolDefinition]) -> Vec<Tool> {
         internals.iter().map(Self::from_internal).collect()
     }

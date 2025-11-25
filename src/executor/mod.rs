@@ -1,4 +1,4 @@
-//! Command execution module with timeout handling for simpaticoder.
+//! Command execution module with timeout handling for ABK agents.
 
 use anyhow::Result;
 use std::collections::HashMap;

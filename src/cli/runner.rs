@@ -133,7 +133,7 @@ impl CommandContext for DefaultCommandContext {
 /// ```rust,ignore
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     abk::cli::run_configured_cli_from_config("config/simpaticoder.toml").await
+///     abk::cli::run_configured_cli_from_config("config/agent.toml").await
 /// }
 /// ```
 pub async fn run_configured_cli_from_config(

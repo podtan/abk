@@ -36,7 +36,7 @@ pub mod tools;
 // Session orchestration - sophisticated workflow management
 pub mod session;
 
-/// Main simpaticoder agent structure.
+/// Main ABK agent structure.
 #[allow(dead_code)]
 pub struct Agent {
     env: EnvironmentLoader,

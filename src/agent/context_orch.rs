@@ -1,7 +1,7 @@
-//! AgentContext implementation for simpaticoder Agent
+//! AgentContext implementation for ABK Agent
 //!
 //! This implements the abk::orchestration::AgentContext trait,
-//! allowing simpaticoder to use ABK's orchestration functions.
+//! allowing ABK agents to use ABK's orchestration functions.
 
 use anyhow::Result;
 use crate::orchestration::AgentContext;

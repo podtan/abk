@@ -202,7 +202,7 @@ impl StorageSizeCalculator {
 
     /// Get cache file path for directory
     fn get_cache_file_path(&self, dir_path: &Path) -> PathBuf {
-        let cache_dir = dir_path.join(".simpaticoder_cache");
+        let cache_dir = dir_path.join(".agent_cache");
         cache_dir.join("size_cache.json")
     }
 

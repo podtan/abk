@@ -22,7 +22,7 @@
 //! Use agent_orchestration instead.
 //!
 //! ### 3. Context-Based Orchestration (agent_orchestration) - RECOMMENDED
-//! For agents with integrated state (like simpaticoder):
+//! For agents with integrated state (like ABK's Agent):
 //! - Single AgentContext trait to implement
 //! - Standalone functions (run_workflow, run_workflow_streaming)
 //! - Works with tightly coupled components

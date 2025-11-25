@@ -1,7 +1,7 @@
 //! ChatML to internal message format adapter.
 //!
 //! This module provides conversion between ChatML messages (used internally
-//! by simpaticoder) and the provider-agnostic internal message format.
+//! by ABK) and the provider-agnostic internal message format.
 
 use umf::chatml::{ChatMLFormatter, ChatMLMessage, MessageRole as ChatMLRole};
 use crate::provider::types::internal::{

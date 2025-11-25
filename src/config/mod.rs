@@ -13,7 +13,7 @@
 //! let env = EnvironmentLoader::new(None);
 //!
 //! // Load configuration from TOML
-//! let config_loader = ConfigurationLoader::new(Some(Path::new("config/simpaticoder.toml"))).unwrap();
+//! let config_loader = ConfigurationLoader::new(Some(Path::new("config/agent.toml"))).unwrap();
 //! let config = &config_loader.config;
 //!
 //! // Access configuration

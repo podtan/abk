@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GlobalCheckpointConfig {
     pub enabled: bool,                         // Master enable/disable switch
-    pub storage_location: PathBuf,             // Base storage directory (~/.simpaticoder)
+    pub storage_location: PathBuf,             // Base storage directory (~/.{agent_name})
     pub auto_checkpoint_interval: u32,         // Create checkpoint every N iterations
     pub max_checkpoints_per_session: u32,      // Maximum checkpoints per session
     pub compression_enabled: bool,             // Enable checkpoint compression
@@ -362,7 +362,7 @@ impl ProjectConfigManager {
             super::errors::CheckpointError::config("Could not determine home directory")
         })?;
         let config_file_path = PathBuf::from(home_dir)
-            .join(".simpaticoder")
+            .join(".agent")
             .join("config")
             .join("projects.toml");
 
