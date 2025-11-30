@@ -287,6 +287,7 @@ impl ConfigurationLoader {
                     auto_execute: false,
                 },
             },
+            #[cfg(feature = "cli")]
             cli: None,
         }
     }
