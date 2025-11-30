@@ -74,7 +74,7 @@ bindgen!({
 /// logic to the WASM exports. It's completely generic and works with any
 /// WASM module that implements the standard provider interface.
 pub struct WasmProvider {
-    /// Provider name (e.g., "tanbal")
+    /// Provider name (e.g., "openai")
     name: String,
     
     /// WASM module path
@@ -96,16 +96,36 @@ pub struct WasmProvider {
     
     /// WASM component (loaded module)
     component: Component,
+    
+    /// Configuration overrides (takes precedence over environment variables)
+    config_overrides: std::collections::HashMap<String, String>,
 }
 
 impl WasmProvider {
     /// Create a new WASM provider
     ///
     /// # Arguments
-    /// * `name` - Provider name (e.g., "tanbal")
+    /// * `name` - Provider name (e.g., "openai")
     /// * `wasm_path` - Path to the .wasm file
     /// * `env` - Environment loader for configuration
     pub fn new(name: String, wasm_path: PathBuf, env: EnvironmentLoader) -> Result<Self> {
+        Self::with_config(name, wasm_path, env, std::collections::HashMap::new())
+    }
+    
+    /// Create a new WASM provider with configuration overrides
+    ///
+    /// # Arguments
+    /// * `name` - Provider name (e.g., "openai")
+    /// * `wasm_path` - Path to the .wasm file
+    /// * `env` - Environment loader for configuration
+    /// * `config_overrides` - Configuration values that override environment variables
+    ///   Keys should match the config keys in provider metadata (e.g., "api_key", "base_url")
+    pub fn with_config(
+        name: String,
+        wasm_path: PathBuf,
+        env: EnvironmentLoader,
+        config_overrides: std::collections::HashMap<String, String>,
+    ) -> Result<Self> {
         // Create wasmtime engine with component model and async support
         let mut config = wasmtime::Config::new();
         config.wasm_component_model(true);
@@ -127,6 +147,7 @@ impl WasmProvider {
             env,
             engine,
             component,
+            config_overrides,
         })
     }
     
@@ -173,6 +194,7 @@ impl WasmProvider {
     }
     
     /// Get configuration from environment based on metadata
+    /// First checks config_overrides (from with_config()), then env vars, then defaults
     async fn get_config(&self) -> Result<Value> {
         let metadata = self.get_metadata().await?;
         let env_vars = metadata["env_vars"]
@@ -181,6 +203,11 @@ impl WasmProvider {
         
         debug!("get_config() called for provider: {}", self.name);
         debug!("Found {} env vars in metadata", env_vars.len());
+        
+        // Get a read lock on config_overrides
+        let overrides = self.config_overrides.read()
+            .map_err(|e| anyhow::anyhow!("Failed to read config_overrides: {}", e))?;
+        debug!("Found {} config overrides", overrides.len());
         
         let mut config = json!({});
         
@@ -192,9 +219,19 @@ impl WasmProvider {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             
-            let value = std::env::var(env_name).ok();
+            // Check config_overrides first, then env var
+            let value = overrides.get(key).cloned()
+                .or_else(|| std::env::var(env_name).ok());
             
-            debug!("  Env var '{}' ({}): {:?}", key, env_name, value.as_deref().unwrap_or("<not set>"));
+            let source = if overrides.contains_key(key) {
+                "config_override"
+            } else if value.is_some() {
+                "env_var"
+            } else {
+                "not_set"
+            };
+            
+            debug!("  Config key '{}' (env: {}): source={}", key, env_name, source);
             
             if required && value.is_none() {
                 // Try default value
@@ -202,11 +239,11 @@ impl WasmProvider {
                     config[key] = default.clone();
                     debug!("    → Using default value: {}", default);
                 } else {
-                    anyhow::bail!("Required environment variable {} not set", env_name);
+                    anyhow::bail!("Required environment variable {} not set (and no config override provided)", env_name);
                 }
             } else if let Some(v) = value {
                 config[key] = json!(v);
-                debug!("    → Set from env var");
+                debug!("    → Set from {}", source);
             } else if let Some(default) = spec.get("default") {
                 config[key] = default.clone();
                 debug!("    → Using default value: {}", default);
