@@ -203,11 +203,7 @@ impl WasmProvider {
         
         debug!("get_config() called for provider: {}", self.name);
         debug!("Found {} env vars in metadata", env_vars.len());
-        
-        // Get a read lock on config_overrides
-        let overrides = self.config_overrides.read()
-            .map_err(|e| anyhow::anyhow!("Failed to read config_overrides: {}", e))?;
-        debug!("Found {} config overrides", overrides.len());
+        debug!("Found {} config overrides", self.config_overrides.len());
         
         let mut config = json!({});
         
@@ -220,10 +216,10 @@ impl WasmProvider {
                 .unwrap_or(false);
             
             // Check config_overrides first, then env var
-            let value = overrides.get(key).cloned()
+            let value = self.config_overrides.get(key).cloned()
                 .or_else(|| std::env::var(env_name).ok());
             
-            let source = if overrides.contains_key(key) {
+            let source = if self.config_overrides.contains_key(key) {
                 "config_override"
             } else if value.is_some() {
                 "env_var"
