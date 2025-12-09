@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.36] - 2025-12-09
+
+### Fixed
+- **Checkpoint Resume with Missing Projects**: Fixed issue where `resume` command would fail when checkpoint metadata contained project paths that no longer exist on disk
+  - Added existence checks in `list_sessions`, `list_checkpoints`, and `delete_session` methods
+  - Resume operations now gracefully skip projects with deleted paths instead of aborting
+  - **Impact**: Resume functionality is now robust against stale project metadata
+
 ## [0.1.30] - 2024-11-25
 
 ### Removed

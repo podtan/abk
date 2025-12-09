@@ -220,6 +220,10 @@ impl CheckpointAccess for AbkCheckpointAccess {
     }
 
     async fn list_sessions(&self, project_path: &PathBuf) -> CliResult<Vec<SessionMetadata>> {
+        if !project_path.exists() {
+            return Ok(vec![]);
+        }
+        
         let manager = crate::checkpoint::get_storage_manager()
             .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
         
@@ -246,6 +250,10 @@ impl CheckpointAccess for AbkCheckpointAccess {
     }
 
     async fn list_checkpoints(&self, project_path: &PathBuf, session_id: &str) -> CliResult<Vec<CheckpointMetadata>> {
+        if !project_path.exists() {
+            return Ok(vec![]);
+        }
+        
         let manager = crate::checkpoint::get_storage_manager()
             .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
 
@@ -270,6 +278,10 @@ impl CheckpointAccess for AbkCheckpointAccess {
     }
 
     async fn delete_session(&self, project_path: &PathBuf, session_id: &str) -> CliResult<()> {
+        if !project_path.exists() {
+            return Ok(());
+        }
+        
         let manager = crate::checkpoint::get_storage_manager()
             .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
         
