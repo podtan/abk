@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.38] - 2025-12-10
+
+### Added
+- **V2 Checkpoint Storage Format**: New split-file checkpoint architecture for better modularity
+  - `checkpoint::v2` module with new storage implementation
+  - `CheckpointMetadataV2`: Lightweight, queryable metadata file
+  - `AgentStateV2`: Agent state snapshot (separate file)
+  - `ConversationFileV2`: Conversation events wrapper (separate file)
+  - `CheckpointRefs`: References to companion files
+  - `SessionStorageV2` / `ProjectStorageV2`: Split file save/load operations
+  - `EventsLog`: Append-only JSONL event log (`events.jsonl`)
+  - `EventEnvelope`: Serializable event wrapper with types
+
+### Changed
+- **Split Checkpoint Files**: Each checkpoint now creates multiple focused files:
+  - `{NNN}_metadata.json` - Checkpoint metadata (small, queryable)
+  - `{NNN}_agent.json` - Agent state snapshot
+  - `{NNN}_conversation.json` - Conversation events
+  - `events.jsonl` - Append-only session event log
+
+### Notes
+- V2 format is additive - existing v1 storage still works
+- New `checkpoint::v2` re-exports available from `checkpoint` module
+- 11 new tests for v2 module
+
 ## [0.1.37] - 2025-12-10
 
 ### Changed
