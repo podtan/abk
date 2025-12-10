@@ -35,6 +35,7 @@
 
 pub mod agent_context;
 pub mod atomic;
+pub mod backend;
 pub mod cleanup;
 pub mod config;
 pub mod errors;
@@ -70,6 +71,12 @@ pub use resume_tracker::{ResumeContext, ResumeTracker};
 pub use session_manager::SessionManager;
 pub use size_calc::{SizeCategory, SizeInfo, SizeUtils, StorageSizeCalculator};
 pub use storage::{CheckpointStorageManager, ProjectStorage, SessionStorage};
+
+// Backend re-exports for storage abstraction
+pub use backend::{
+    FileStorageBackend, ListOptions, ListResult, StorageBackend, StorageBackendBuilder,
+    StorageBackendExt, StorageError, StorageItemMeta, StorageResult,
+};
 
 // V2 re-exports for split-file checkpoint format
 pub use v2::{

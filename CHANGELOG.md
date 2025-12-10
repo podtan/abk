@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.42] - 2025-12-10
+
+### Added
+- **Storage Backend Abstraction**: New pluggable storage backend system for checkpoint storage
+  - `StorageBackend` trait: Core async trait for storage operations (read, write, delete, list, exists, metadata)
+  - `StorageBackendExt` trait: Extension trait for JSON serialization/deserialization helpers
+  - `FileStorageBackend`: Default file system implementation with atomic writes
+  - `StorageError`: Comprehensive error types for storage operations (IO, NotFound, Serialization, Connection, etc.)
+  - `StorageItemMeta`: Metadata struct for stored items (key, size, modified_at, content_type)
+  - `ListOptions` / `ListResult`: Pagination support for listing operations
+  - `StorageBackendBuilder`: Builder pattern for creating backends from configuration
+
+- **DocumentDB Storage Backend** (feature-gated: `storage-documentdb`):
+  - `DocumentDBStorageBackend`: MongoDB/DocumentDB implementation for cloud-native checkpoint storage
+  - Supports distributed agents and multi-region deployments
+  - Enable with: `abk = { features = ["checkpoint", "storage-documentdb"] }`
+
+### Changed
+- `checkpoint` feature now includes `async-trait` dependency for backend trait support
+- New re-exports from `checkpoint` module: `FileStorageBackend`, `StorageBackend`, `StorageBackendExt`, `StorageError`, `StorageResult`, `ListOptions`, `ListResult`, `StorageItemMeta`, `StorageBackendBuilder`
+
+### Notes
+- FileStorageBackend includes atomic write support (temp file + rename pattern)
+- Directory traversal prevention in file backend
+- 9 new tests for storage backend module
+
 ## [0.1.41] - 2025-12-10
 
 ### Fixed

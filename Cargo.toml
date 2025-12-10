@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.1.41"
+version = "0.1.42"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -16,12 +16,15 @@ default = []
 config = ["serde", "serde_json", "toml", "anyhow", "chrono", "dotenv"]
 observability = ["anyhow", "chrono", "serde_json"]
 cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "async-trait", "serde", "serde_json", "thiserror", "config", "checkpoint", "dirs", "shellexpand"]
-checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "uname", "hostname"]
+checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "uname", "hostname", "async-trait"]
 provider = ["serde", "serde_json", "anyhow", "async-trait", "wasmtime", "wasmtime-wasi", "reqwest", "futures-util", "umf", "tokio", "config"]
 orchestration = ["anyhow", "tokio", "serde_json", "async-trait", "umf", "uuid", "futures-util", "provider"]
 agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "wasmtime", "wasmtime-wasi", "config", "observability", "checkpoint", "provider", "orchestration", "executor"]
 executor = ["anyhow", "tokio"]
 all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration", "agent"]
+
+# Storage backend features (optional)
+storage-documentdb = ["checkpoint", "mongodb"]
 
 [dependencies]
 # Config feature dependencies
@@ -59,6 +62,9 @@ futures-util = { version = "0.3", optional = true }
 # Agent feature dependencies
 cats = { version = "0.1.2", optional = true }
 regex = { version = "1.0", optional = true }
+
+# Storage backend dependencies (optional)
+mongodb = { version = "3.1", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
