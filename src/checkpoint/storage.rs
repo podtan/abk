@@ -517,7 +517,14 @@ impl ProjectStorage {
     }
 
     /// List all sessions for this project (with caching for performance)
+    /// 
+    /// For remote-only mode, also queries the remote backend for session list.
     pub async fn list_sessions(&self) -> CheckpointResult<Vec<SessionMetadata>> {
+        use super::config::StorageMode;
+        
+        let should_try_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
+        let should_try_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+        
         // Check if we have a valid cache entry
         {
             let cache_guard = self.sessions_cache.read().unwrap();
@@ -528,16 +535,123 @@ impl ProjectStorage {
             }
         }
 
-        // Cache miss or expired, load from disk
-        let sessions = self.load_sessions_from_disk().await?;
+        let mut all_sessions = Vec::new();
+        
+        // Load from local disk if configured
+        if should_try_local {
+            let local_sessions = self.load_sessions_from_disk().await?;
+            all_sessions.extend(local_sessions);
+        }
+        
+        // Load from remote if configured
+        #[cfg(feature = "storage-documentdb")]
+        if should_try_remote {
+            if let Some(remote_sessions) = self.load_sessions_from_remote().await? {
+                // Merge remote sessions, avoiding duplicates
+                for remote_session in remote_sessions {
+                    if !all_sessions.iter().any(|s| s.session_id == remote_session.session_id) {
+                        all_sessions.push(remote_session);
+                    }
+                }
+            }
+        }
+        
+        // Sort by creation time, newest first
+        all_sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         // Update cache
         {
             let mut cache_guard = self.sessions_cache.write().unwrap();
-            *cache_guard = Some((std::time::Instant::now(), sessions.clone()));
+            *cache_guard = Some((std::time::Instant::now(), all_sessions.clone()));
         }
 
-        Ok(sessions)
+        Ok(all_sessions)
+    }
+    
+    /// Load sessions from remote backend
+    #[cfg(feature = "storage-documentdb")]
+    async fn load_sessions_from_remote(&self) -> CheckpointResult<Option<Vec<SessionMetadata>>> {
+        use super::backend::ListOptions;
+        
+        let backend = match &self.remote_backend {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        
+        // List all documents in the sessions/ prefix for this project
+        let list_options = ListOptions {
+            prefix: Some("sessions/".to_string()),
+            limit: None,
+            continuation_token: None,
+        };
+        
+        let list_result = match backend.list(list_options).await {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("[checkpoint] Warning: Failed to list sessions from remote: {}", e);
+                return Ok(None);
+            }
+        };
+        
+        // Extract unique session IDs from document keys
+        // Keys are like: sessions/{session_id}/{checkpoint_id}_metadata.json
+        let mut session_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item in list_result.items {
+            let parts: Vec<&str> = item.key.split('/').collect();
+            if parts.len() >= 2 {
+                session_ids.insert(parts[1].to_string());
+            }
+        }
+        
+        // Build SessionMetadata for each unique session
+        let mut sessions = Vec::new();
+        for session_id in session_ids {
+            // Try to read the first checkpoint metadata to get session info
+            let metadata_key = format!("sessions/{}/001_analyze_metadata.json", session_id);
+            match backend.read_json::<CheckpointMetadata>(&metadata_key).await {
+                Ok(checkpoint_meta) => {
+                    // Extract task description from session_id (format: session_YYYY_MM_DD_HH_MM_task_name)
+                    let description = session_id
+                        .strip_prefix("session_")
+                        .and_then(|s| s.get(17..))  // Skip date/time part
+                        .map(|s| s.replace('_', " "))
+                        .or_else(|| checkpoint_meta.description.clone());
+                    
+                    sessions.push(SessionMetadata {
+                        session_id: session_id.clone(),
+                        project_hash: self.project_hash.as_str().to_string(),
+                        created_at: checkpoint_meta.created_at,
+                        last_accessed: checkpoint_meta.created_at,
+                        checkpoint_count: 1, // Approximate
+                        status: SessionStatus::Active,
+                        description,
+                        tags: Vec::new(),
+                        size_bytes: 0,
+                    });
+                }
+                Err(_) => {
+                    // Session exists but we couldn't read metadata, create basic entry
+                    let description = session_id
+                        .strip_prefix("session_")
+                        .and_then(|s| s.get(17..))
+                        .map(|s| s.replace('_', " "));
+                    
+                    sessions.push(SessionMetadata {
+                        session_id: session_id.clone(),
+                        project_hash: self.project_hash.as_str().to_string(),
+                        created_at: chrono::Utc::now(),
+                        last_accessed: chrono::Utc::now(),
+                        checkpoint_count: 1,
+                        status: SessionStatus::Active,
+                        description,
+                        tags: Vec::new(),
+                        size_bytes: 0,
+                    });
+                }
+            }
+        }
+        
+        Ok(Some(sessions))
     }
 
     /// Load sessions from disk without caching
