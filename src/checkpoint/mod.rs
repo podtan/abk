@@ -11,6 +11,14 @@
 //!
 //! All data is stored centrally in `~/.{agent_name}/` to avoid project directory pollution.
 //!
+//! ## V2 Storage Format
+//!
+//! The v2 module provides a new split-file checkpoint format:
+//! - `{NNN}_metadata.json` - Checkpoint metadata (small, queryable)
+//! - `{NNN}_agent.json` - Agent state snapshot
+//! - `{NNN}_conversation.json` - Conversation events
+//! - `events.jsonl` - Append-only event log
+//!
 //! ## Usage
 //!
 //! ```rust,no_run
@@ -37,6 +45,7 @@ pub mod session_manager;
 pub mod size_calc;
 pub mod storage;
 pub mod utils;
+pub mod v2;
 
 // Re-export key types for convenience
 pub use agent_context::AgentContext;
@@ -61,6 +70,18 @@ pub use resume_tracker::{ResumeContext, ResumeTracker};
 pub use session_manager::SessionManager;
 pub use size_calc::{SizeCategory, SizeInfo, SizeUtils, StorageSizeCalculator};
 pub use storage::{CheckpointStorageManager, ProjectStorage, SessionStorage};
+
+// V2 re-exports for split-file checkpoint format
+pub use v2::{
+    // Schemas
+    AgentStateV2, CheckpointMetadataV2, CheckpointRefs, CheckpointsIndex,
+    ConversationFileV2, SessionMetadataV2, SessionStatusV2, WorkflowStepV2,
+    CHECKPOINT_VERSION_V2,
+    // Storage
+    ProjectStorageV2, SessionStorageV2,
+    // Events
+    EventEnvelope, EventType, EventsLog,
+};
 
 /// Initialize the checkpoint system
 pub fn initialize() -> CheckpointResult<()> {
