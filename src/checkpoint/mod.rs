@@ -55,7 +55,7 @@ pub use cleanup::CleanupManager;
 pub use config::{
     CleanupReport, ConfigMigrator, GlobalCheckpointConfig, MigrationReport,
     ProjectCheckpointConfig, ProjectConfigManager, ProjectStats, RetentionPolicy, SessionStats,
-    StorageBackendConfig, StorageBackendType, StorageStats,
+    StorageBackendConfig, StorageBackendType, StorageMode, StorageStats,
 };
 pub use errors::{CheckpointError, CheckpointResult};
 pub use models::{

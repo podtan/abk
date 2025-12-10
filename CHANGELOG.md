@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.47] - 2025-12-10
+
+### Added
+- **StorageMode**: New enum for controlling checkpoint storage behavior
+  - `Local`: Only write to local filesystem (default for file backend)
+  - `Remote`: Only write to remote backend (no local files)
+  - `Mirror`: Write to both local and remote (default when remote backend configured)
+
+- **storage_mode config option**: New field in `StorageBackendConfig`
+  ```toml
+  [checkpointing.storage_backend]
+  backend_type = "documentdb"
+  storage_mode = "remote"  # or "mirror" or "local"
+  ```
+
+- **Remote checkpoint loading**: `load_checkpoint()` now supports loading from remote backend
+  - Tries local storage first (for Mirror mode)
+  - Falls back to remote backend if local doesn't exist
+  - Enables `trustee resume` to work with DocumentDB-only storage
+
+### Changed
+- **save_checkpoint()**: Now respects storage_mode
+  - `Local`: Only writes to local files
+  - `Remote`: Only writes to remote backend (no local files created)
+  - `Mirror`: Writes to both local and remote
+
+- **effective_storage_mode()**: Helper method on StorageBackendConfig
+  - Automatically determines best mode based on backend_type
+  - Remote backend configured + Local mode → defaults to Mirror for safety
+
+- **SessionStorage/ProjectStorage**: Now track storage_mode
+  - Passed down from CheckpointStorageManager through ProjectStorage to SessionStorage
+
+### Notes
+- Default behavior (Mirror) maintains backward compatibility
+- Use `storage_mode = "remote"` for pure DocumentDB storage (no local files)
+- Resume works with any storage mode - checks remote if local doesn't exist
+
 ## [0.1.46] - 2025-12-10
 
 ### Changed

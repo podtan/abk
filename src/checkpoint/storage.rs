@@ -133,11 +133,13 @@ impl CheckpointStorageManager {
         
         #[cfg(feature = "storage-documentdb")]
         {
+            let storage_mode = self.config.storage_backend.effective_storage_mode();
             ProjectStorage::with_remote_backend(
                 self.home_dir.clone(),
                 project_hash,
                 project_path.to_path_buf(),
                 self.remote_backend.clone(),
+                storage_mode,
             )
             .await
         }
@@ -367,6 +369,8 @@ pub struct ProjectStorage {
     // Cache for session metadata to improve performance
     sessions_cache: std::sync::RwLock<Option<(std::time::Instant, Vec<SessionMetadata>)>>,
     cache_duration: std::time::Duration,
+    /// Storage mode for checkpoints (local, remote, or mirror)
+    storage_mode: super::config::StorageMode,
     /// Optional remote storage backend
     #[cfg(feature = "storage-documentdb")]
     remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
@@ -398,6 +402,7 @@ impl ProjectStorage {
             config,
             sessions_cache: std::sync::RwLock::new(None),
             cache_duration: std::time::Duration::from_secs(30), // Cache for 30 seconds
+            storage_mode: super::config::StorageMode::Local,
             #[cfg(feature = "storage-documentdb")]
             remote_backend: None,
         })
@@ -410,6 +415,7 @@ impl ProjectStorage {
         project_hash: ProjectHash,
         project_path: PathBuf,
         remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
+        storage_mode: super::config::StorageMode,
     ) -> CheckpointResult<Self> {
         let storage_path = base_path.join("projects").join(project_hash.as_str());
 
@@ -430,6 +436,7 @@ impl ProjectStorage {
             config,
             sessions_cache: std::sync::RwLock::new(None),
             cache_duration: std::time::Duration::from_secs(30),
+            storage_mode,
             remote_backend,
         })
     }
@@ -451,6 +458,7 @@ impl ProjectStorage {
             config,
             sessions_cache: std::sync::RwLock::new(None),
             cache_duration: std::time::Duration::from_secs(30), // Cache for 30 seconds
+            storage_mode: super::config::StorageMode::Local,
             #[cfg(feature = "storage-documentdb")]
             remote_backend: None,
         })
@@ -460,6 +468,16 @@ impl ProjectStorage {
     #[cfg(feature = "storage-documentdb")]
     pub fn set_remote_backend(&mut self, backend: Option<Arc<dyn StorageBackend + Send + Sync>>) {
         self.remote_backend = backend;
+    }
+    
+    /// Set the storage mode for this project
+    pub fn set_storage_mode(&mut self, mode: super::config::StorageMode) {
+        self.storage_mode = mode;
+    }
+    
+    /// Get the current storage mode
+    pub fn storage_mode(&self) -> &super::config::StorageMode {
+        &self.storage_mode
     }
 
     /// Create a new session
@@ -486,10 +504,10 @@ impl ProjectStorage {
         // Invalidate cache since we added a new session
         self.invalidate_sessions_cache();
 
-        // Create session with remote backend if configured
+        // Create session with remote backend and storage mode if configured
         #[cfg(feature = "storage-documentdb")]
         {
-            SessionStorage::with_remote_backend(session_path, metadata, self.remote_backend.clone()).await
+            SessionStorage::with_remote_backend(session_path, metadata, self.remote_backend.clone(), self.storage_mode.clone()).await
         }
         
         #[cfg(not(feature = "storage-documentdb"))]
@@ -633,13 +651,15 @@ pub struct SessionStorage {
     session_path: PathBuf,
     metadata: SessionMetadata,
     checkpoints: HashMap<String, CheckpointMetadata>,
+    /// Storage mode: local, remote, or mirror
+    storage_mode: super::config::StorageMode,
     /// Optional remote storage backend for mirroring checkpoints
     #[cfg(feature = "storage-documentdb")]
     remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
 }
 
 impl SessionStorage {
-    /// Create a new session storage instance
+    /// Create a new session storage instance (local-only mode)
     pub async fn new(session_path: PathBuf, metadata: SessionMetadata) -> CheckpointResult<Self> {
         let checkpoints = load_checkpoint_index(&session_path).await?;
 
@@ -647,24 +667,33 @@ impl SessionStorage {
             session_path,
             metadata,
             checkpoints,
+            storage_mode: super::config::StorageMode::Local,
             #[cfg(feature = "storage-documentdb")]
             remote_backend: None,
         })
     }
     
-    /// Create a new session storage instance with remote backend
+    /// Create a new session storage instance with remote backend and storage mode
     #[cfg(feature = "storage-documentdb")]
     pub async fn with_remote_backend(
         session_path: PathBuf,
         metadata: SessionMetadata,
         remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
+        storage_mode: super::config::StorageMode,
     ) -> CheckpointResult<Self> {
-        let checkpoints = load_checkpoint_index(&session_path).await?;
+        // For remote-only mode, don't require local files to exist
+        let checkpoints = if matches!(storage_mode, super::config::StorageMode::Remote) {
+            // Try loading from local, but don't fail if not present
+            load_checkpoint_index(&session_path).await.unwrap_or_default()
+        } else {
+            load_checkpoint_index(&session_path).await?
+        };
 
         Ok(Self {
             session_path,
             metadata,
             checkpoints,
+            storage_mode,
             remote_backend,
         })
     }
@@ -674,78 +703,152 @@ impl SessionStorage {
     pub fn set_remote_backend(&mut self, backend: Option<Arc<dyn StorageBackend + Send + Sync>>) {
         self.remote_backend = backend;
     }
+    
+    /// Set the storage mode
+    pub fn set_storage_mode(&mut self, mode: super::config::StorageMode) {
+        self.storage_mode = mode;
+    }
+    
+    /// Get the current storage mode
+    pub fn storage_mode(&self) -> &super::config::StorageMode {
+        &self.storage_mode
+    }
 
     /// Save a checkpoint using V2 split-file format
     ///
-    /// Creates:
+    /// Storage behavior depends on storage_mode:
+    /// - Local: Only write to local files
+    /// - Remote: Only write to remote backend
+    /// - Mirror: Write to both local and remote
+    ///
+    /// Creates (when writing to local):
     /// - `{checkpoint_id}_metadata.json` - Lightweight metadata
     /// - `{checkpoint_id}_agent.json` - Agent state snapshot
     /// - `{checkpoint_id}_conversation.json` - Conversation state
-    ///
-    /// If a remote backend is configured, also mirrors to remote storage.
     pub async fn save_checkpoint(&mut self, checkpoint: &Checkpoint) -> CheckpointResult<()> {
+        use super::config::StorageMode;
+        
         let checkpoint_id = &checkpoint.metadata.checkpoint_id;
         let session_id = &self.metadata.session_id;
-
-        // V2 Split-file format:
-        // 1. Save metadata file (lightweight, queryable)
-        let metadata_file = self
-            .session_path
-            .join(format!("{}_metadata.json", checkpoint_id));
-        AtomicOps::write_json(&metadata_file, &checkpoint.metadata)?;
-
-        // 2. Save agent state file
-        let agent_file = self
-            .session_path
-            .join(format!("{}_agent.json", checkpoint_id));
-        AtomicOps::write_json(&agent_file, &checkpoint.agent_state)?;
-
-        // 3. Save conversation state file
-        let conversation_file = self
-            .session_path
-            .join(format!("{}_conversation.json", checkpoint_id));
-        AtomicOps::write_json(&conversation_file, &checkpoint.conversation_state)?;
         
-        // Mirror to remote backend if configured
+        let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
+        let should_write_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+
+        // Write to local files if configured
+        if should_write_local {
+            // V2 Split-file format:
+            // 1. Save metadata file (lightweight, queryable)
+            let metadata_file = self
+                .session_path
+                .join(format!("{}_metadata.json", checkpoint_id));
+            AtomicOps::write_json(&metadata_file, &checkpoint.metadata)?;
+
+            // 2. Save agent state file
+            let agent_file = self
+                .session_path
+                .join(format!("{}_agent.json", checkpoint_id));
+            AtomicOps::write_json(&agent_file, &checkpoint.agent_state)?;
+
+            // 3. Save conversation state file
+            let conversation_file = self
+                .session_path
+                .join(format!("{}_conversation.json", checkpoint_id));
+            AtomicOps::write_json(&conversation_file, &checkpoint.conversation_state)?;
+            
+            eprintln!("[checkpoint] ✅ Saved checkpoint {} to local storage", checkpoint_id);
+        }
+        
+        // Write to remote backend if configured
         #[cfg(feature = "storage-documentdb")]
-        if let Some(ref backend) = self.remote_backend {
-            let key_prefix = format!("sessions/{}/{}", session_id, checkpoint_id);
-            
-            // Write metadata
-            if let Err(e) = backend.write_json(&format!("{}_metadata.json", key_prefix), &checkpoint.metadata).await {
-                eprintln!("[checkpoint] Warning: Failed to write metadata to remote backend: {}", e);
+        if should_write_remote {
+            if let Some(ref backend) = self.remote_backend {
+                let key_prefix = format!("sessions/{}/{}", session_id, checkpoint_id);
+                
+                // Write metadata
+                if let Err(e) = backend.write_json(&format!("{}_metadata.json", key_prefix), &checkpoint.metadata).await {
+                    eprintln!("[checkpoint] Warning: Failed to write metadata to remote backend: {}", e);
+                }
+                
+                // Write agent state
+                if let Err(e) = backend.write_json(&format!("{}_agent.json", key_prefix), &checkpoint.agent_state).await {
+                    eprintln!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e);
+                }
+                
+                // Write conversation state
+                if let Err(e) = backend.write_json(&format!("{}_conversation.json", key_prefix), &checkpoint.conversation_state).await {
+                    eprintln!("[checkpoint] Warning: Failed to write conversation to remote backend: {}", e);
+                }
+                
+                let mode_str = if matches!(self.storage_mode, StorageMode::Mirror) { "mirrored" } else { "saved" };
+                eprintln!("[checkpoint] ✅ {} checkpoint {} to remote storage", mode_str.to_uppercase(), checkpoint_id);
+            } else if matches!(self.storage_mode, StorageMode::Remote) {
+                return Err(CheckpointError::Storage {
+                    message: "Remote storage mode requires a remote backend to be configured".to_string(),
+                });
             }
-            
-            // Write agent state
-            if let Err(e) = backend.write_json(&format!("{}_agent.json", key_prefix), &checkpoint.agent_state).await {
-                eprintln!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e);
-            }
-            
-            // Write conversation state
-            if let Err(e) = backend.write_json(&format!("{}_conversation.json", key_prefix), &checkpoint.conversation_state).await {
-                eprintln!("[checkpoint] Warning: Failed to write conversation to remote backend: {}", e);
-            }
-            
-            eprintln!("[checkpoint] ✅ Mirrored checkpoint {} to remote storage", checkpoint_id);
+        }
+        
+        #[cfg(not(feature = "storage-documentdb"))]
+        if should_write_remote && !should_write_local {
+            return Err(CheckpointError::Storage {
+                message: "Remote storage requires the 'storage-documentdb' feature".to_string(),
+            });
         }
 
-        // Update checkpoint index
+        // Update checkpoint index (always in memory, persist to local if using local storage)
         self.checkpoints.insert(
             checkpoint.metadata.checkpoint_id.clone(),
             checkpoint.metadata.clone(),
         );
-        self.save_checkpoint_index().await?;
+        if should_write_local {
+            self.save_checkpoint_index().await?;
+        }
 
         // Update session metadata
         self.metadata.checkpoint_count = self.checkpoints.len() as u32;
         self.metadata.last_accessed = Utc::now();
-        self.save_metadata().await?;
+        if should_write_local {
+            self.save_metadata().await?;
+        }
 
         Ok(())
     }
 
     /// Load a checkpoint (supports both V1 single-file and V2 split-file formats)
+    /// 
+    /// Loading behavior depends on storage_mode:
+    /// - Local: Only try local files
+    /// - Remote: Only try remote backend
+    /// - Mirror: Try local first, fall back to remote
     pub async fn load_checkpoint(&self, checkpoint_id: &str) -> CheckpointResult<Checkpoint> {
+        use super::config::StorageMode;
+        
+        let should_try_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
+        let should_try_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+        
+        // Try local storage first (if configured)
+        if should_try_local {
+            if let Some(checkpoint) = self.try_load_from_local(checkpoint_id).await? {
+                return Ok(checkpoint);
+            }
+        }
+        
+        // Try remote storage (if configured)
+        #[cfg(feature = "storage-documentdb")]
+        if should_try_remote {
+            if let Some(checkpoint) = self.try_load_from_remote(checkpoint_id).await? {
+                return Ok(checkpoint);
+            }
+        }
+        
+        Err(CheckpointError::CheckpointNotFound {
+            checkpoint_id: checkpoint_id.to_string(),
+            session_id: self.metadata.session_id.clone(),
+        })
+    }
+    
+    /// Try to load checkpoint from local files
+    async fn try_load_from_local(&self, checkpoint_id: &str) -> CheckpointResult<Option<Checkpoint>> {
         // Try V2 split-file format first
         let metadata_file = self
             .session_path
@@ -765,73 +868,126 @@ impl SessionStorage {
                 .join(format!("{}_conversation.json", checkpoint_id));
             let conversation_state: ConversationSnapshot = load_json(&conversation_file).await?;
 
-            // For compatibility, create default states for older fields
-            use super::models::{
-                ExecutionContext, FilePermissions, ProcessInfo, ResourceUsage, SystemInfo,
-                ToolState,
-            };
-
-            return Ok(Checkpoint {
-                metadata,
-                agent_state,
-                conversation_state,
-                file_system_state: FileSystemSnapshot {
-                    working_directory: std::path::PathBuf::new(),
-                    tracked_files: Vec::new(),
-                    modified_files: Vec::new(),
-                    git_status: None,
-                    file_permissions: HashMap::new(),
-                },
-                tool_state: ToolStateSnapshot {
-                    active_tools: HashMap::new(),
-                    executed_commands: Vec::new(),
-                    tool_registry: HashMap::new(),
-                    execution_context: ExecutionContext {
-                        environment_variables: HashMap::new(),
-                        working_directory: std::path::PathBuf::new(),
-                        timeout_seconds: 30,
-                        max_retries: 3,
-                    },
-                },
-                environment_state: EnvironmentSnapshot {
-                    environment_variables: HashMap::new(),
-                    system_info: SystemInfo {
-                        os_name: String::new(),
-                        os_version: String::new(),
-                        architecture: String::new(),
-                        hostname: String::new(),
-                        cpu_count: 0,
-                        total_memory: 0,
-                    },
-                    process_info: ProcessInfo {
-                        pid: 0,
-                        parent_pid: None,
-                        start_time: Utc::now(),
-                        command_line: Vec::new(),
-                        working_directory: std::path::PathBuf::new(),
-                    },
-                    resource_usage: ResourceUsage {
-                        cpu_usage: 0.0,
-                        memory_usage: 0,
-                        disk_usage: 0,
-                        network_bytes_sent: 0,
-                        network_bytes_received: 0,
-                    },
-                },
-            });
+            return Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)));
         }
 
         // Fall back to V1 single-file format
         let checkpoint_file = self.session_path.join(format!("{}.json", checkpoint_id));
 
-        if !checkpoint_file.exists() {
-            return Err(CheckpointError::CheckpointNotFound {
-                checkpoint_id: checkpoint_id.to_string(),
-                session_id: self.metadata.session_id.clone(),
-            });
+        if checkpoint_file.exists() {
+            let checkpoint = load_json(&checkpoint_file).await?;
+            return Ok(Some(checkpoint));
         }
+        
+        Ok(None)
+    }
+    
+    /// Try to load checkpoint from remote backend
+    #[cfg(feature = "storage-documentdb")]
+    async fn try_load_from_remote(&self, checkpoint_id: &str) -> CheckpointResult<Option<Checkpoint>> {
+        let backend = match &self.remote_backend {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        
+        let session_id = &self.metadata.session_id;
+        let key_prefix = format!("sessions/{}/{}", session_id, checkpoint_id);
+        
+        // Try to load metadata
+        let metadata: CheckpointMetadata = match backend.read_json(&format!("{}_metadata.json", key_prefix)).await {
+            Ok(Some(m)) => m,
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                eprintln!("[checkpoint] Warning: Failed to read metadata from remote: {}", e);
+                return Ok(None);
+            }
+        };
+        
+        // Load agent state
+        let agent_state: AgentStateSnapshot = match backend.read_json(&format!("{}_agent.json", key_prefix)).await {
+            Ok(Some(a)) => a,
+            Ok(None) => {
+                eprintln!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}", checkpoint_id);
+                return Ok(None);
+            }
+            Err(e) => {
+                eprintln!("[checkpoint] Warning: Failed to read agent state from remote: {}", e);
+                return Ok(None);
+            }
+        };
+        
+        // Load conversation state
+        let conversation_state: ConversationSnapshot = match backend.read_json(&format!("{}_conversation.json", key_prefix)).await {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                eprintln!("[checkpoint] Warning: Conversation state missing in remote for checkpoint {}", checkpoint_id);
+                return Ok(None);
+            }
+            Err(e) => {
+                eprintln!("[checkpoint] Warning: Failed to read conversation from remote: {}", e);
+                return Ok(None);
+            }
+        };
+        
+        eprintln!("[checkpoint] ✅ Loaded checkpoint {} from remote storage", checkpoint_id);
+        Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)))
+    }
+    
+    /// Build a Checkpoint with default values for optional fields
+    fn build_checkpoint(metadata: CheckpointMetadata, agent_state: AgentStateSnapshot, conversation_state: ConversationSnapshot) -> Checkpoint {
+        use super::models::{
+            ExecutionContext, FilePermissions, ProcessInfo, ResourceUsage, SystemInfo,
+            ToolState,
+        };
 
-        load_json(&checkpoint_file).await
+        Checkpoint {
+            metadata,
+            agent_state,
+            conversation_state,
+            file_system_state: FileSystemSnapshot {
+                working_directory: std::path::PathBuf::new(),
+                tracked_files: Vec::new(),
+                modified_files: Vec::new(),
+                git_status: None,
+                file_permissions: HashMap::new(),
+            },
+            tool_state: ToolStateSnapshot {
+                active_tools: HashMap::new(),
+                executed_commands: Vec::new(),
+                tool_registry: HashMap::new(),
+                execution_context: ExecutionContext {
+                    environment_variables: HashMap::new(),
+                    working_directory: std::path::PathBuf::new(),
+                    timeout_seconds: 30,
+                    max_retries: 3,
+                },
+            },
+            environment_state: EnvironmentSnapshot {
+                environment_variables: HashMap::new(),
+                system_info: SystemInfo {
+                    os_name: String::new(),
+                    os_version: String::new(),
+                    architecture: String::new(),
+                    hostname: String::new(),
+                    cpu_count: 0,
+                    total_memory: 0,
+                },
+                process_info: ProcessInfo {
+                    pid: 0,
+                    parent_pid: None,
+                    start_time: Utc::now(),
+                    command_line: Vec::new(),
+                    working_directory: std::path::PathBuf::new(),
+                },
+                resource_usage: ResourceUsage {
+                    cpu_usage: 0.0,
+                    memory_usage: 0,
+                    disk_usage: 0,
+                    network_bytes_sent: 0,
+                    network_bytes_received: 0,
+                },
+            },
+        }
     }
 
     /// Get the filesystem path for a checkpoint file (metadata file in V2)

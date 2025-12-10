@@ -18,12 +18,32 @@ pub enum StorageBackendType {
     MongoDB,
 }
 
+/// Storage mode - determines where checkpoints are stored
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageMode {
+    /// Only local file system (default when no remote backend)
+    #[default]
+    Local,
+    /// Only remote backend (no local files)
+    Remote,
+    /// Both local and remote (mirroring for reliability)
+    Mirror,
+}
+
 /// Storage backend configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StorageBackendConfig {
     /// Backend type: "file", "documentdb", or "mongodb"
     #[serde(default)]
     pub backend_type: StorageBackendType,
+    
+    /// Storage mode: "local", "remote", or "mirror"
+    /// - local: Only local files (default when backend_type is file)
+    /// - remote: Only remote storage (no local files)
+    /// - mirror: Both local and remote (default when remote backend is configured)
+    #[serde(default)]
+    pub storage_mode: StorageMode,
     
     /// Connection URL for remote backends (supports env var substitution)
     /// Example: "${DOCUMENTDB_URL}" or "mongodb://localhost:10260"
@@ -70,6 +90,7 @@ impl Default for StorageBackendConfig {
     fn default() -> Self {
         Self {
             backend_type: StorageBackendType::File,
+            storage_mode: StorageMode::Local,
             connection_url: None,
             database: None,
             collection: default_collection_name(),
@@ -154,6 +175,33 @@ impl StorageBackendConfig {
         } else {
             Some(value.to_string())
         }
+    }
+    
+    /// Get effective storage mode based on configuration
+    /// - If storage_mode is explicitly set, use that
+    /// - If remote backend is configured and mode is Local, default to Mirror
+    /// - Otherwise use Local
+    pub fn effective_storage_mode(&self) -> StorageMode {
+        match (&self.storage_mode, &self.backend_type) {
+            // Explicit mode set - use it
+            (StorageMode::Remote, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => StorageMode::Remote,
+            (StorageMode::Mirror, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => StorageMode::Mirror,
+            (StorageMode::Local, StorageBackendType::File) => StorageMode::Local,
+            // Remote backend configured but mode is Local - default to Mirror for safety
+            (StorageMode::Local, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => StorageMode::Mirror,
+            // File backend with remote modes doesn't make sense - fallback to Local
+            (StorageMode::Remote | StorageMode::Mirror, StorageBackendType::File) => StorageMode::Local,
+        }
+    }
+    
+    /// Check if local storage should be used
+    pub fn should_use_local(&self) -> bool {
+        matches!(self.effective_storage_mode(), StorageMode::Local | StorageMode::Mirror)
+    }
+    
+    /// Check if remote storage should be used
+    pub fn should_use_remote(&self) -> bool {
+        matches!(self.effective_storage_mode(), StorageMode::Remote | StorageMode::Mirror)
     }
 }
 
