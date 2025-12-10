@@ -574,7 +574,7 @@ impl SessionStorage {
             let conversation_state: ConversationSnapshot = load_json(&conversation_file).await?;
 
             // For compatibility, create default states for older fields
-            use super::{
+            use super::models::{
                 ExecutionContext, FilePermissions, ProcessInfo, ResourceUsage, SystemInfo,
                 ToolState,
             };
