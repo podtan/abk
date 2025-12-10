@@ -157,69 +157,103 @@ impl CheckpointStorageManager {
 
     /// List all projects in storage
     pub async fn list_projects(&self) -> CheckpointResult<Vec<ProjectMetadata>> {
-        let projects_dir = self.home_dir.join("projects");
-
-        if !projects_dir.exists() {
-            return Ok(Vec::new());
-        }
-
         let mut projects = Vec::new();
-        let mut entries = fs::read_dir(&projects_dir).await?;
-
-        while let Some(entry) = entries.next_entry().await? {
-            if entry.file_type().await?.is_dir() {
-                let project_dir = entry.path();
-                let project_hash = entry.file_name().to_string_lossy().to_string();
-
-                // Try to load project metadata
-                let metadata_path = project_dir.join(PROJECT_METADATA_FILENAME);
-                if metadata_path.exists() {
-                    match load_json::<ProjectMetadata>(&metadata_path).await {
-                        Ok(metadata) => projects.push(metadata),
-                        Err(_) => {
-                            // Create minimal metadata for corrupted projects
-                            // Try to reconstruct project information from available data
-                            let recovered_path = self.try_recover_project_path(&project_dir).await;
-                            let (project_path, project_name) = match recovered_path {
-                                Some(path) => {
-                                    let name = path
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("Recovered Project")
-                                        .to_string();
-                                    (path, name)
-                                }
-                                None => {
-                                    // Last resort: try to use current working directory or descriptive name with hash
-                                    let current_dir = std::env::current_dir()
-                                        .unwrap_or_else(|_| PathBuf::from("."));
-                                    let project_name = current_dir
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| {
-                                            let truncated_hash = if project_hash.len() >= 8 {
-                                                &project_hash[..8]
-                                            } else {
-                                                &project_hash
-                                            };
-                                            format!("Project ({})", truncated_hash)
-                                        });
-                                    (current_dir, project_name)
-                                }
-                            };
-
-                            let metadata = ProjectMetadata {
-                                project_hash,
-                                project_path,
-                                name: project_name,
-                                created_at: Utc::now(),
-                                last_accessed: Utc::now(),
-                                session_count: 0,
-                                size_bytes: 0,
-                                git_remote: None,
-                            };
+        let mut seen_hashes = std::collections::HashSet::new();
+        
+        // First, try to load from remote backend if configured
+        #[cfg(feature = "storage-documentdb")]
+        if let Some(ref backend) = self.remote_backend {
+            use crate::checkpoint::StorageBackendExt;
+            use crate::checkpoint::ListOptions;
+            
+            // Query for project metadata documents
+            let list_opts = ListOptions {
+                prefix: Some("project_metadata/".to_string()),
+                limit: None,
+                continuation_token: None,
+            };
+            
+            if let Ok(list_result) = backend.list(list_opts).await {
+                for item in list_result.items {
+                    // Try to read and parse the project metadata
+                    if let Ok(metadata) = backend.read_json::<ProjectMetadata>(&item.key).await {
+                        if seen_hashes.insert(metadata.project_hash.clone()) {
                             projects.push(metadata);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Also check local storage
+        let projects_dir = self.home_dir.join("projects");
+        if projects_dir.exists() {
+            let mut entries = fs::read_dir(&projects_dir).await?;
+
+            while let Some(entry) = entries.next_entry().await? {
+                if entry.file_type().await?.is_dir() {
+                    let project_dir = entry.path();
+                    let project_hash = entry.file_name().to_string_lossy().to_string();
+                    
+                    // Skip if we already have this project from remote
+                    if seen_hashes.contains(&project_hash) {
+                        continue;
+                    }
+
+                    // Try to load project metadata
+                    let metadata_path = project_dir.join(PROJECT_METADATA_FILENAME);
+                    if metadata_path.exists() {
+                        match load_json::<ProjectMetadata>(&metadata_path).await {
+                            Ok(metadata) => {
+                                seen_hashes.insert(metadata.project_hash.clone());
+                                projects.push(metadata);
+                            }
+                            Err(_) => {
+                                // Create minimal metadata for corrupted projects
+                                // Try to reconstruct project information from available data
+                                let recovered_path = self.try_recover_project_path(&project_dir).await;
+                                let (project_path, project_name) = match recovered_path {
+                                    Some(path) => {
+                                        let name = path
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("Recovered Project")
+                                            .to_string();
+                                        (path, name)
+                                    }
+                                    None => {
+                                        // Last resort: try to use current working directory or descriptive name with hash
+                                        let current_dir = std::env::current_dir()
+                                            .unwrap_or_else(|_| PathBuf::from("."));
+                                        let project_name = current_dir
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| {
+                                                let truncated_hash = if project_hash.len() >= 8 {
+                                                    &project_hash[..8]
+                                                } else {
+                                                    &project_hash
+                                                };
+                                                format!("Project ({})", truncated_hash)
+                                            });
+                                        (current_dir, project_name)
+                                    }
+                                };
+
+                                let metadata = ProjectMetadata {
+                                    project_hash: project_hash.clone(),
+                                    project_path,
+                                    name: project_name,
+                                    created_at: Utc::now(),
+                                    last_accessed: Utc::now(),
+                                    session_count: 0,
+                                    size_bytes: 0,
+                                    git_remote: None,
+                                };
+                                seen_hashes.insert(project_hash);
+                                projects.push(metadata);
+                            }
                         }
                     }
                 }

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.51] - 2025-12-10
+
+### Fixed
+- **Remote project discovery**: `list_projects()` now queries remote backend for project metadata
+  - Projects stored only in DocumentDB are now discoverable
+  - Merges local and remote projects, deduplicates by project_hash
+  - Enables `trustee resume` to find projects from DocumentDB when storage_mode=remote
+
 ## [0.1.50] - 2025-12-10
 
 ### Fixed
