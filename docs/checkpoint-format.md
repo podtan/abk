@@ -10,10 +10,10 @@ Directory layout
 At initialization the checkpoint system creates:
 
 - `~/.{app-name}/projects/{FOLDER_HASH}/` — project root directory
-  - `metadata.json` — project-level metadata (one file)
+  - `project_metadata.json` — project-level metadata (one file)
   - `sessions/` — directory containing all sessions
     - `{session_id}/` — one directory per session (multiple)
-      - `metadata.json` — session-level metadata
+      - `session_metadata.json` — session-level metadata
       - `001_analyze.json`, `002_analyze.json`, ... — ordered action/observation records
       - `checkpoints.json` — checkpoint index (described below)
       - other payload files (artifacts, attachments)
@@ -25,7 +25,7 @@ Notes:
 JSON files and schemas
 ----------------------
 
-1) Project-level `metadata.json`
+1) Project-level `project_metadata.json`
 
 Purpose: describe the project-level identity and runtime statistics used by the checkpoint subsystem.
 
@@ -54,7 +54,7 @@ Fields (explanation):
 Directory notes:
 - The project directory typically contains a `sessions/` subdirectory (holds session folders) and a `cache/` directory for temporary data. If `session_count` is `0` then `sessions/` may be empty.
 
-2) Session-level `metadata.json`
+2) Session-level `session_metadata.json`
 
 Purpose: describe a single session run, configuration, state pointers, and checkpoints index reference.
 

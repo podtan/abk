@@ -8,6 +8,9 @@ use chrono::{Duration, Utc};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Metadata filename constants
+const SESSION_METADATA_FILENAME: &str = "session_metadata.json";
+
 /// Cleanup manager for checkpoint storage
 pub struct CleanupManager {
     storage_root: PathBuf,
@@ -211,7 +214,7 @@ impl CleanupManager {
         session_path: &Path,
         retention: &RetentionPolicy,
     ) -> CheckpointResult<bool> {
-        let metadata_path = session_path.join("metadata.json");
+        let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
         if !metadata_path.exists() {
             // Delete sessions without metadata (corrupted/orphaned)
             return Ok(true);
@@ -493,7 +496,7 @@ impl CleanupManager {
                 let filename = entry.file_name();
                 if let Some(name) = filename.to_str() {
                     if name.ends_with(".json")
-                        && name != "metadata.json"
+                        && name != SESSION_METADATA_FILENAME
                         && name != "checkpoints.json"
                     {
                         count += 1;
@@ -532,7 +535,7 @@ impl CleanupManager {
                 }
 
                 let session_path = session_entry.path();
-                let metadata_path = session_path.join("metadata.json");
+                let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
 
                 if let Ok(metadata) =
                     AtomicOps::read_json::<SessionMetadata>(&metadata_path)

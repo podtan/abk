@@ -10,6 +10,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Metadata filename constants
+const PROJECT_METADATA_FILENAME: &str = "project_metadata.json";
+const SESSION_METADATA_FILENAME: &str = "session_metadata.json";
+
 /// Global checkpoint storage manager
 pub struct CheckpointStorageManager {
     home_dir: PathBuf, // ~/.{agent_name}/
@@ -79,7 +83,7 @@ impl CheckpointStorageManager {
                 let project_hash = entry.file_name().to_string_lossy().to_string();
 
                 // Try to load project metadata
-                let metadata_path = project_dir.join("metadata.json");
+                let metadata_path = project_dir.join(PROJECT_METADATA_FILENAME);
                 if metadata_path.exists() {
                     match load_json::<ProjectMetadata>(&metadata_path).await {
                         Ok(metadata) => projects.push(metadata),
@@ -144,7 +148,7 @@ impl CheckpointStorageManager {
             if let Ok(mut entries) = tokio::fs::read_dir(&sessions_dir).await {
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     if entry.file_type().await.map_or(false, |ft| ft.is_dir()) {
-                        let session_metadata_path = entry.path().join("metadata.json");
+                        let session_metadata_path = entry.path().join(SESSION_METADATA_FILENAME);
                         if let Ok(_session_data) =
                             load_json::<SessionMetadata>(&session_metadata_path).await
                         {
@@ -345,7 +349,7 @@ impl ProjectStorage {
         };
 
         // Save session metadata using atomic operations
-        let metadata_path = session_path.join("metadata.json");
+        let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
         AtomicOps::write_json(&metadata_path, &metadata)?;
 
         // Invalidate cache since we added a new session
@@ -391,7 +395,7 @@ impl ProjectStorage {
 
         while let Some(entry) = entries.next_entry().await? {
             if entry.file_type().await?.is_dir() {
-                let metadata_path = entry.path().join("metadata.json");
+                let metadata_path = entry.path().join(SESSION_METADATA_FILENAME);
                 if metadata_path.exists() {
                     match load_json::<SessionMetadata>(&metadata_path).await {
                         Ok(metadata) => sessions.push(metadata),
@@ -577,7 +581,7 @@ impl SessionStorage {
 
     /// Save session metadata using atomic operations
     async fn save_metadata(&self) -> CheckpointResult<()> {
-        let metadata_file = self.session_path.join("metadata.json");
+        let metadata_file = self.session_path.join(SESSION_METADATA_FILENAME);
         AtomicOps::write_json(&metadata_file, &self.metadata)
     }
 
@@ -627,7 +631,7 @@ impl SessionStorage {
         let mut repair_actions = Vec::new();
 
         // Check if metadata file exists and is readable
-        let metadata_file = self.session_path.join("metadata.json");
+        let metadata_file = self.session_path.join(SESSION_METADATA_FILENAME);
         if !metadata_file.exists() {
             repair_actions.push("Recreated missing metadata file".to_string());
             self.save_metadata().await?;
@@ -760,7 +764,7 @@ async fn load_or_create_project_metadata(
     project_hash: &ProjectHash,
     project_path: &Path,
 ) -> CheckpointResult<ProjectMetadata> {
-    let metadata_path = storage_path.join("metadata.json");
+    let metadata_path = storage_path.join(PROJECT_METADATA_FILENAME);
 
     if metadata_path.exists() {
         AtomicOps::read_json(&metadata_path)
@@ -1157,7 +1161,7 @@ mod tests {
         fs::create_dir_all(&project_dir).await.unwrap();
 
         // Create corrupted metadata.json to trigger recovery
-        let metadata_path = project_dir.join("metadata.json");
+        let metadata_path = project_dir.join(PROJECT_METADATA_FILENAME);
         fs::write(&metadata_path, "invalid json content")
             .await
             .unwrap();
@@ -1169,7 +1173,7 @@ mod tests {
         fs::create_dir_all(&checkpoints_dir).await.unwrap();
 
         let session_metadata = create_test_session_metadata("test_session");
-        let session_metadata_path = session_dir.join("metadata.json");
+        let session_metadata_path = session_dir.join(SESSION_METADATA_FILENAME);
         AtomicOps::write_json(&session_metadata_path, &session_metadata).unwrap();
 
         let checkpoint = create_test_checkpoint();
