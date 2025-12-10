@@ -1,9 +1,11 @@
 //! Storage management for the checkpoint system
 
 use super::{
-    AtomicOps, Checkpoint, CheckpointError, CheckpointMetadata, CheckpointResult, CleanupManager,
-    GlobalCheckpointConfig, MigrationReport, ProjectCheckpointConfig, ProjectHash, ProjectStats,
-    RetentionPolicy, SessionMetadata, SessionStats, SessionStatus, StorageStats,
+    AgentStateSnapshot, AtomicOps, Checkpoint, CheckpointError, CheckpointMetadata,
+    CheckpointResult, CleanupManager, ConversationSnapshot, EnvironmentSnapshot,
+    FileSystemSnapshot, GlobalCheckpointConfig, MigrationReport, ProjectCheckpointConfig,
+    ProjectHash, ProjectStats, RetentionPolicy, SessionMetadata, SessionStats, SessionStatus,
+    StorageStats, ToolStateSnapshot,
 };
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -507,12 +509,33 @@ impl SessionStorage {
         })
     }
 
-    /// Save a checkpoint using atomic operations
+    /// Save a checkpoint using V2 split-file format
+    ///
+    /// Creates:
+    /// - `{checkpoint_id}_metadata.json` - Lightweight metadata
+    /// - `{checkpoint_id}_agent.json` - Agent state snapshot
+    /// - `{checkpoint_id}_conversation.json` - Conversation state
     pub async fn save_checkpoint(&mut self, checkpoint: &Checkpoint) -> CheckpointResult<()> {
-        let checkpoint_file = self
+        let checkpoint_id = &checkpoint.metadata.checkpoint_id;
+
+        // V2 Split-file format:
+        // 1. Save metadata file (lightweight, queryable)
+        let metadata_file = self
             .session_path
-            .join(format!("{}.json", checkpoint.metadata.checkpoint_id));
-        AtomicOps::write_json(&checkpoint_file, checkpoint)?;
+            .join(format!("{}_metadata.json", checkpoint_id));
+        AtomicOps::write_json(&metadata_file, &checkpoint.metadata)?;
+
+        // 2. Save agent state file
+        let agent_file = self
+            .session_path
+            .join(format!("{}_agent.json", checkpoint_id));
+        AtomicOps::write_json(&agent_file, &checkpoint.agent_state)?;
+
+        // 3. Save conversation state file
+        let conversation_file = self
+            .session_path
+            .join(format!("{}_conversation.json", checkpoint_id));
+        AtomicOps::write_json(&conversation_file, &checkpoint.conversation_state)?;
 
         // Update checkpoint index
         self.checkpoints.insert(
@@ -529,8 +552,84 @@ impl SessionStorage {
         Ok(())
     }
 
-    /// Load a checkpoint
+    /// Load a checkpoint (supports both V1 single-file and V2 split-file formats)
     pub async fn load_checkpoint(&self, checkpoint_id: &str) -> CheckpointResult<Checkpoint> {
+        // Try V2 split-file format first
+        let metadata_file = self
+            .session_path
+            .join(format!("{}_metadata.json", checkpoint_id));
+
+        if metadata_file.exists() {
+            // V2 format: load from split files
+            let metadata: CheckpointMetadata = load_json(&metadata_file).await?;
+
+            let agent_file = self
+                .session_path
+                .join(format!("{}_agent.json", checkpoint_id));
+            let agent_state: AgentStateSnapshot = load_json(&agent_file).await?;
+
+            let conversation_file = self
+                .session_path
+                .join(format!("{}_conversation.json", checkpoint_id));
+            let conversation_state: ConversationSnapshot = load_json(&conversation_file).await?;
+
+            // For compatibility, create default states for older fields
+            use super::{
+                ExecutionContext, FilePermissions, ProcessInfo, ResourceUsage, SystemInfo,
+                ToolState,
+            };
+
+            return Ok(Checkpoint {
+                metadata,
+                agent_state,
+                conversation_state,
+                file_system_state: FileSystemSnapshot {
+                    working_directory: std::path::PathBuf::new(),
+                    tracked_files: Vec::new(),
+                    modified_files: Vec::new(),
+                    git_status: None,
+                    file_permissions: HashMap::new(),
+                },
+                tool_state: ToolStateSnapshot {
+                    active_tools: HashMap::new(),
+                    executed_commands: Vec::new(),
+                    tool_registry: HashMap::new(),
+                    execution_context: ExecutionContext {
+                        environment_variables: HashMap::new(),
+                        working_directory: std::path::PathBuf::new(),
+                        timeout_seconds: 30,
+                        max_retries: 3,
+                    },
+                },
+                environment_state: EnvironmentSnapshot {
+                    environment_variables: HashMap::new(),
+                    system_info: SystemInfo {
+                        os_name: String::new(),
+                        os_version: String::new(),
+                        architecture: String::new(),
+                        hostname: String::new(),
+                        cpu_count: 0,
+                        total_memory: 0,
+                    },
+                    process_info: ProcessInfo {
+                        pid: 0,
+                        parent_pid: None,
+                        start_time: Utc::now(),
+                        command_line: Vec::new(),
+                        working_directory: std::path::PathBuf::new(),
+                    },
+                    resource_usage: ResourceUsage {
+                        cpu_usage: 0.0,
+                        memory_usage: 0,
+                        disk_usage: 0,
+                        network_bytes_sent: 0,
+                        network_bytes_received: 0,
+                    },
+                },
+            });
+        }
+
+        // Fall back to V1 single-file format
         let checkpoint_file = self.session_path.join(format!("{}.json", checkpoint_id));
 
         if !checkpoint_file.exists() {
@@ -543,9 +642,9 @@ impl SessionStorage {
         load_json(&checkpoint_file).await
     }
 
-    /// Get the filesystem path for a checkpoint file
+    /// Get the filesystem path for a checkpoint file (metadata file in V2)
     pub fn get_checkpoint_path(&self, checkpoint_id: &str) -> PathBuf {
-        self.session_path.join(format!("{}.json", checkpoint_id))
+        self.session_path.join(format!("{}_metadata.json", checkpoint_id))
     }
 
     /// List checkpoints in this session

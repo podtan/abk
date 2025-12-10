@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.39] - 2025-12-10
+
+### Changed
+- **SessionStorage now uses V2 split-file format**: The main `SessionStorage::save_checkpoint()` method now creates split files:
+  - `{checkpoint_id}_metadata.json` - Lightweight checkpoint metadata
+  - `{checkpoint_id}_agent.json` - Agent state snapshot
+  - `{checkpoint_id}_conversation.json` - Conversation state
+- **Backward compatible loading**: `SessionStorage::load_checkpoint()` supports both:
+  - V2 split-file format (checks for `{id}_metadata.json` first)
+  - V1 single-file format (falls back to `{id}.json`)
+- **Breaking Change**: New checkpoints will create split files instead of single files
+
+### Notes
+- Existing v1 checkpoints can still be loaded
+- New checkpoints use the more modular v2 format
+- This change affects `trustee`, `simpaticoder`, and any agent using ABK's checkpoint system
+
 ## [0.1.38] - 2025-12-10
 
 ### Added
