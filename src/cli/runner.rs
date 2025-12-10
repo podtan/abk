@@ -201,13 +201,57 @@ impl AbkCheckpointAccess {
     fn new() -> Self {
         Self
     }
+    
+    /// Get storage manager with remote backend configuration if available.
+    /// This method loads the checkpoint config from the agent's config file
+    /// and creates a storage manager with the appropriate backend settings.
+    #[cfg(feature = "storage-documentdb")]
+    async fn get_configured_storage_manager(&self) -> CliResult<crate::checkpoint::CheckpointStorageManager> {
+        // Try to load checkpoint config from the agent's config file
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let config_path = std::path::PathBuf::from(&home_dir)
+            .join(format!(".{}", agent_name))
+            .join("config")
+            .join(format!("{}.toml", agent_name));
+        
+        if config_path.exists() {
+            if let Ok(config_str) = std::fs::read_to_string(&config_path) {
+                if let Ok(config_value) = config_str.parse::<toml::Value>() {
+                    if let Some(checkpoint_table) = config_value.get("checkpointing") {
+                        let checkpoint_toml_str = toml::to_string(checkpoint_table)
+                            .unwrap_or_default();
+                        
+                        if let Ok(checkpoint_config) = toml::from_str::<crate::checkpoint::GlobalCheckpointConfig>(&checkpoint_toml_str) {
+                            match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config).await {
+                                Ok(m) => return Ok(m),
+                                Err(e) => {
+                                    // Log the error but fall back to default
+                                    eprintln!("Warning: Failed to create configured storage manager: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fall back to default storage manager
+        crate::checkpoint::get_storage_manager()
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))
+    }
+    
+    #[cfg(not(feature = "storage-documentdb"))]
+    async fn get_configured_storage_manager(&self) -> CliResult<crate::checkpoint::CheckpointStorageManager> {
+        crate::checkpoint::get_storage_manager()
+            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))
+    }
 }
 
 #[async_trait]
 impl CheckpointAccess for AbkCheckpointAccess {
     async fn list_projects(&self) -> CliResult<Vec<ProjectMetadata>> {
-        let manager = crate::checkpoint::get_storage_manager()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        let manager = self.get_configured_storage_manager().await?;
         
         let projects = manager.list_projects().await
             .map_err(|e| CliError::CheckpointError(format!("Failed to list projects: {}", e)))?;
@@ -220,14 +264,9 @@ impl CheckpointAccess for AbkCheckpointAccess {
     }
 
     async fn list_sessions(&self, project_path: &PathBuf) -> CliResult<Vec<SessionMetadata>> {
-        if !project_path.exists() {
-            return Ok(vec![]);
-        }
-        
-        // Try to get storage manager with remote backend from config
+        // For remote storage, we don't require the project path to exist locally
         #[cfg(feature = "storage-documentdb")]
-        let manager = {
-            // Try to load checkpoint config from the agent's config file
+        let check_path = {
             let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
             let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
             let config_path = std::path::PathBuf::from(&home_dir)
@@ -235,44 +274,27 @@ impl CheckpointAccess for AbkCheckpointAccess {
                 .join("config")
                 .join(format!("{}.toml", agent_name));
             
+            // Check if we're using remote storage mode
             if config_path.exists() {
                 if let Ok(config_str) = std::fs::read_to_string(&config_path) {
-                    if let Ok(config_value) = config_str.parse::<toml::Value>() {
-                        if let Some(checkpoint_table) = config_value.get("checkpointing") {
-                            let checkpoint_toml_str = toml::to_string(checkpoint_table)
-                                .unwrap_or_default();
-                            
-                            if let Ok(checkpoint_config) = toml::from_str::<crate::checkpoint::GlobalCheckpointConfig>(&checkpoint_toml_str) {
-                                match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config).await {
-                                    Ok(m) => m,
-                                    Err(_) => crate::checkpoint::get_storage_manager()
-                                        .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
-                                }
-                            } else {
-                                crate::checkpoint::get_storage_manager()
-                                    .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
-                            }
-                        } else {
-                            crate::checkpoint::get_storage_manager()
-                                .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
-                        }
-                    } else {
-                        crate::checkpoint::get_storage_manager()
-                            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
-                    }
+                    config_str.contains("storage_mode") && 
+                    (config_str.contains("\"remote\"") || config_str.contains("'remote'"))
                 } else {
-                    crate::checkpoint::get_storage_manager()
-                        .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                    true // Check path by default
                 }
             } else {
-                crate::checkpoint::get_storage_manager()
-                    .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                true // Check path by default
             }
         };
         
         #[cfg(not(feature = "storage-documentdb"))]
-        let manager = crate::checkpoint::get_storage_manager()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        let check_path = true;
+        
+        if check_path && !project_path.exists() {
+            return Ok(vec![]);
+        }
+        
+        let manager = self.get_configured_storage_manager().await?;
         
         let project_storage = manager.get_project_storage(project_path).await
             .map_err(|e| CliError::CheckpointError(format!("Failed to get project storage: {}", e)))?;
@@ -297,12 +319,13 @@ impl CheckpointAccess for AbkCheckpointAccess {
     }
 
     async fn list_checkpoints(&self, project_path: &PathBuf, session_id: &str) -> CliResult<Vec<CheckpointMetadata>> {
+        // For remote storage, we don't require the project path to exist locally
+        #[cfg(not(feature = "storage-documentdb"))]
         if !project_path.exists() {
             return Ok(vec![]);
         }
         
-        let manager = crate::checkpoint::get_storage_manager()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        let manager = self.get_configured_storage_manager().await?;
 
         let project_storage = manager.get_project_storage(project_path).await
             .map_err(|e| CliError::CheckpointError(format!("Failed to get project storage: {}", e)))?;
@@ -325,12 +348,13 @@ impl CheckpointAccess for AbkCheckpointAccess {
     }
 
     async fn delete_session(&self, project_path: &PathBuf, session_id: &str) -> CliResult<()> {
+        // For remote storage, we don't require the project path to exist locally
+        #[cfg(not(feature = "storage-documentdb"))]
         if !project_path.exists() {
             return Ok(());
         }
         
-        let manager = crate::checkpoint::get_storage_manager()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
+        let manager = self.get_configured_storage_manager().await?;
         
         let project_storage = manager.get_project_storage(project_path).await
             .map_err(|e| CliError::CheckpointError(format!("Failed to get project storage: {}", e)))?;
