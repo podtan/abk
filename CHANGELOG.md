@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.41] - 2025-12-10
+
+### Fixed
+- **Checkpoint restoration with V2 format**: Fixed `CheckpointRestoration::load_checkpoint()` to use `SessionStorage::load_checkpoint()` instead of direct file reading
+  - This properly handles the V2 split-file format (`{id}_metadata.json`, `{id}_agent.json`, `{id}_conversation.json`)
+  - Previously it was directly reading the metadata file and failing with "missing field `metadata`" error
+  - Resume functionality now works correctly with V2 checkpoints
+
 ## [0.1.40] - 2025-12-10
 
 ### Fixed

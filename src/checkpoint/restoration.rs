@@ -783,21 +783,10 @@ impl CheckpointRestoration {
             .await?;
 
         // Try to get session storage - this should exist if checkpoint exists
-        let session_storage = project_storage.create_session(session_id).await?;
+        let mut session_storage = project_storage.create_session(session_id).await?;
 
-        // Load the specific checkpoint
-        let checkpoint_path = session_storage.get_checkpoint_path(checkpoint_id);
-
-        if !checkpoint_path.exists() {
-            return Err(CheckpointError::not_found(format!(
-                "Checkpoint {} not found in session {}",
-                checkpoint_id, session_id
-            )));
-        }
-
-        // Read and deserialize checkpoint
-        let checkpoint_data = fs::read_to_string(&checkpoint_path).await?;
-        let checkpoint: Checkpoint = serde_json::from_str(&checkpoint_data)?;
+        // Use SessionStorage::load_checkpoint which handles both V1 and V2 formats
+        let checkpoint = session_storage.load_checkpoint(checkpoint_id).await?;
 
         Ok(checkpoint)
     }
