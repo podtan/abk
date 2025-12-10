@@ -224,6 +224,53 @@ impl CheckpointAccess for AbkCheckpointAccess {
             return Ok(vec![]);
         }
         
+        // Try to get storage manager with remote backend from config
+        #[cfg(feature = "storage-documentdb")]
+        let manager = {
+            // Try to load checkpoint config from the agent's config file
+            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+            let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let config_path = std::path::PathBuf::from(&home_dir)
+                .join(format!(".{}", agent_name))
+                .join("config")
+                .join(format!("{}.toml", agent_name));
+            
+            if config_path.exists() {
+                if let Ok(config_str) = std::fs::read_to_string(&config_path) {
+                    if let Ok(config_value) = config_str.parse::<toml::Value>() {
+                        if let Some(checkpoint_table) = config_value.get("checkpointing") {
+                            let checkpoint_toml_str = toml::to_string(checkpoint_table)
+                                .unwrap_or_default();
+                            
+                            if let Ok(checkpoint_config) = toml::from_str::<crate::checkpoint::GlobalCheckpointConfig>(&checkpoint_toml_str) {
+                                match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config).await {
+                                    Ok(m) => m,
+                                    Err(_) => crate::checkpoint::get_storage_manager()
+                                        .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                                }
+                            } else {
+                                crate::checkpoint::get_storage_manager()
+                                    .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                            }
+                        } else {
+                            crate::checkpoint::get_storage_manager()
+                                .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                        }
+                    } else {
+                        crate::checkpoint::get_storage_manager()
+                            .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                    }
+                } else {
+                    crate::checkpoint::get_storage_manager()
+                        .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+                }
+            } else {
+                crate::checkpoint::get_storage_manager()
+                    .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?
+            }
+        };
+        
+        #[cfg(not(feature = "storage-documentdb"))]
         let manager = crate::checkpoint::get_storage_manager()
             .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))?;
         
