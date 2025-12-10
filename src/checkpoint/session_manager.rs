@@ -97,6 +97,63 @@ impl SessionManager {
             initial_additional_context: None,
         })
     }
+    
+    /// Create a new session manager with config-based storage backend.
+    ///
+    /// This async constructor enables remote storage backends like DocumentDB
+    /// based on the GlobalCheckpointConfig settings.
+    ///
+    /// # Arguments
+    /// * `checkpointing_enabled` - Whether to enable checkpoint saving
+    /// * `config` - Global checkpoint configuration including storage backend settings
+    ///
+    /// # Returns
+    /// A new `SessionManager` instance with configured backend, or an error.
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn with_config(
+        checkpointing_enabled: bool,
+        config: super::GlobalCheckpointConfig,
+    ) -> Result<Self> {
+        let storage_manager = if checkpointing_enabled {
+            Some(CheckpointStorageManager::with_config_async(config).await?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            storage_manager,
+            current_session: None,
+            current_iteration: 0,
+            checkpointing_enabled,
+            classification_done: false,
+            classified_task_type: None,
+            template_sent: false,
+            initial_task_description: String::new(),
+            initial_additional_context: None,
+        })
+    }
+    
+    /// Initialize the remote storage backend from config.
+    ///
+    /// This method can be called after creating a SessionManager with `new()`
+    /// to enable remote storage backends like DocumentDB.
+    ///
+    /// # Arguments
+    /// * `config` - Global checkpoint configuration including storage backend settings
+    ///
+    /// # Returns
+    /// Ok(()) if successful, or an error if backend initialization fails.
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn initialize_remote_backend(&mut self, config: super::GlobalCheckpointConfig) -> Result<()> {
+        if !self.checkpointing_enabled {
+            return Ok(());
+        }
+        
+        // Create a new storage manager with the configured backend
+        let storage_manager = CheckpointStorageManager::with_config_async(config).await?;
+        self.storage_manager = Some(storage_manager);
+        Ok(())
+    }
 
     /// Start a new agent session.
     ///

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.45] - 2025-12-10
+
+### Added
+- **Agent.initialize_remote_checkpoint_backend()**: New async method to initialize remote storage backend
+  - Loads checkpoint config from agent's TOML config file
+  - Initializes DocumentDB/MongoDB connection for checkpoint mirroring
+  - Can be called after agent creation to enable remote storage
+
+- **SessionManager.initialize_remote_backend()**: New async method to set up remote backend
+  - Enables remote backend initialization on existing SessionManager
+  - Alternative to using `SessionManager::with_config()` constructor
+
+- **SessionManager.with_config()**: New async constructor (feature-gated on `storage-documentdb`)
+  - Creates SessionManager with remote backend from GlobalCheckpointConfig
+  - Enables DocumentDB/MongoDB support from config
+
+### Changed
+- CLI `run` command now initializes remote checkpoint backend from config
+  - Automatic DocumentDB/MongoDB backend initialization when configured
+  - Graceful fallback with info message if backend initialization fails
+
+### Notes
+- Remote backend is initialized asynchronously after agent creation
+- Config file location: `~/.{agent_name}/config/{agent_name}.toml`
+- Requires `storage-documentdb` feature flag
+
 ## [0.1.44] - 2025-12-10
 
 ### Added

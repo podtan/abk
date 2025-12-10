@@ -100,6 +100,14 @@ pub async fn execute_run<C: CommandContext>(
         log_base.as_deref(),
     )
     .map_err(|e| CliError::ExecutionError(format!("Failed to create agent: {}", e)))?;
+    
+    // Initialize remote checkpoint backend if configured
+    #[cfg(feature = "storage-documentdb")]
+    {
+        if let Err(e) = agent.initialize_remote_checkpoint_backend(config_path.as_deref()).await {
+            ctx.log_info(&format!("Note: Remote checkpoint backend not initialized: {}", e));
+        }
+    }
 
     // Check for resume context before starting new session
     let current_dir = std::env::current_dir()

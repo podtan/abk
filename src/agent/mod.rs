@@ -226,6 +226,59 @@ impl Agent {
         self.logger.log_mode_change(&old_mode, &mode.to_string())?;
         Ok(())
     }
+    
+    /// Initialize the remote storage backend for checkpoints.
+    ///
+    /// This method should be called after agent creation to enable remote
+    /// storage backends like DocumentDB. It loads the checkpoint config
+    /// from the agent's config file and initializes the backend connection.
+    ///
+    /// # Arguments
+    /// * `config_path` - Path to the TOML config file containing checkpoint settings
+    ///
+    /// # Returns
+    /// Ok(()) if successful, or an error if backend initialization fails.
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn initialize_remote_checkpoint_backend(&mut self, config_path: Option<&Path>) -> Result<()> {
+        use crate::checkpoint::GlobalCheckpointConfig;
+        
+        // Load checkpoint config from TOML
+        let config_path = config_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
+            let home_dir = std::env::var("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("."));
+            home_dir.join(format!(".{}/config/{}.toml", agent_name, agent_name))
+        });
+        
+        if !config_path.exists() {
+            return Ok(()); // No config file, skip remote backend
+        }
+        
+        let content = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("Failed to read config: {}", config_path.display()))?;
+            
+        let config_value: toml::Value = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse TOML: {}", config_path.display()))?;
+            
+        // Check if checkpointing section exists
+        let checkpointing = match config_value.get("checkpointing") {
+            Some(c) => c,
+            None => return Ok(()), // No checkpointing config
+        };
+        
+        // Parse the full checkpoint config
+        let checkpoint_config: GlobalCheckpointConfig = checkpointing.clone().try_into()
+            .with_context(|| "Failed to parse checkpoint config")?;
+        
+        // Initialize the remote backend in session manager
+        if let Some(ref mut session_manager) = self.session_manager {
+            session_manager.initialize_remote_backend(checkpoint_config).await
+                .context("Failed to initialize remote checkpoint backend")?;
+        }
+        
+        Ok(())
+    }
 
     // ========================================================================
     // SessionManager accessors (for backward compatibility)
