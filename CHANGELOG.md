@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.43] - 2025-12-10
+
+### Added
+- **Storage Backend Configuration**: Configuration-driven storage backend selection
+  - `StorageBackendType` enum: `File`, `DocumentDB`, `MongoDB`
+  - `StorageBackendConfig` struct with fields:
+    - `backend_type`: Select storage backend from config
+    - `connection_url`: Connection URL with env var substitution (`${DOCUMENTDB_URL}`)
+    - `database`: Database name for remote backends
+    - `collection`: Collection name (default: "checkpoints")
+    - `username`, `password`: Credentials with env var substitution
+    - `tls_enabled`, `tls_allow_invalid_certs`: TLS configuration
+    - `connection_timeout_secs`: Connection timeout
+  - `build_connection_string()`: Builds MongoDB URI with credentials and TLS options
+  - Environment variable substitution: `${VAR_NAME}` syntax in config values
+
+- **GlobalCheckpointConfig.storage_backend**: New field for backend configuration
+  - Agents can select backend via TOML config without code changes
+  - Default: File backend for backward compatibility
+
+- **Integration Tests**: 4 new tests for DocumentDB backend
+  - Connection test
+  - CRUD operations test
+  - JSON serialization test
+  - List operations test
+
+### Changed
+- `checkpoint` feature now includes `regex` and `urlencoding` dependencies
+- `storage-documentdb` feature now includes `futures-util` dependency
+- New re-exports: `StorageBackendConfig`, `StorageBackendType`
+
+### Notes
+- Tested with local DocumentDB container:
+  ```bash
+  docker run -dt -p 10260:10260 --name documentdb-container documentdb --username trustee --password abk12345
+  ```
+- All 4 DocumentDB integration tests pass
+
 ## [0.1.42] - 2025-12-10
 
 ### Added

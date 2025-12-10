@@ -164,6 +164,7 @@ impl StorageBackend for DocumentDBStorageBackend {
 
     async fn list(&self, options: ListOptions) -> StorageResult<ListResult> {
         use futures_util::TryStreamExt;
+        use mongodb::options::FindOptions;
 
         let mut filter = doc! {};
 
@@ -175,10 +176,17 @@ impl StorageBackend for DocumentDBStorageBackend {
             );
         }
 
+        // Build find options with limit if specified
+        let find_options = if let Some(limit) = options.limit {
+            FindOptions::builder().limit(limit as i64).build()
+        } else {
+            FindOptions::default()
+        };
+
         let mut cursor = self
             .collection
             .find(filter)
-            .limit(options.limit.map(|l| l as i64))
+            .with_options(find_options)
             .await
             .map_err(|e| StorageError::Backend(e.to_string()))?;
 

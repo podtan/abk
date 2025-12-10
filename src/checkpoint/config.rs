@@ -5,6 +5,158 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Storage backend type
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageBackendType {
+    /// Local file system storage (default)
+    #[default]
+    File,
+    /// DocumentDB/MongoDB storage
+    DocumentDB,
+    /// MongoDB storage (alias for DocumentDB)
+    MongoDB,
+}
+
+/// Storage backend configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct StorageBackendConfig {
+    /// Backend type: "file", "documentdb", or "mongodb"
+    #[serde(default)]
+    pub backend_type: StorageBackendType,
+    
+    /// Connection URL for remote backends (supports env var substitution)
+    /// Example: "${DOCUMENTDB_URL}" or "mongodb://localhost:10260"
+    pub connection_url: Option<String>,
+    
+    /// Database name for remote backends
+    /// Example: "${DOCUMENTDB_DATABASE}" or "trustee_checkpoints"
+    pub database: Option<String>,
+    
+    /// Collection/table name for storing checkpoints
+    #[serde(default = "default_collection_name")]
+    pub collection: String,
+    
+    /// Username for authentication (supports env var substitution)
+    /// Example: "${DOCUMENTDB_USERNAME}"
+    pub username: Option<String>,
+    
+    /// Password for authentication (supports env var substitution)
+    /// Example: "${DOCUMENTDB_PASSWORD}"
+    pub password: Option<String>,
+    
+    /// Enable TLS/SSL for connection
+    #[serde(default)]
+    pub tls_enabled: bool,
+    
+    /// Allow invalid TLS certificates (for local development)
+    #[serde(default)]
+    pub tls_allow_invalid_certs: bool,
+    
+    /// Connection timeout in seconds
+    #[serde(default = "default_connection_timeout")]
+    pub connection_timeout_secs: u64,
+}
+
+fn default_collection_name() -> String {
+    "checkpoints".to_string()
+}
+
+fn default_connection_timeout() -> u64 {
+    30
+}
+
+impl Default for StorageBackendConfig {
+    fn default() -> Self {
+        Self {
+            backend_type: StorageBackendType::File,
+            connection_url: None,
+            database: None,
+            collection: default_collection_name(),
+            username: None,
+            password: None,
+            tls_enabled: false,
+            tls_allow_invalid_certs: false,
+            connection_timeout_secs: default_connection_timeout(),
+        }
+    }
+}
+
+impl StorageBackendConfig {
+    /// Build connection string with credentials for DocumentDB/MongoDB
+    /// Substitutes environment variables in the format ${VAR_NAME}
+    pub fn build_connection_string(&self) -> Option<String> {
+        let url = self.resolve_env_var(self.connection_url.as_deref()?)?;
+        let username = self.resolve_env_var(self.username.as_deref().unwrap_or(""))?;
+        let password = self.resolve_env_var(self.password.as_deref().unwrap_or(""))?;
+        
+        // Parse URL and inject credentials if needed
+        if !username.is_empty() && !password.is_empty() {
+            // Check if URL already has credentials
+            if url.contains("@") {
+                return Some(url);
+            }
+            
+            // Inject credentials into URL
+            if let Some(rest) = url.strip_prefix("mongodb://") {
+                let encoded_user = urlencoding::encode(&username);
+                let encoded_pass = urlencoding::encode(&password);
+                let mut conn_str = format!("mongodb://{}:{}@{}", encoded_user, encoded_pass, rest);
+                
+                // Add TLS options if enabled
+                if self.tls_enabled {
+                    let separator = if conn_str.contains('?') { "&" } else { "?" };
+                    conn_str.push_str(&format!("{}tls=true", separator));
+                    if self.tls_allow_invalid_certs {
+                        conn_str.push_str("&tlsAllowInvalidCertificates=true");
+                    }
+                }
+                
+                return Some(conn_str);
+            }
+        }
+        
+        // Return URL as-is with TLS options if needed
+        let mut conn_str = url;
+        if self.tls_enabled && !conn_str.contains("tls=") {
+            let separator = if conn_str.contains('?') { "&" } else { "?" };
+            conn_str.push_str(&format!("{}tls=true", separator));
+            if self.tls_allow_invalid_certs {
+                conn_str.push_str("&tlsAllowInvalidCertificates=true");
+            }
+        }
+        
+        Some(conn_str)
+    }
+    
+    /// Get the resolved database name
+    pub fn get_database(&self) -> Option<String> {
+        self.resolve_env_var(self.database.as_deref()?)
+    }
+    
+    /// Resolve environment variable placeholders like ${VAR_NAME}
+    fn resolve_env_var(&self, value: &str) -> Option<String> {
+        if value.starts_with("${") && value.ends_with("}") {
+            let var_name = &value[2..value.len()-1];
+            std::env::var(var_name).ok()
+        } else if value.contains("${") {
+            // Handle mixed content with env vars
+            let mut result = value.to_string();
+            let re = regex::Regex::new(r"\$\{([^}]+)\}").ok()?;
+            for cap in re.captures_iter(value) {
+                if let Some(var_name) = cap.get(1) {
+                    if let Ok(var_value) = std::env::var(var_name.as_str()) {
+                        result = result.replace(&cap[0], &var_value);
+                    }
+                }
+            }
+            Some(result)
+        } else {
+            Some(value.to_string())
+        }
+    }
+}
+
 /// Global checkpoint configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GlobalCheckpointConfig {
@@ -18,6 +170,9 @@ pub struct GlobalCheckpointConfig {
     pub performance: PerformanceConfig,        // Performance settings
     pub security: SecurityConfig,              // Security settings
     pub logging: LoggingConfig,                // Logging configuration
+    /// Storage backend configuration
+    #[serde(default)]
+    pub storage_backend: StorageBackendConfig,
 }
 
 impl Default for GlobalCheckpointConfig {
@@ -33,6 +188,7 @@ impl Default for GlobalCheckpointConfig {
             performance: PerformanceConfig::default(),
             security: SecurityConfig::default(),
             logging: LoggingConfig::default(),
+            storage_backend: StorageBackendConfig::default(),
         }
     }
 }
@@ -343,6 +499,7 @@ impl ProjectCheckpointConfig {
             performance: global.performance.clone(),
             security: global.security.clone(),
             logging: global.logging.clone(),
+            storage_backend: global.storage_backend.clone(),
         }
     }
 }
