@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.44] - 2025-12-10
+
+### Added
+- **End-to-End Backend Integration**: Storage backend now fully integrated through entire checkpoint pipeline
+  - `SessionStorage` now accepts and uses remote backend for checkpoint mirroring
+  - `ProjectStorage` now holds and passes remote backend to sessions
+  - `CheckpointStorageManager.with_config_async()` initializes backend from config
+  - `get_project_storage()` now passes remote backend to project storage
+
+### Changed
+- `SessionStorage` struct:
+  - New `remote_backend` field (feature-gated on `storage-documentdb`)
+  - New `with_remote_backend()` constructor for remote backend support
+  - New `set_remote_backend()` method to set backend after creation
+  - `save_checkpoint()` now mirrors to remote backend when configured
+  
+- `ProjectStorage` struct:
+  - New `remote_backend` field (feature-gated on `storage-documentdb`)
+  - New `with_remote_backend()` constructor
+  - New `set_remote_backend()` method
+  - `create_session()` now passes remote backend to sessions
+
+- `CheckpointStorageManager`:
+  - `get_project_storage()` now creates `ProjectStorage` with remote backend
+
+### Notes
+- Checkpoints are written to both local file system AND remote backend (mirroring)
+- Remote writes are non-blocking with warnings on failure
+- Local filesystem remains primary storage for backward compatibility
+
 ## [0.1.43] - 2025-12-10
 
 ### Added

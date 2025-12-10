@@ -5,11 +5,13 @@ use super::{
     CheckpointResult, CleanupManager, ConversationSnapshot, EnvironmentSnapshot,
     FileSystemSnapshot, GlobalCheckpointConfig, MigrationReport, ProjectCheckpointConfig,
     ProjectHash, ProjectStats, RetentionPolicy, SessionMetadata, SessionStats, SessionStatus,
-    StorageStats, ToolStateSnapshot,
+    StorageBackendConfig, StorageBackendType, StorageStats, ToolStateSnapshot,
 };
+use super::backend::{StorageBackend, StorageBackendExt};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs;
 
 /// Metadata filename constants
@@ -22,6 +24,9 @@ pub struct CheckpointStorageManager {
     #[allow(dead_code)]
     current_project: Option<ProjectHash>, // Currently active project
     config: GlobalCheckpointConfig,
+    /// Optional remote storage backend (DocumentDB/MongoDB)
+    #[cfg(feature = "storage-documentdb")]
+    remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
 }
 
 impl CheckpointStorageManager {
@@ -37,6 +42,8 @@ impl CheckpointStorageManager {
             home_dir,
             current_project: None,
             config,
+            #[cfg(feature = "storage-documentdb")]
+            remote_backend: None,
         })
     }
 
@@ -51,7 +58,70 @@ impl CheckpointStorageManager {
             home_dir,
             current_project: None,
             config,
+            #[cfg(feature = "storage-documentdb")]
+            remote_backend: None,
         })
+    }
+    
+    /// Create a new storage manager with custom config and initialize backend
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn with_config_async(config: GlobalCheckpointConfig) -> CheckpointResult<Self> {
+        let home_dir = config.storage_location.clone();
+
+        // Ensure storage directories exist
+        ensure_global_storage_directories()?;
+        
+        // Initialize remote backend if configured
+        let remote_backend = Self::create_remote_backend(&config.storage_backend).await?;
+
+        Ok(Self {
+            home_dir,
+            current_project: None,
+            config,
+            remote_backend,
+        })
+    }
+    
+    /// Create remote storage backend based on configuration
+    #[cfg(feature = "storage-documentdb")]
+    async fn create_remote_backend(
+        backend_config: &StorageBackendConfig,
+    ) -> CheckpointResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
+        match backend_config.backend_type {
+            StorageBackendType::File => Ok(None),
+            StorageBackendType::DocumentDB | StorageBackendType::MongoDB => {
+                use super::backend::DocumentDBStorageBackend;
+                
+                let connection_string = backend_config
+                    .build_connection_string()
+                    .ok_or_else(|| CheckpointError::config("Missing DocumentDB connection URL"))?;
+                    
+                let database = backend_config
+                    .get_database()
+                    .ok_or_else(|| CheckpointError::config("Missing DocumentDB database name"))?;
+                    
+                let collection = &backend_config.collection;
+                
+                eprintln!("[checkpoint] Connecting to DocumentDB: database={}, collection={}", database, collection);
+                
+                let backend = DocumentDBStorageBackend::new(&connection_string, &database, collection)
+                    .await
+                    .map_err(|e| CheckpointError::config(format!("Failed to connect to DocumentDB: {}", e)))?;
+                
+                if backend.is_available().await {
+                    eprintln!("[checkpoint] ✅ DocumentDB backend connected successfully");
+                    Ok(Some(Arc::new(backend)))
+                } else {
+                    Err(CheckpointError::config("DocumentDB backend not available"))
+                }
+            }
+        }
+    }
+    
+    /// Get the remote backend if configured
+    #[cfg(feature = "storage-documentdb")]
+    pub fn remote_backend(&self) -> Option<Arc<dyn StorageBackend + Send + Sync>> {
+        self.remote_backend.clone()
     }
 
     /// Get project storage for a given project path
@@ -60,12 +130,27 @@ impl CheckpointStorageManager {
         project_path: &Path,
     ) -> CheckpointResult<ProjectStorage> {
         let project_hash = ProjectHash::new(project_path)?;
-        ProjectStorage::new(
-            self.home_dir.clone(),
-            project_hash,
-            project_path.to_path_buf(),
-        )
-        .await
+        
+        #[cfg(feature = "storage-documentdb")]
+        {
+            ProjectStorage::with_remote_backend(
+                self.home_dir.clone(),
+                project_hash,
+                project_path.to_path_buf(),
+                self.remote_backend.clone(),
+            )
+            .await
+        }
+        
+        #[cfg(not(feature = "storage-documentdb"))]
+        {
+            ProjectStorage::new(
+                self.home_dir.clone(),
+                project_hash,
+                project_path.to_path_buf(),
+            )
+            .await
+        }
     }
 
     /// List all projects in storage
@@ -282,6 +367,9 @@ pub struct ProjectStorage {
     // Cache for session metadata to improve performance
     sessions_cache: std::sync::RwLock<Option<(std::time::Instant, Vec<SessionMetadata>)>>,
     cache_duration: std::time::Duration,
+    /// Optional remote storage backend
+    #[cfg(feature = "storage-documentdb")]
+    remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
 }
 
 impl ProjectStorage {
@@ -310,6 +398,39 @@ impl ProjectStorage {
             config,
             sessions_cache: std::sync::RwLock::new(None),
             cache_duration: std::time::Duration::from_secs(30), // Cache for 30 seconds
+            #[cfg(feature = "storage-documentdb")]
+            remote_backend: None,
+        })
+    }
+    
+    /// Create a new project storage instance with remote backend
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn with_remote_backend(
+        base_path: PathBuf,
+        project_hash: ProjectHash,
+        project_path: PathBuf,
+        remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
+    ) -> CheckpointResult<Self> {
+        let storage_path = base_path.join("projects").join(project_hash.as_str());
+
+        // Ensure storage directories exist
+        fs::create_dir_all(&storage_path).await?;
+        fs::create_dir_all(storage_path.join("sessions")).await?;
+        fs::create_dir_all(storage_path.join("cache")).await?;
+
+        let metadata =
+            load_or_create_project_metadata(&storage_path, &project_hash, &project_path).await?;
+        let config = ProjectCheckpointConfig::default();
+
+        Ok(Self {
+            project_hash,
+            project_path,
+            storage_path,
+            metadata,
+            config,
+            sessions_cache: std::sync::RwLock::new(None),
+            cache_duration: std::time::Duration::from_secs(30),
+            remote_backend,
         })
     }
 
@@ -330,7 +451,15 @@ impl ProjectStorage {
             config,
             sessions_cache: std::sync::RwLock::new(None),
             cache_duration: std::time::Duration::from_secs(30), // Cache for 30 seconds
+            #[cfg(feature = "storage-documentdb")]
+            remote_backend: None,
         })
+    }
+    
+    /// Set the remote backend for this project storage
+    #[cfg(feature = "storage-documentdb")]
+    pub fn set_remote_backend(&mut self, backend: Option<Arc<dyn StorageBackend + Send + Sync>>) {
+        self.remote_backend = backend;
     }
 
     /// Create a new session
@@ -357,7 +486,16 @@ impl ProjectStorage {
         // Invalidate cache since we added a new session
         self.invalidate_sessions_cache();
 
-        SessionStorage::new(session_path, metadata).await
+        // Create session with remote backend if configured
+        #[cfg(feature = "storage-documentdb")]
+        {
+            SessionStorage::with_remote_backend(session_path, metadata, self.remote_backend.clone()).await
+        }
+        
+        #[cfg(not(feature = "storage-documentdb"))]
+        {
+            SessionStorage::new(session_path, metadata).await
+        }
     }
 
     /// List all sessions for this project (with caching for performance)
@@ -495,6 +633,9 @@ pub struct SessionStorage {
     session_path: PathBuf,
     metadata: SessionMetadata,
     checkpoints: HashMap<String, CheckpointMetadata>,
+    /// Optional remote storage backend for mirroring checkpoints
+    #[cfg(feature = "storage-documentdb")]
+    remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
 }
 
 impl SessionStorage {
@@ -506,7 +647,32 @@ impl SessionStorage {
             session_path,
             metadata,
             checkpoints,
+            #[cfg(feature = "storage-documentdb")]
+            remote_backend: None,
         })
+    }
+    
+    /// Create a new session storage instance with remote backend
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn with_remote_backend(
+        session_path: PathBuf,
+        metadata: SessionMetadata,
+        remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
+    ) -> CheckpointResult<Self> {
+        let checkpoints = load_checkpoint_index(&session_path).await?;
+
+        Ok(Self {
+            session_path,
+            metadata,
+            checkpoints,
+            remote_backend,
+        })
+    }
+    
+    /// Set the remote backend for this session
+    #[cfg(feature = "storage-documentdb")]
+    pub fn set_remote_backend(&mut self, backend: Option<Arc<dyn StorageBackend + Send + Sync>>) {
+        self.remote_backend = backend;
     }
 
     /// Save a checkpoint using V2 split-file format
@@ -515,8 +681,11 @@ impl SessionStorage {
     /// - `{checkpoint_id}_metadata.json` - Lightweight metadata
     /// - `{checkpoint_id}_agent.json` - Agent state snapshot
     /// - `{checkpoint_id}_conversation.json` - Conversation state
+    ///
+    /// If a remote backend is configured, also mirrors to remote storage.
     pub async fn save_checkpoint(&mut self, checkpoint: &Checkpoint) -> CheckpointResult<()> {
         let checkpoint_id = &checkpoint.metadata.checkpoint_id;
+        let session_id = &self.metadata.session_id;
 
         // V2 Split-file format:
         // 1. Save metadata file (lightweight, queryable)
@@ -536,6 +705,29 @@ impl SessionStorage {
             .session_path
             .join(format!("{}_conversation.json", checkpoint_id));
         AtomicOps::write_json(&conversation_file, &checkpoint.conversation_state)?;
+        
+        // Mirror to remote backend if configured
+        #[cfg(feature = "storage-documentdb")]
+        if let Some(ref backend) = self.remote_backend {
+            let key_prefix = format!("sessions/{}/{}", session_id, checkpoint_id);
+            
+            // Write metadata
+            if let Err(e) = backend.write_json(&format!("{}_metadata.json", key_prefix), &checkpoint.metadata).await {
+                eprintln!("[checkpoint] Warning: Failed to write metadata to remote backend: {}", e);
+            }
+            
+            // Write agent state
+            if let Err(e) = backend.write_json(&format!("{}_agent.json", key_prefix), &checkpoint.agent_state).await {
+                eprintln!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e);
+            }
+            
+            // Write conversation state
+            if let Err(e) = backend.write_json(&format!("{}_conversation.json", key_prefix), &checkpoint.conversation_state).await {
+                eprintln!("[checkpoint] Warning: Failed to write conversation to remote backend: {}", e);
+            }
+            
+            eprintln!("[checkpoint] ✅ Mirrored checkpoint {} to remote storage", checkpoint_id);
+        }
 
         // Update checkpoint index
         self.checkpoints.insert(
