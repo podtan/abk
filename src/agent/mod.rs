@@ -267,8 +267,11 @@ impl Agent {
             None => return Ok(()), // No checkpointing config
         };
         
-        // Parse the full checkpoint config
-        let checkpoint_config: GlobalCheckpointConfig = checkpointing.clone().try_into()
+        // Re-serialize just the checkpointing section and parse with defaults
+        let checkpointing_toml = toml::to_string(checkpointing)
+            .with_context(|| "Failed to serialize checkpointing config")?;
+        
+        let checkpoint_config: GlobalCheckpointConfig = toml::from_str(&checkpointing_toml)
             .with_context(|| "Failed to parse checkpoint config")?;
         
         // Initialize the remote backend in session manager

@@ -158,39 +158,49 @@ impl StorageBackendConfig {
 }
 
 /// Global checkpoint configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(default)]
 pub struct GlobalCheckpointConfig {
-    pub enabled: bool,                         // Master enable/disable switch
-    pub storage_location: PathBuf,             // Base storage directory (~/.{agent_name})
-    pub auto_checkpoint_interval: u32,         // Create checkpoint every N iterations
-    pub max_checkpoints_per_session: u32,      // Maximum checkpoints per session
-    pub compression_enabled: bool,             // Enable checkpoint compression
-    pub retention: RetentionPolicy,            // Data retention policy
-    pub git_integration: GitIntegrationConfig, // Git integration settings
-    pub performance: PerformanceConfig,        // Performance settings
-    pub security: SecurityConfig,              // Security settings
-    pub logging: LoggingConfig,                // Logging configuration
+    /// Master enable/disable switch
+    pub enabled: bool,
+    /// Base storage directory (~/.{agent_name})
+    #[serde(default = "get_default_storage_location")]
+    pub storage_location: PathBuf,
+    /// Create checkpoint every N iterations
+    #[serde(default = "default_checkpoint_interval")]
+    pub auto_checkpoint_interval: u32,
+    /// Maximum checkpoints per session
+    #[serde(default = "default_max_checkpoints")]
+    pub max_checkpoints_per_session: u32,
+    /// Enable checkpoint compression
+    #[serde(default)]
+    pub compression_enabled: bool,
+    /// Data retention policy
+    #[serde(default)]
+    pub retention: RetentionPolicy,
+    /// Git integration settings
+    #[serde(default)]
+    pub git_integration: GitIntegrationConfig,
+    /// Performance settings
+    #[serde(default)]
+    pub performance: PerformanceConfig,
+    /// Security settings
+    #[serde(default)]
+    pub security: SecurityConfig,
+    /// Logging configuration
+    #[serde(default)]
+    pub logging: LoggingConfig,
     /// Storage backend configuration
     #[serde(default)]
     pub storage_backend: StorageBackendConfig,
 }
 
-impl Default for GlobalCheckpointConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            storage_location: get_default_storage_location(),
-            auto_checkpoint_interval: 1,
-            max_checkpoints_per_session: 50,
-            compression_enabled: true,
-            retention: RetentionPolicy::default(),
-            git_integration: GitIntegrationConfig::default(),
-            performance: PerformanceConfig::default(),
-            security: SecurityConfig::default(),
-            logging: LoggingConfig::default(),
-            storage_backend: StorageBackendConfig::default(),
-        }
-    }
+fn default_checkpoint_interval() -> u32 {
+    1
+}
+
+fn default_max_checkpoints() -> u32 {
+    50
 }
 
 /// Per-project checkpoint configuration
@@ -237,59 +247,57 @@ impl Default for ProjectCheckpointConfig {
 }
 
 /// Data retention policy
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(default)]
 pub struct RetentionPolicy {
+    #[serde(default = "default_retention_days")]
     pub max_age_days: Option<u32>,      // Delete data older than N days
+    #[serde(default = "default_retention_size")]
     pub max_total_size_gb: Option<u32>, // Delete oldest when total size exceeds N GB
+    #[serde(default = "default_sessions_per_project")]
     pub max_sessions_per_project: Option<u32>, // Keep only N newest sessions per project
+    #[serde(default = "default_cleanup_interval")]
     pub cleanup_interval_hours: u32,    // Run cleanup every N hours
+    #[serde(default = "default_true")]
     pub enable_auto_cleanup: bool,      // Automatically clean up expired data
+    #[serde(default = "default_true")]
     pub preserve_tagged: bool,          // Never delete tagged checkpoints
+    #[serde(default = "default_true")]
     pub preserve_active_sessions: bool, // Never delete active sessions
 }
 
-impl Default for RetentionPolicy {
-    fn default() -> Self {
-        Self {
-            max_age_days: Some(30),
-            max_total_size_gb: Some(10),
-            max_sessions_per_project: Some(20),
-            cleanup_interval_hours: 24,
-            enable_auto_cleanup: true,
-            preserve_tagged: true,
-            preserve_active_sessions: true,
-        }
-    }
-}
+fn default_retention_days() -> Option<u32> { Some(30) }
+fn default_retention_size() -> Option<u32> { Some(10) }
+fn default_sessions_per_project() -> Option<u32> { Some(20) }
+fn default_cleanup_interval() -> u32 { 24 }
+fn default_true() -> bool { true }
 
 /// Git integration configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(default)]
 pub struct GitIntegrationConfig {
+    #[serde(default)]
     pub enabled: bool,                         // Enable git integration
     pub shadow_repo_location: Option<PathBuf>, // Location for shadow repos
+    #[serde(default)]
     pub auto_commit_before_checkpoint: bool,   // Auto-commit changes before checkpoint
+    #[serde(default = "default_true")]
     pub create_git_snapshots: bool,            // Create git snapshots of file system
+    #[serde(default = "default_true")]
     pub track_uncommitted_changes: bool,       // Track uncommitted changes in checkpoints
+    #[serde(default = "default_true")]
     pub exclude_gitignored_files: bool,        // Exclude gitignored files from checkpoints
+    #[serde(default = "default_commit_message_template")]
     pub commit_message_template: String,       // Template for commit messages
 }
 
-impl Default for GitIntegrationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            shadow_repo_location: None,
-            auto_commit_before_checkpoint: false,
-            create_git_snapshots: true,
-            track_uncommitted_changes: true,
-            exclude_gitignored_files: true,
-            commit_message_template: "Checkpoint: {checkpoint_id} - {workflow_step}".to_string(),
-        }
-    }
+fn default_commit_message_template() -> String {
+    "Checkpoint: {checkpoint_id} - {workflow_step}".to_string()
 }
 
 /// Performance configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
 pub struct PerformanceConfig {
     pub compression_level: u32,           // Compression level (0-9)
     pub enable_lazy_loading: bool,        // Load checkpoints on demand
@@ -316,6 +324,7 @@ impl Default for PerformanceConfig {
 
 /// Security configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
 pub struct SecurityConfig {
     pub enable_encryption: bool,              // Encrypt checkpoint data
     pub encryption_key_derivation: String,    // Key derivation method
@@ -375,6 +384,7 @@ impl Default for SecurityConfig {
 
 /// Logging configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
 pub struct LoggingConfig {
     pub log_level: String,               // Logging level (DEBUG, INFO, WARN, ERROR)
     pub log_to_file: bool,               // Log to file
