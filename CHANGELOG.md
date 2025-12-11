@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.52] - 2025-12-11
+
+### Changed
+- **DocumentDB key format**: Updated to proper hierarchical structure
+  - Old format: `sessions/{session_id}/{checkpoint_id}_{type}.json`
+  - New format: `projects/{project_hash}/sessions/{session_id}/checkpoints/{checkpoint_id}_{type}.json`
+  - Enables proper project-level organization and querying
+
+### Added
+- **Project metadata in remote**: Project metadata now saved to remote backend
+  - Key: `projects/{project_hash}/metadata.json`
+- **Session metadata in remote**: Session metadata now saved to remote backend
+  - Key: `projects/{project_hash}/sessions/{session_id}/metadata.json`
+- Session creation respects storage_mode (no local dirs in remote-only mode)
+
+### Fixed
+- `list_projects()` now correctly queries for `projects/*/metadata.json`
+- `load_sessions_from_remote()` uses project-scoped prefix for session discovery
+- `try_load_from_remote()` uses correct hierarchical path
+- `save_checkpoint()` uses project hash in remote key path
+
 ## [0.1.51] - 2025-12-10
 
 ### Fixed

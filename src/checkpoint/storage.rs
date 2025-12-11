@@ -166,19 +166,23 @@ impl CheckpointStorageManager {
             use crate::checkpoint::StorageBackendExt;
             use crate::checkpoint::ListOptions;
             
-            // Query for project metadata documents
+            // Query for project metadata documents using the correct key format
+            // Format: projects/{project_hash}/metadata.json
             let list_opts = ListOptions {
-                prefix: Some("project_metadata/".to_string()),
+                prefix: Some("projects/".to_string()),
                 limit: None,
                 continuation_token: None,
             };
             
             if let Ok(list_result) = backend.list(list_opts).await {
                 for item in list_result.items {
-                    // Try to read and parse the project metadata
-                    if let Ok(metadata) = backend.read_json::<ProjectMetadata>(&item.key).await {
-                        if seen_hashes.insert(metadata.project_hash.clone()) {
-                            projects.push(metadata);
+                    // Only process metadata.json files (not session or checkpoint files)
+                    if item.key.ends_with("/metadata.json") && !item.key.contains("/sessions/") {
+                        // Try to read and parse the project metadata
+                        if let Ok(metadata) = backend.read_json::<ProjectMetadata>(&item.key).await {
+                            if seen_hashes.insert(metadata.project_hash.clone()) {
+                                projects.push(metadata);
+                            }
                         }
                     }
                 }
@@ -516,8 +520,16 @@ impl ProjectStorage {
 
     /// Create a new session
     pub async fn create_session(&self, session_id: &str) -> CheckpointResult<SessionStorage> {
+        use super::config::StorageMode;
+        
         let session_path = self.storage_path.join("sessions").join(session_id);
-        fs::create_dir_all(&session_path).await?;
+        
+        let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
+        
+        // Create local directories only if using local storage
+        if should_write_local {
+            fs::create_dir_all(&session_path).await?;
+        }
 
         let metadata = SessionMetadata {
             session_id: session_id.to_string(),
@@ -531,9 +543,33 @@ impl ProjectStorage {
             size_bytes: 0,
         };
 
-        // Save session metadata using atomic operations
-        let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
-        AtomicOps::write_json(&metadata_path, &metadata)?;
+        // Save session metadata using atomic operations (local)
+        if should_write_local {
+            let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
+            AtomicOps::write_json(&metadata_path, &metadata)?;
+        }
+        
+        // Save to remote backend if configured
+        #[cfg(feature = "storage-documentdb")]
+        {
+            let should_write_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+            if should_write_remote {
+                if let Some(ref backend) = self.remote_backend {
+                    // Save project metadata to remote
+                    let project_key = format!("projects/{}/metadata.json", self.project_hash.as_str());
+                    if let Err(e) = backend.write_json(&project_key, &self.metadata).await {
+                        eprintln!("[checkpoint] Warning: Failed to write project metadata to remote: {}", e);
+                    }
+                    
+                    // Save session metadata to remote  
+                    let session_key = format!("projects/{}/sessions/{}/metadata.json", 
+                        self.project_hash.as_str(), session_id);
+                    if let Err(e) = backend.write_json(&session_key, &metadata).await {
+                        eprintln!("[checkpoint] Warning: Failed to write session metadata to remote: {}", e);
+                    }
+                }
+            }
+        }
 
         // Invalidate cache since we added a new session
         self.invalidate_sessions_cache();
@@ -606,15 +642,18 @@ impl ProjectStorage {
     #[cfg(feature = "storage-documentdb")]
     async fn load_sessions_from_remote(&self) -> CheckpointResult<Option<Vec<SessionMetadata>>> {
         use super::backend::ListOptions;
+        use crate::checkpoint::StorageBackendExt;
         
         let backend = match &self.remote_backend {
             Some(b) => b,
             None => return Ok(None),
         };
         
-        // List all documents in the sessions/ prefix for this project
+        let project_hash = self.project_hash.as_str();
+        
+        // List all documents with prefix: projects/{project_hash}/sessions/
         let list_options = ListOptions {
-            prefix: Some("sessions/".to_string()),
+            prefix: Some(format!("projects/{}/sessions/", project_hash)),
             limit: None,
             continuation_token: None,
         };
@@ -628,20 +667,29 @@ impl ProjectStorage {
         };
         
         // Extract unique session IDs from document keys
-        // Keys are like: sessions/{session_id}/{checkpoint_id}_metadata.json
+        // Keys are like: projects/{project_hash}/sessions/{session_id}/metadata.json
+        //            or: projects/{project_hash}/sessions/{session_id}/checkpoints/{checkpoint_id}_metadata.json
         let mut session_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for item in list_result.items {
             let parts: Vec<&str> = item.key.split('/').collect();
-            if parts.len() >= 2 {
-                session_ids.insert(parts[1].to_string());
+            // Format: projects/{hash}/sessions/{session_id}/...
+            if parts.len() >= 4 && parts[0] == "projects" && parts[2] == "sessions" {
+                session_ids.insert(parts[3].to_string());
             }
         }
         
         // Build SessionMetadata for each unique session
         let mut sessions = Vec::new();
         for session_id in session_ids {
-            // Try to read the first checkpoint metadata to get session info
-            let metadata_key = format!("sessions/{}/001_analyze_metadata.json", session_id);
+            // Try to read the session metadata first
+            let session_metadata_key = format!("projects/{}/sessions/{}/metadata.json", project_hash, session_id);
+            if let Ok(session_meta) = backend.read_json::<SessionMetadata>(&session_metadata_key).await {
+                sessions.push(session_meta);
+                continue;
+            }
+            
+            // Fall back to reading first checkpoint metadata
+            let metadata_key = format!("projects/{}/sessions/{}/checkpoints/001_analyze_metadata.json", project_hash, session_id);
             match backend.read_json::<CheckpointMetadata>(&metadata_key).await {
                 Ok(checkpoint_meta) => {
                     // Extract task description from session_id (format: session_YYYY_MM_DD_HH_MM_task_name)
@@ -653,7 +701,7 @@ impl ProjectStorage {
                     
                     sessions.push(SessionMetadata {
                         session_id: session_id.clone(),
-                        project_hash: self.project_hash.as_str().to_string(),
+                        project_hash: project_hash.to_string(),
                         created_at: checkpoint_meta.created_at,
                         last_accessed: checkpoint_meta.created_at,
                         checkpoint_count: 1, // Approximate
@@ -663,7 +711,7 @@ impl ProjectStorage {
                         size_bytes: 0,
                     });
                 }
-                Err(_) => {
+                _ => {
                     // Session exists but we couldn't read metadata, create basic entry
                     let description = session_id
                         .strip_prefix("session_")
@@ -672,7 +720,7 @@ impl ProjectStorage {
                     
                     sessions.push(SessionMetadata {
                         session_id: session_id.clone(),
-                        project_hash: self.project_hash.as_str().to_string(),
+                        project_hash: project_hash.to_string(),
                         created_at: chrono::Utc::now(),
                         last_accessed: chrono::Utc::now(),
                         checkpoint_count: 1,
@@ -910,7 +958,9 @@ impl SessionStorage {
         #[cfg(feature = "storage-documentdb")]
         if should_write_remote {
             if let Some(ref backend) = self.remote_backend {
-                let key_prefix = format!("sessions/{}/{}", session_id, checkpoint_id);
+                let project_hash = &self.metadata.project_hash;
+                // Key format: projects/{project_hash}/sessions/{session_id}/checkpoints/{checkpoint_id}_{type}.json
+                let key_prefix = format!("projects/{}/sessions/{}/checkpoints/{}", project_hash, session_id, checkpoint_id);
                 
                 // Write metadata
                 if let Err(e) = backend.write_json(&format!("{}_metadata.json", key_prefix), &checkpoint.metadata).await {
@@ -1038,8 +1088,10 @@ impl SessionStorage {
             None => return Ok(None),
         };
         
+        let project_hash = &self.metadata.project_hash;
         let session_id = &self.metadata.session_id;
-        let key_prefix = format!("sessions/{}/{}", session_id, checkpoint_id);
+        // Key format: projects/{project_hash}/sessions/{session_id}/checkpoints/{checkpoint_id}_{type}.json
+        let key_prefix = format!("projects/{}/sessions/{}/checkpoints/{}", project_hash, session_id, checkpoint_id);
         
         // Try to load metadata
         let metadata: CheckpointMetadata = match backend.read_json(&format!("{}_metadata.json", key_prefix)).await {
