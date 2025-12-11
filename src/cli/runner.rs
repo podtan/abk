@@ -277,8 +277,13 @@ impl CheckpointAccess for AbkCheckpointAccess {
             // Check if we're using remote storage mode
             if config_path.exists() {
                 if let Ok(config_str) = std::fs::read_to_string(&config_path) {
-                    config_str.contains("storage_mode") && 
-                    (config_str.contains("\"remote\"") || config_str.contains("'remote'"))
+                    // Check for storage_mode = "remote" (with or without quotes)
+                    let is_remote = config_str.contains("storage_mode") && 
+                        (config_str.contains("\"remote\"") || 
+                         config_str.contains("'remote'") ||
+                         config_str.contains("= remote") ||
+                         config_str.contains("=remote"));
+                    !is_remote // Only check path if NOT remote mode
                 } else {
                     true // Check path by default
                 }

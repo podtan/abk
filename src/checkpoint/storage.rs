@@ -157,31 +157,44 @@ impl CheckpointStorageManager {
 
     /// List all projects in storage
     pub async fn list_projects(&self) -> CheckpointResult<Vec<ProjectMetadata>> {
+        use super::config::StorageMode;
+        
         let mut projects = Vec::new();
         let mut seen_hashes = std::collections::HashSet::new();
         
-        // First, try to load from remote backend if configured
+        // Determine which storage sources to query based on storage_mode
         #[cfg(feature = "storage-documentdb")]
-        if let Some(ref backend) = self.remote_backend {
-            use crate::checkpoint::StorageBackendExt;
-            use crate::checkpoint::ListOptions;
-            
-            // Query for project metadata documents using the correct key format
-            // Format: projects/{project_hash}/metadata.json
-            let list_opts = ListOptions {
-                prefix: Some("projects/".to_string()),
-                limit: None,
-                continuation_token: None,
-            };
-            
-            if let Ok(list_result) = backend.list(list_opts).await {
-                for item in list_result.items {
-                    // Only process metadata.json files (not session or checkpoint files)
-                    if item.key.ends_with("/metadata.json") && !item.key.contains("/sessions/") {
-                        // Try to read and parse the project metadata
-                        if let Ok(metadata) = backend.read_json::<ProjectMetadata>(&item.key).await {
-                            if seen_hashes.insert(metadata.project_hash.clone()) {
-                                projects.push(metadata);
+        let storage_mode = self.config.storage_backend.effective_storage_mode();
+        #[cfg(not(feature = "storage-documentdb"))]
+        let storage_mode = StorageMode::Local;
+        
+        let should_try_local = matches!(storage_mode, StorageMode::Local | StorageMode::Mirror);
+        let should_try_remote = matches!(storage_mode, StorageMode::Remote | StorageMode::Mirror);
+        
+        // First, try to load from remote backend if configured and storage_mode allows
+        #[cfg(feature = "storage-documentdb")]
+        if should_try_remote {
+            if let Some(ref backend) = self.remote_backend {
+                use crate::checkpoint::StorageBackendExt;
+                use crate::checkpoint::ListOptions;
+                
+                // Query for project metadata documents using the correct key format
+                // Format: projects/{project_hash}/metadata.json
+                let list_opts = ListOptions {
+                    prefix: Some("projects/".to_string()),
+                    limit: None,
+                    continuation_token: None,
+                };
+                
+                if let Ok(list_result) = backend.list(list_opts).await {
+                    for item in list_result.items {
+                        // Only process metadata.json files (not session or checkpoint files)
+                        if item.key.ends_with("/metadata.json") && !item.key.contains("/sessions/") {
+                            // Try to read and parse the project metadata
+                            if let Ok(metadata) = backend.read_json::<ProjectMetadata>(&item.key).await {
+                                if seen_hashes.insert(metadata.project_hash.clone()) {
+                                    projects.push(metadata);
+                                }
                             }
                         }
                     }
@@ -189,74 +202,76 @@ impl CheckpointStorageManager {
             }
         }
         
-        // Also check local storage
-        let projects_dir = self.home_dir.join("projects");
-        if projects_dir.exists() {
-            let mut entries = fs::read_dir(&projects_dir).await?;
+        // Also check local storage if storage_mode allows
+        if should_try_local {
+            let projects_dir = self.home_dir.join("projects");
+            if projects_dir.exists() {
+                let mut entries = fs::read_dir(&projects_dir).await?;
 
-            while let Some(entry) = entries.next_entry().await? {
-                if entry.file_type().await?.is_dir() {
-                    let project_dir = entry.path();
-                    let project_hash = entry.file_name().to_string_lossy().to_string();
-                    
-                    // Skip if we already have this project from remote
-                    if seen_hashes.contains(&project_hash) {
-                        continue;
-                    }
+                while let Some(entry) = entries.next_entry().await? {
+                    if entry.file_type().await?.is_dir() {
+                        let project_dir = entry.path();
+                        let project_hash = entry.file_name().to_string_lossy().to_string();
+                        
+                        // Skip if we already have this project from remote
+                        if seen_hashes.contains(&project_hash) {
+                            continue;
+                        }
 
-                    // Try to load project metadata
-                    let metadata_path = project_dir.join(PROJECT_METADATA_FILENAME);
-                    if metadata_path.exists() {
-                        match load_json::<ProjectMetadata>(&metadata_path).await {
-                            Ok(metadata) => {
-                                seen_hashes.insert(metadata.project_hash.clone());
-                                projects.push(metadata);
-                            }
-                            Err(_) => {
-                                // Create minimal metadata for corrupted projects
-                                // Try to reconstruct project information from available data
-                                let recovered_path = self.try_recover_project_path(&project_dir).await;
-                                let (project_path, project_name) = match recovered_path {
-                                    Some(path) => {
-                                        let name = path
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or("Recovered Project")
-                                            .to_string();
-                                        (path, name)
-                                    }
-                                    None => {
-                                        // Last resort: try to use current working directory or descriptive name with hash
-                                        let current_dir = std::env::current_dir()
-                                            .unwrap_or_else(|_| PathBuf::from("."));
-                                        let project_name = current_dir
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .map(|s| s.to_string())
-                                            .unwrap_or_else(|| {
-                                                let truncated_hash = if project_hash.len() >= 8 {
-                                                    &project_hash[..8]
-                                                } else {
-                                                    &project_hash
-                                                };
-                                                format!("Project ({})", truncated_hash)
-                                            });
-                                        (current_dir, project_name)
-                                    }
-                                };
+                        // Try to load project metadata
+                        let metadata_path = project_dir.join(PROJECT_METADATA_FILENAME);
+                        if metadata_path.exists() {
+                            match load_json::<ProjectMetadata>(&metadata_path).await {
+                                Ok(metadata) => {
+                                    seen_hashes.insert(metadata.project_hash.clone());
+                                    projects.push(metadata);
+                                }
+                                Err(_) => {
+                                    // Create minimal metadata for corrupted projects
+                                    // Try to reconstruct project information from available data
+                                    let recovered_path = self.try_recover_project_path(&project_dir).await;
+                                    let (project_path, project_name) = match recovered_path {
+                                        Some(path) => {
+                                            let name = path
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("Recovered Project")
+                                                .to_string();
+                                            (path, name)
+                                        }
+                                        None => {
+                                            // Last resort: try to use current working directory or descriptive name with hash
+                                            let current_dir = std::env::current_dir()
+                                                .unwrap_or_else(|_| PathBuf::from("."));
+                                            let project_name = current_dir
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .map(|s| s.to_string())
+                                                .unwrap_or_else(|| {
+                                                    let truncated_hash = if project_hash.len() >= 8 {
+                                                        &project_hash[..8]
+                                                    } else {
+                                                        &project_hash
+                                                    };
+                                                    format!("Project ({})", truncated_hash)
+                                                });
+                                            (current_dir, project_name)
+                                        }
+                                    };
 
-                                let metadata = ProjectMetadata {
-                                    project_hash: project_hash.clone(),
-                                    project_path,
-                                    name: project_name,
-                                    created_at: Utc::now(),
-                                    last_accessed: Utc::now(),
-                                    session_count: 0,
-                                    size_bytes: 0,
-                                    git_remote: None,
-                                };
-                                seen_hashes.insert(project_hash);
-                                projects.push(metadata);
+                                    let metadata = ProjectMetadata {
+                                        project_hash: project_hash.clone(),
+                                        project_path,
+                                        name: project_name,
+                                        created_at: Utc::now(),
+                                        last_accessed: Utc::now(),
+                                        session_count: 0,
+                                        size_bytes: 0,
+                                        git_remote: None,
+                                    };
+                                    seen_hashes.insert(project_hash);
+                                    projects.push(metadata);
+                                }
                             }
                         }
                     }
@@ -652,8 +667,10 @@ impl ProjectStorage {
         let project_hash = self.project_hash.as_str();
         
         // List all documents with prefix: projects/{project_hash}/sessions/
+        let prefix = format!("projects/{}/sessions/", project_hash);
+        
         let list_options = ListOptions {
-            prefix: Some(format!("projects/{}/sessions/", project_hash)),
+            prefix: Some(prefix.clone()),
             limit: None,
             continuation_token: None,
         };
@@ -1007,6 +1024,18 @@ impl SessionStorage {
         self.metadata.last_accessed = Utc::now();
         if should_write_local {
             self.save_metadata().await?;
+        }
+        
+        // Also update session metadata in remote storage if configured
+        #[cfg(feature = "storage-documentdb")]
+        if should_write_remote {
+            if let Some(ref backend) = self.remote_backend {
+                let project_hash = &self.metadata.project_hash;
+                let session_metadata_key = format!("projects/{}/sessions/{}/metadata.json", project_hash, session_id);
+                if let Err(e) = backend.write_json(&session_metadata_key, &self.metadata).await {
+                    eprintln!("[checkpoint] Warning: Failed to update session metadata in remote: {}", e);
+                }
+            }
         }
 
         Ok(())

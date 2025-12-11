@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.53] - 2025-12-11
+
+### Fixed
+- **list_projects() respects storage_mode**: Only queries configured storage sources
+  - `StorageMode::Local` - Only local filesystem
+  - `StorageMode::Remote` - Only remote backend (DocumentDB)
+  - `StorageMode::Mirror` - Both local and remote
+  - Fixes issue where local projects were always queried regardless of storage_mode
+
+- **Session metadata checkpoint_count**: Session metadata is now updated in remote storage
+  - `checkpoint_count` now correctly incremented when saving checkpoints to remote
+  - Enables `trustee resume` to show sessions with their actual checkpoint counts
+  - Previously, sessions saved to remote had `checkpoint_count: 0`
+
+### Removed
+- Debug eprintln statements (kept connection messages and warnings)
+
 ## [0.1.52] - 2025-12-11
 
 ### Changed
