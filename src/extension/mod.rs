@@ -36,9 +36,9 @@ pub use error::{ExtensionError, ExtensionResult};
 pub use loader::ExtensionLoader;
 pub use manifest::{Capabilities, ExtensionInfo, ExtensionManifest, LibInfo};
 pub use registry::{ExtensionRegistry, LoadedExtension};
-pub use bindings::{ExtensionInstance, ExtensionState, ProviderExtensionInstance};
+pub use bindings::{ExtensionInstance, ExtensionState, ProviderExtensionInstance, LifecycleExtensionInstance};
 // Re-export generated WIT types for external use
-pub use bindings::{core, lifecycle, provider, provider_only};
+pub use bindings::{core, lifecycle, provider, provider_only, lifecycle_only};
 
 use std::path::{Path, PathBuf};
 

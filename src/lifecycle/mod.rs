@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::path::PathBuf;
 
-use crate::extension::{ExtensionInstance, ExtensionManager};
+use crate::extension::{LifecycleExtensionInstance, ExtensionManager};
 
 /// Conditional debug macro
 macro_rules! debug {
@@ -29,13 +29,13 @@ macro_rules! debug {
 /// Lifecycle WASM extension wrapper
 ///
 /// This is the public API for lifecycle functionality. Internally it uses
-/// the new extension system (`ExtensionManager` and `ExtensionInstance`).
+/// the new extension system (`ExtensionManager` and `LifecycleExtensionInstance`).
 ///
 /// Uses interior mutability (`RefCell`) to allow `&self` methods while
-/// the underlying `ExtensionInstance` requires `&mut self`.
+/// the underlying `LifecycleExtensionInstance` requires `&mut self`.
 pub struct LifecyclePlugin {
     /// Extension instance for lifecycle calls (interior mutability for &self methods)
-    instance: RefCell<ExtensionInstance>,
+    instance: RefCell<LifecycleExtensionInstance>,
 
     /// Path to the extension (for debugging)
     #[allow(dead_code)]
@@ -177,27 +177,46 @@ impl LifecyclePlugin {
     }
 }
 
-/// Create a standalone ExtensionInstance for a lifecycle extension
-fn create_standalone_instance(extension_dir: &PathBuf) -> Result<ExtensionInstance> {
-    use crate::extension::ExtensionLoader;
+/// Create a standalone LifecycleExtensionInstance for a lifecycle extension
+fn create_standalone_instance(extension_dir: &PathBuf) -> Result<LifecycleExtensionInstance> {
     use crate::extension::ExtensionManifest;
+    use std::sync::Arc;
+    use wasmtime::component::Component;
+    use wasmtime::{Config, Engine};
 
     // Load manifest
     let manifest_path = extension_dir.join("extension.toml");
+    debug!("Loading manifest from: {}", manifest_path.display());
     let manifest = ExtensionManifest::from_file(&manifest_path)
-        .context("Failed to load extension manifest")?;
+        .with_context(|| format!("Failed to load extension manifest: {}", manifest_path.display()))?;
+    debug!("Manifest loaded: {} v{}", manifest.extension.name, manifest.extension.version);
 
-    // Create loader and load component
-    let loader = ExtensionLoader::new()
-        .context("Failed to create extension loader")?;
+    // Create engine WITHOUT async support (sync bindings for lifecycle extensions)
+    let mut config = Config::new();
+    config.wasm_component_model(true);
+    // Note: async_support is NOT enabled for lifecycle extensions
+    // because they use sync bindgen
+    debug!("Creating WASM engine (sync mode)...");
+    let engine = Arc::new(Engine::new(&config)
+        .context("Failed to create WASM engine for lifecycle")?);
+    debug!("WASM engine created");
 
+    // Load component
     let wasm_path = extension_dir.join(&manifest.lib.path);
-    let loaded_wasm = loader.load_wasm(&wasm_path)
-        .context("Failed to load WASM component")?;
+    debug!("Loading WASM component from: {}", wasm_path.display());
+    let wasm_bytes = std::fs::read(&wasm_path)
+        .with_context(|| format!("Failed to read WASM file: {}", wasm_path.display()))?;
+    debug!("Read {} bytes from WASM file", wasm_bytes.len());
+    
+    let component = Component::from_binary(&engine, &wasm_bytes)
+        .with_context(|| format!("Failed to parse WASM component: {}", wasm_path.display()))?;
+    debug!("WASM component parsed successfully");
 
-    // Create instance
-    let instance = ExtensionInstance::new(loaded_wasm.engine(), loaded_wasm.component())
-        .context("Failed to create extension instance")?;
+    // Create instance using LifecycleExtensionInstance (lifecycle-extension world)
+    debug!("Creating LifecycleExtensionInstance...");
+    let instance = LifecycleExtensionInstance::new(&engine, &component)
+        .with_context(|| "Failed to create lifecycle extension instance from WASM component")?;
+    debug!("LifecycleExtensionInstance created successfully");
 
     Ok(instance)
 }

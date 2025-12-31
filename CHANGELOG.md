@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2025-12-31
+
+### Added
+- **LifecycleExtensionInstance**: New type for instantiating lifecycle-only extensions
+  that implement the `lifecycle-extension` world. This properly handles extensions
+  that only export `core` and `lifecycle` interfaces (not `provider`).
+- **lifecycle_only module**: Re-exports types from `lifecycle-extension` world
+  bindings for use with `LifecycleExtensionInstance`.
+- **tracing dependency for extension feature**: Added `tracing` as a dependency
+  when the `extension` feature is enabled for proper debug logging.
+
+### Fixed  
+- **Lifecycle extension instantiation**: Fixed "no exported instance named 
+  `abk:extension/provider@0.3.0`" error when loading lifecycle extensions.
+  The lifecycle module now uses `LifecycleExtensionInstance` (which uses the
+  `lifecycle-extension` world) instead of `ExtensionInstance` (which requires
+  all three interfaces including `provider`).
+
+### Changed
+- **Lifecycle module uses LifecycleExtensionInstance**: Updated 
+  `create_standalone_instance()` to return `LifecycleExtensionInstance` instead
+  of `ExtensionInstance`, allowing lifecycle-only extensions to load correctly.
+
 ## [0.2.3] - 2025-12-31
 
 ### Changed
