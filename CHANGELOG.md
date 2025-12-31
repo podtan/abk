@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-12-31
+
+### Fixed
+- **Streaming tool call index support**: Added `tool_call_index` field to
+  `content-delta` record in WIT interface to properly track which tool call
+  streaming arguments belong to. This fixes "trailing characters" JSON parse
+  errors when LLMs return multiple tool calls in a single response.
+  - ExtensionProvider now uses `delta.tool_call_index` instead of hardcoded 0
+  - WASM extensions can extract and pass through the index from SSE events
+
 ## [0.2.1] - 2025-12-31
 
 ### Fixed
