@@ -6,6 +6,16 @@ This guide explains how to create WASM extensions for ABK (Agent Builder Kit). E
 
 ABK uses a **WASM Component Model** based extension system. Extensions are WebAssembly modules that implement specific interfaces defined using WIT (WebAssembly Interface Types).
 
+### Extension Worlds
+
+ABK defines three WIT worlds for different extension types:
+
+| World | Required Interfaces | Use Case |
+|-------|---------------------|----------|
+| `extension` | `core` + `lifecycle` + `provider` | Full-featured extensions |
+| `lifecycle-extension` | `core` + `lifecycle` | Lifecycle-only extensions (templates, classification) |
+| `provider-extension` | `core` + `provider` | LLM provider extensions |
+
 ### Extension Capabilities
 
 Extensions can provide one or more capabilities:
@@ -13,7 +23,7 @@ Extensions can provide one or more capabilities:
 | Capability | Description |
 |------------|-------------|
 | `lifecycle` | Template management, task classification, workflow control |
-| `provider` | LLM API communication (future) |
+| `provider` | LLM API communication |
 | `tools` | Custom tools for agents (future) |
 | `context` | Context providers (future) |
 
@@ -85,12 +95,15 @@ strip = true
 
 ### 4. Implement the Extension
 
+For lifecycle-only extensions, use the `lifecycle-extension` world:
+
 ```rust
 // src/lib.rs
 
 // Generate bindings from WIT interface
+// Use "lifecycle-extension" world for lifecycle-only extensions
 wit_bindgen::generate!({
-    world: "extension",
+    world: "lifecycle-extension",
     path: "../abk/wit/extension",
 });
 
@@ -194,16 +207,34 @@ impl exports::abk::extension::lifecycle::Guest for MyExtension {
 
 ### 5. Build the Extension
 
+**Important**: WASM modules must be converted to WASM components using `wasm-tools`:
+
 ```bash
 #!/bin/bash
 # build.sh
 
+set -e
+
 # Build for WASM
 cargo build --target wasm32-wasip1 --release
 
-# Copy to output
-cp target/wasm32-wasip1/release/my_extension.wasm ./
+# Get WASI adapter
+WASI_ADAPTER="wasi_snapshot_preview1.reactor.wasm"
+if [ ! -f "$WASI_ADAPTER" ]; then
+    echo "Downloading WASI adapter..."
+    curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/v25.0.0/$WASI_ADAPTER"
+fi
+
+# Convert module to component
+wasm-tools component new \
+    target/wasm32-wasip1/release/my_extension.wasm \
+    -o my_extension.wasm \
+    --adapt "$WASI_ADAPTER"
+
+echo "Built: my_extension.wasm"
 ```
+
+> **Note**: ABK requires WASM **components** (not modules). The `wasm-tools component new` command converts your Rust WASM module to a proper component with WASI support.
 
 ## WIT Interface Reference
 
@@ -369,6 +400,16 @@ RUST_LOG=debug trustee run "your task"
 
 ## API Reference
 
+### Instance Types
+
+ABK provides different instance types for different extension worlds:
+
+| Type | World | Use Case |
+|------|-------|----------|
+| `ExtensionInstance` | `extension` | Full extensions (all interfaces) |
+| `LifecycleExtensionInstance` | `lifecycle-extension` | Lifecycle-only extensions |
+| `ProviderExtensionInstance` | `provider-extension` | Provider-only extensions |
+
 ### ExtensionManager
 
 ```rust
@@ -388,6 +429,38 @@ let instance = manager.instantiate("coder-lifecycle")?;
 
 // Call lifecycle method
 let template = instance.lifecycle().load_template("system")?;
+```
+
+### LifecycleExtensionInstance (Lifecycle-only)
+
+```rust
+use abk::extension::{LifecycleExtensionInstance, ExtensionManifest};
+use wasmtime::{Engine, Config};
+use wasmtime::component::Component;
+use std::sync::Arc;
+
+// Create engine WITHOUT async_support (sync bindings)
+let mut config = Config::new();
+config.wasm_component_model(true);
+// Note: Do NOT enable async_support for lifecycle extensions
+let engine = Arc::new(Engine::new(&config)?);
+
+// Load WASM component
+let wasm_bytes = std::fs::read("extension.wasm")?;
+let component = Component::from_binary(&engine, &wasm_bytes)?;
+
+// Create instance
+let mut instance = LifecycleExtensionInstance::new(&engine, &component)?;
+
+// Initialize
+instance.init()?;
+
+// Use lifecycle methods
+let template = instance.load_template("system")?;
+let rendered = instance.render_template(&template, &[
+    ("task".to_string(), "fix the bug".to_string()),
+])?;
+let (task_type, confidence) = instance.classify_task("fix the login bug")?;
 ```
 
 ### ExtensionManifest
