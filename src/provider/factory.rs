@@ -2,10 +2,16 @@
 //!
 //! This module provides a factory for dynamically creating LLM providers
 //! based on configuration and environment settings.
+//!
+//! The factory tries to find providers in this order:
+//! 1. Extension system: ~/.{agent}/extensions/{name}/ (new)
+//! 2. Old plugin system: ~/.{agent}/providers/{name}/provider.wasm (legacy)
+//! 3. Development: ./providers/{name}/provider.wasm
 
 use crate::config::EnvironmentLoader;
 use crate::provider::LlmProvider;
 use crate::provider::wasm::WasmProvider;
+use crate::provider::extension::ExtensionProvider;
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -24,37 +30,81 @@ pub struct ProviderFactory;
 impl ProviderFactory {
     /// Create a provider based on environment configuration
     ///
-    /// This will read the LLM_PROVIDER environment variable (defaulting to "tanbal")
-    /// and create the appropriate WASM provider instance.
+    /// Tries to find provider in this order:
+    /// 1. Extension system (new) - looks in ~/.{agent}/extensions/{name}/
+    /// 2. Old plugin system (legacy) - looks in ~/.{agent}/providers/{name}/provider.wasm
     ///
     /// # Arguments
     /// * `env` - Environment loader with configuration
     ///
     /// # Returns
     /// A boxed LLM provider implementation
-    ///
-    /// # Example
-    /// ```ignore
-    /// use abk::provider::ProviderFactory;
-    /// use abk::config::EnvironmentLoader;
-    ///
-    /// let env = EnvironmentLoader::load()?;
-    /// let provider = ProviderFactory::create(&env)?;
-    /// ```
-    pub fn create(env: &EnvironmentLoader) -> Result<Box<dyn LlmProvider>> {
-        // Get provider name from environment (default to "tanbal")
-        let provider_name = env.llm_provider().unwrap_or_else(|| "tanbal".to_string());
+    pub async fn create(env: &EnvironmentLoader) -> Result<Box<dyn LlmProvider>> {
+        // Get provider name from environment (default to "openai-unofficial")
+        let provider_name = env.llm_provider().unwrap_or_else(|| "openai-unofficial".to_string());
 
-        // All providers are now WASM-based
+        // Try extension system first (new system)
+        if let Ok(provider) = Self::try_create_extension_provider(&provider_name, env).await {
+            debug!("Factory - Using extension provider: {}", provider_name);
+            return Ok(provider);
+        }
+
+        // Fall back to old WASM plugin system
+        debug!("Factory - Extension '{}' not found, trying legacy plugin system", provider_name);
         Self::create_wasm_provider(&provider_name, env)
     }
 
-    /// Create a WASM-based provider (generic loader for ANY .wasm file)
+    /// Try to create an extension-based provider
+    async fn try_create_extension_provider(
+        provider_name: &str,
+        env: &EnvironmentLoader,
+    ) -> Result<Box<dyn LlmProvider>> {
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
+        debug!("Factory - Agent name: {}", agent_name);
+
+        // Look for extension in installed location
+        let extensions_dir = if let Ok(home_dir) = std::env::var("HOME") {
+            PathBuf::from(home_dir).join(format!(".{}/extensions", agent_name))
+        } else {
+            PathBuf::from("extensions")
+        };
+        debug!("Factory - Looking for extensions in: {}", extensions_dir.display());
+
+        // Check if extension exists
+        let extension_path = extensions_dir.join(provider_name);
+        let manifest_path = extension_path.join("extension.toml");
+        debug!("Factory - Checking manifest at: {}", manifest_path.display());
+
+        if !manifest_path.exists() {
+            debug!("Factory - Manifest not found at installed location");
+            // Also try development location
+            let dev_extensions = PathBuf::from("extensions");
+            let dev_manifest = dev_extensions.join(provider_name).join("extension.toml");
+            debug!("Factory - Trying dev location: {}", dev_manifest.display());
+            
+            if !dev_manifest.exists() {
+                debug!("Factory - Extension not found anywhere");
+                anyhow::bail!("Extension '{}' not found", provider_name);
+            }
+            
+            // Use development extensions directory
+            debug!("Factory - Creating extension provider from dev location");
+            let provider = ExtensionProvider::new(provider_name.to_string(), dev_extensions, env.clone()).await?;
+            return Ok(Box::new(provider));
+        }
+
+        // Use installed extensions directory
+        debug!("Factory - Creating extension provider from installed location");
+        let provider = ExtensionProvider::new(provider_name.to_string(), extensions_dir, env.clone()).await?;
+        Ok(Box::new(provider))
+    }
+
+    /// Create a WASM-based provider (legacy plugin system)
     fn create_wasm_provider(provider_name: &str, env: &EnvironmentLoader) -> Result<Box<dyn LlmProvider>> {
         // Try to find WASM file in multiple locations (installed vs development)
         let wasm_path = Self::find_wasm_provider(provider_name)?;
 
-        debug!("Factory - Loading WASM provider: {}", provider_name);
+        debug!("Factory - Loading legacy WASM provider: {}", provider_name);
         debug!("  WASM path: {}", wasm_path.display());
 
         Ok(Box::new(WasmProvider::new(

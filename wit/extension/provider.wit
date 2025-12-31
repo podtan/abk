@@ -106,4 +106,26 @@ interface provider {
     /// model: Model string to check
     /// Returns true if streaming is fully supported
     supports-streaming: func(model: string) -> bool;
+
+    /// Format request from raw JSON messages (handles complex tool messages)
+    /// This is used when messages contain tool_call_id, tool_calls arrays, etc.
+    /// that can't be represented in the simple message record.
+    /// 
+    /// messages-json: JSON array of InternalMessage structures
+    /// model: Model string
+    /// tools-json: Optional JSON array of tool definitions
+    /// tool-choice-json: Optional tool choice ("auto", "required", "none", or {"type":"function","function":{"name":"x"}})
+    /// max-tokens: Optional max tokens limit
+    /// temperature: Temperature for sampling (0.0-2.0)
+    /// enable-streaming: Whether to enable streaming mode
+    /// Returns JSON string ready to send as HTTP body
+    format-request-from-json: func(
+        messages-json: string,
+        model: string,
+        tools-json: option<string>,
+        tool-choice-json: option<string>,
+        max-tokens: option<u32>,
+        temperature: f32,
+        enable-streaming: bool
+    ) -> result<string, provider-error>;
 }

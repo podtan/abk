@@ -38,7 +38,8 @@ use std::path::{Path, PathBuf};
 ///     // ... implement remaining methods
 /// }
 /// ```
-pub trait CommandContext {
+#[async_trait::async_trait]
+pub trait CommandContext: Send + Sync {
     /// Get the path to the configuration file
     fn config_path(&self) -> CliResult<PathBuf>;
 
@@ -179,5 +180,5 @@ pub trait CommandContext {
     }
 
     /// Create an agent instance for executing tasks
-    fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error>>;
+    async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>>;
 }

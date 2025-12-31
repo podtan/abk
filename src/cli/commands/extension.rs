@@ -257,6 +257,7 @@ mod tests {
         }
     }
     
+    #[async_trait::async_trait]
     impl CommandContext for MockContext {
         fn config_path(&self) -> CliResult<std::path::PathBuf> {
             Ok(self.data_dir.join("config.toml"))
@@ -303,7 +304,7 @@ mod tests {
             println!("✓ {}", message);
         }
         
-        fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error>> {
+        async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {
             unimplemented!()
         }
     }

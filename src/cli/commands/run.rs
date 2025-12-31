@@ -99,6 +99,7 @@ pub async fn execute_run<C: CommandContext>(
         template_base.as_deref(),
         log_base.as_deref(),
     )
+    .await
     .map_err(|e| CliError::ExecutionError(format!("Failed to create agent: {}", e)))?;
     
     // Initialize remote checkpoint backend if configured

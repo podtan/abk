@@ -60,6 +60,7 @@ impl DefaultCommandContext {
     }
 }
 
+#[async_trait::async_trait]
 impl CommandContext for DefaultCommandContext {
     fn config_path(&self) -> CliResult<std::path::PathBuf> {
         Ok(self.config_path.clone())
@@ -117,9 +118,9 @@ impl CommandContext for DefaultCommandContext {
         println!("✓ {}", message);
     }
 
-    fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error>> {
+    async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {
         let config_path = Some(self.config_path.as_path());
-        Ok(crate::agent::Agent::new(config_path, None, None)?)
+        Ok(crate::agent::Agent::new(config_path, None, None).await?)
     }
 }
 

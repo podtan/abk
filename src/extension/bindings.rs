@@ -11,12 +11,21 @@ use wasmtime_wasi::WasiCtx;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::WasiView;
 
-// Generate bindings from WIT files
+// Generate bindings for the full extension world (requires all interfaces)
 wasmtime::component::bindgen!({
     path: "wit/extension",
     world: "extension",
     async: false,
 });
+
+// Generate bindings for provider-only extensions (async for proper wasmtime support)
+mod provider_extension_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/extension",
+        world: "provider-extension",
+        async: true,
+    });
+}
 
 // Re-export generated types at module level
 
@@ -36,6 +45,13 @@ pub mod lifecycle {
 pub mod provider {
     #![allow(missing_docs)]
     pub use super::exports::abk::extension::provider::*;
+}
+
+/// Provider-only extension types (from provider-extension world)
+pub mod provider_only {
+    #![allow(missing_docs)]
+    pub use super::provider_extension_bindings::exports::abk::extension::core as core;
+    pub use super::provider_extension_bindings::exports::abk::extension::provider as provider;
 }
 
 /// WASI state for extension execution
@@ -287,6 +303,218 @@ impl ExtensionInstance {
             .abk_extension_provider()
             .call_handle_stream_chunk(&mut self.store, chunk)
             .map_err(|e| ExtensionError::CallError(format!("handle_stream_chunk failed: {}", e)))
+    }
+
+    /// Get API URL for a model (provider capability)
+    pub fn get_api_url(&mut self, base_url: &str, model: &str) -> ExtensionResult<String> {
+        self.bindings
+            .abk_extension_provider()
+            .call_get_api_url(&mut self.store, base_url, model)
+            .map_err(|e| ExtensionError::CallError(format!("get_api_url failed: {}", e)))
+    }
+
+    /// Check if streaming is supported for a model (provider capability)
+    pub fn supports_streaming(&mut self, model: &str) -> ExtensionResult<bool> {
+        self.bindings
+            .abk_extension_provider()
+            .call_supports_streaming(&mut self.store, model)
+            .map_err(|e| ExtensionError::CallError(format!("supports_streaming failed: {}", e)))
+    }
+
+    /// Format request from JSON (provider capability)
+    /// Used for complex messages with tool_call_id, tool_calls arrays, etc.
+    pub fn format_request_from_json(
+        &mut self,
+        messages_json: &str,
+        model: &str,
+        tools_json: Option<&str>,
+        tool_choice_json: Option<&str>,
+        max_tokens: Option<u32>,
+        temperature: f32,
+        enable_streaming: bool,
+    ) -> ExtensionResult<String> {
+        self.bindings
+            .abk_extension_provider()
+            .call_format_request_from_json(
+                &mut self.store,
+                messages_json,
+                model,
+                tools_json,
+                tool_choice_json,
+                max_tokens,
+                temperature,
+                enable_streaming,
+            )
+            .map_err(|e| ExtensionError::CallError(format!("format_request_from_json failed: {}", e)))?
+            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+    }
+}
+
+/// An instantiated provider-only extension (no lifecycle interface required)
+pub struct ProviderExtensionInstance {
+    /// Store with extension state
+    store: Store<ExtensionState>,
+    /// Bindings to the extension's exports (provider-extension world)
+    bindings: provider_extension_bindings::ProviderExtension,
+}
+
+impl ProviderExtensionInstance {
+    /// Instantiate a provider-only extension from a loaded component
+    pub async fn new(engine: &Arc<Engine>, component: &Component) -> ExtensionResult<Self> {
+        let mut linker = Linker::new(engine);
+
+        // Add WASI to linker (async version for async bindings)
+        wasmtime_wasi::add_to_linker_async(&mut linker).map_err(|e| {
+            ExtensionError::WasmLoadError(format!("Failed to add WASI to linker: {}", e))
+        })?;
+
+        // Create store with state
+        let state = ExtensionState::new();
+        let mut store = Store::new(engine, state);
+
+        // Instantiate using provider-extension world (async)
+        let bindings = provider_extension_bindings::ProviderExtension::instantiate_async(&mut store, component, &linker)
+            .await
+            .map_err(|e| {
+                ExtensionError::WasmLoadError(format!("Failed to instantiate provider extension: {}", e))
+            })?;
+
+        Ok(Self { store, bindings })
+    }
+
+    /// Get extension metadata via core interface
+    pub async fn get_metadata(&mut self) -> ExtensionResult<provider_only::core::ExtensionMetadata> {
+        self.bindings
+            .abk_extension_core()
+            .call_get_metadata(&mut self.store)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("get_metadata failed: {}", e)))
+    }
+
+    /// List capabilities via core interface
+    pub async fn list_capabilities(&mut self) -> ExtensionResult<Vec<String>> {
+        self.bindings
+            .abk_extension_core()
+            .call_list_capabilities(&mut self.store)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("list_capabilities failed: {}", e)))
+    }
+
+    /// Initialize the extension via core interface
+    pub async fn init(&mut self) -> ExtensionResult<()> {
+        self.bindings
+            .abk_extension_core()
+            .call_init(&mut self.store)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("init call failed: {}", e)))?
+            .map_err(|e| ExtensionError::InitError(e))
+    }
+
+    // ===== Provider Interface Methods =====
+
+    /// Get provider metadata (provider capability)
+    pub async fn get_provider_metadata(&mut self) -> ExtensionResult<String> {
+        self.bindings
+            .abk_extension_provider()
+            .call_get_provider_metadata(&mut self.store)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("get_provider_metadata failed: {}", e)))
+    }
+
+    /// Format request for LLM API (provider capability)
+    pub async fn format_request(
+        &mut self,
+        messages: &[(String, String)],
+        config: &provider_only::provider::Config,
+        tools: Option<&[provider_only::provider::Tool]>,
+    ) -> ExtensionResult<String> {
+        let msgs: Vec<provider_only::provider::Message> = messages
+            .iter()
+            .map(|(role, content)| provider_only::provider::Message {
+                role: role.clone(),
+                content: content.clone(),
+            })
+            .collect();
+
+        self.bindings
+            .abk_extension_provider()
+            .call_format_request(&mut self.store, &msgs, config, tools)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("format_request failed: {}", e)))?
+            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+    }
+
+    /// Parse response from provider API (provider capability)
+    pub async fn parse_response(
+        &mut self,
+        body: &str,
+        model: &str,
+    ) -> ExtensionResult<provider_only::provider::AssistantMessage> {
+        self.bindings
+            .abk_extension_provider()
+            .call_parse_response(&mut self.store, body, model)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("parse_response failed: {}", e)))?
+            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+    }
+
+    /// Handle streaming chunk (provider capability)
+    pub async fn handle_stream_chunk(
+        &mut self,
+        chunk: &str,
+    ) -> ExtensionResult<Option<provider_only::provider::ContentDelta>> {
+        self.bindings
+            .abk_extension_provider()
+            .call_handle_stream_chunk(&mut self.store, chunk)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("handle_stream_chunk failed: {}", e)))
+    }
+
+    /// Get API URL for a model (provider capability)
+    pub async fn get_api_url(&mut self, base_url: &str, model: &str) -> ExtensionResult<String> {
+        self.bindings
+            .abk_extension_provider()
+            .call_get_api_url(&mut self.store, base_url, model)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("get_api_url failed: {}", e)))
+    }
+
+    /// Check if streaming is supported for a model (provider capability)
+    pub async fn supports_streaming(&mut self, model: &str) -> ExtensionResult<bool> {
+        self.bindings
+            .abk_extension_provider()
+            .call_supports_streaming(&mut self.store, model)
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("supports_streaming failed: {}", e)))
+    }
+
+    /// Format request from JSON (provider capability)
+    /// Used for complex messages with tool_call_id, tool_calls arrays, etc.
+    pub async fn format_request_from_json(
+        &mut self,
+        messages_json: &str,
+        model: &str,
+        tools_json: Option<&str>,
+        tool_choice_json: Option<&str>,
+        max_tokens: Option<u32>,
+        temperature: f32,
+        enable_streaming: bool,
+    ) -> ExtensionResult<String> {
+        self.bindings
+            .abk_extension_provider()
+            .call_format_request_from_json(
+                &mut self.store,
+                messages_json,
+                model,
+                tools_json,
+                tool_choice_json,
+                max_tokens,
+                temperature,
+                enable_streaming,
+            )
+            .await
+            .map_err(|e| ExtensionError::CallError(format!("format_request_from_json failed: {}", e)))?
+            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
     }
 }
 

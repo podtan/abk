@@ -2,7 +2,7 @@
 //!
 //! Manages discovered and loaded extensions with capability-based indexing.
 
-use super::bindings::ExtensionInstance;
+use super::bindings::{ExtensionInstance, ProviderExtensionInstance};
 use super::error::{ExtensionError, ExtensionResult};
 use super::loader::{ExtensionLoader, LoadedWasm};
 use super::manifest::ExtensionManifest;
@@ -20,8 +20,11 @@ pub struct ExtensionRegistry {
     /// Loaded WASM components indexed by ID (lazy loaded)
     loaded: HashMap<String, LoadedWasm>,
 
-    /// Instantiated extensions indexed by ID
+    /// Instantiated extensions indexed by ID (full extension world)
     instances: HashMap<String, ExtensionInstance>,
+
+    /// Instantiated provider-only extensions indexed by ID
+    provider_instances: HashMap<String, ProviderExtensionInstance>,
 
     /// Capability index: capability -> list of extension IDs
     capability_index: HashMap<String, Vec<String>>,
@@ -35,6 +38,7 @@ impl ExtensionRegistry {
             extension_paths: HashMap::new(),
             loaded: HashMap::new(),
             instances: HashMap::new(),
+            provider_instances: HashMap::new(),
             capability_index: HashMap::new(),
         }
     }
@@ -193,6 +197,52 @@ impl ExtensionRegistry {
     /// Returns None if not instantiated. Use `instantiate()` first.
     pub fn get_instance_mut(&mut self, id: &str) -> Option<&mut ExtensionInstance> {
         self.instances.get_mut(id)
+    }
+
+    /// Instantiate a provider-only extension by ID
+    ///
+    /// Creates a callable instance of a provider-only extension.
+    /// Use this for extensions that only have provider capability (no lifecycle).
+    ///
+    /// # Arguments
+    /// * `id` - Extension ID
+    /// * `loader` - WASM loader to use
+    ///
+    /// # Returns
+    /// * `ExtensionResult<&mut ProviderExtensionInstance>` - Mutable reference to instance
+    pub async fn instantiate_provider(
+        &mut self,
+        id: &str,
+        loader: &ExtensionLoader,
+    ) -> ExtensionResult<&mut ProviderExtensionInstance> {
+        // Load WASM if needed
+        self.load_wasm(id, loader)?;
+
+        // Check if already instantiated
+        if !self.provider_instances.contains_key(id) {
+            // Get loaded WASM
+            let loaded_wasm = self.loaded.get(id).ok_or_else(|| {
+                ExtensionError::NotLoaded(format!("Extension '{}' not loaded", id))
+            })?;
+
+            // Create provider-only instance (async)
+            let instance =
+                ProviderExtensionInstance::new(loaded_wasm.engine(), loaded_wasm.component()).await?;
+
+            self.provider_instances.insert(id.to_string(), instance);
+        }
+
+        // Return mutable reference to instance
+        self.provider_instances.get_mut(id).ok_or_else(|| {
+            ExtensionError::NotLoaded(format!("Extension '{}' instantiation failed", id))
+        })
+    }
+
+    /// Get a mutable reference to an instantiated provider-only extension
+    ///
+    /// Returns None if not instantiated. Use `instantiate_provider()` first.
+    pub fn get_provider_instance_mut(&mut self, id: &str) -> Option<&mut ProviderExtensionInstance> {
+        self.provider_instances.get_mut(id)
     }
 
     /// Get loaded WASM component by ID

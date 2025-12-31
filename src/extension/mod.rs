@@ -36,9 +36,9 @@ pub use error::{ExtensionError, ExtensionResult};
 pub use loader::ExtensionLoader;
 pub use manifest::{Capabilities, ExtensionInfo, ExtensionManifest, LibInfo};
 pub use registry::{ExtensionRegistry, LoadedExtension};
-pub use bindings::{ExtensionInstance, ExtensionState};
+pub use bindings::{ExtensionInstance, ExtensionState, ProviderExtensionInstance};
 // Re-export generated WIT types for external use
-pub use bindings::{core, lifecycle, provider};
+pub use bindings::{core, lifecycle, provider, provider_only};
 
 use std::path::{Path, PathBuf};
 
@@ -144,6 +144,27 @@ impl ExtensionManager {
     /// Returns None if not instantiated. Use `instantiate()` first.
     pub fn get_instance_mut(&mut self, id: &str) -> Option<&mut ExtensionInstance> {
         self.registry.get_instance_mut(id)
+    }
+
+    /// Instantiate a provider-only extension by ID
+    ///
+    /// Creates a callable instance of a provider-only extension.
+    /// Use this for extensions that only have provider capability (no lifecycle).
+    ///
+    /// # Arguments
+    /// * `id` - Extension ID from manifest
+    ///
+    /// # Returns
+    /// * `ExtensionResult<&mut ProviderExtensionInstance>` - Mutable reference to instance
+    pub async fn instantiate_provider(&mut self, id: &str) -> ExtensionResult<&mut ProviderExtensionInstance> {
+        self.registry.instantiate_provider(id, &self.loader).await
+    }
+
+    /// Get a mutable reference to an instantiated provider-only extension
+    ///
+    /// Returns None if not instantiated. Use `instantiate_provider()` first.
+    pub fn get_provider_instance_mut(&mut self, id: &str) -> Option<&mut ProviderExtensionInstance> {
+        self.registry.get_provider_instance_mut(id)
     }
 
     /// Get extensions by capability

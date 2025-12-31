@@ -92,12 +92,12 @@ impl Agent {
     /// * `mode` - Initial interaction mode.
     /// * `template_base` - Base path for templates (optional).
     /// * `log_base` - Base path for logs (optional).
-    pub fn new(
+    pub async fn new(
         config_path: Option<&Path>,
         env_file: Option<&Path>,
         mode: Option<AgentMode>,
     ) -> Result<Self> {
-        Self::new_with_bases(config_path, env_file, mode, None, None)
+        Self::new_with_bases(config_path, env_file, mode, None, None).await
     }
 
     /// Initialize the agent with custom base paths.
@@ -108,7 +108,7 @@ impl Agent {
     /// * `mode` - Initial interaction mode.
     /// * `template_base` - Base path for templates (optional).
     /// * `log_base` - Base path for logs (optional).
-    pub fn new_with_bases(
+    pub async fn new_with_bases(
         config_path: Option<&Path>,
         env_file: Option<&Path>,
         mode: Option<AgentMode>,
@@ -127,7 +127,7 @@ impl Agent {
             .context("Failed to load lifecycle plugin")?;
 
         // Create provider using factory (new provider-based architecture)
-        let provider = ProviderFactory::create(&env)
+        let provider = ProviderFactory::create(&env).await
             .context("Failed to create LLM provider")?;
 
         let timeout_seconds = config.get_u64("execution.timeout_seconds").unwrap_or(120);

@@ -46,6 +46,7 @@ impl Default for MockCommandContext {
     }
 }
 
+#[async_trait]
 impl CommandContext for MockCommandContext {
     fn config_path(&self) -> CliResult<PathBuf> {
         Ok(self.config_path.clone())
@@ -81,6 +82,18 @@ impl CommandContext for MockCommandContext {
 
     fn log_error(&self, message: &str) {
         self.logs.lock().unwrap().push(format!("[ERROR] {}", message));
+    }
+
+    fn log_success(&self, message: &str) {
+        self.logs.lock().unwrap().push(format!("[SUCCESS] {}", message));
+    }
+
+    fn config(&self) -> &crate::config::Configuration {
+        unimplemented!("MockCommandContext::config not implemented")
+    }
+
+    async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {
+        unimplemented!("MockCommandContext::create_agent not implemented")
     }
 }
 
