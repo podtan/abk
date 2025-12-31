@@ -2,6 +2,7 @@
 //!
 //! Manages discovered and loaded extensions with capability-based indexing.
 
+use super::bindings::ExtensionInstance;
 use super::error::{ExtensionError, ExtensionResult};
 use super::loader::{ExtensionLoader, LoadedWasm};
 use super::manifest::ExtensionManifest;
@@ -19,6 +20,9 @@ pub struct ExtensionRegistry {
     /// Loaded WASM components indexed by ID (lazy loaded)
     loaded: HashMap<String, LoadedWasm>,
 
+    /// Instantiated extensions indexed by ID
+    instances: HashMap<String, ExtensionInstance>,
+
     /// Capability index: capability -> list of extension IDs
     capability_index: HashMap<String, Vec<String>>,
 }
@@ -30,6 +34,7 @@ impl ExtensionRegistry {
             manifests: HashMap::new(),
             extension_paths: HashMap::new(),
             loaded: HashMap::new(),
+            instances: HashMap::new(),
             capability_index: HashMap::new(),
         }
     }
@@ -92,28 +97,35 @@ impl ExtensionRegistry {
         self.manifests.keys().collect()
     }
 
-    /// Check if an extension is loaded
+    /// Check if an extension is loaded (WASM bytes loaded)
     pub fn is_loaded(&self, id: &str) -> bool {
         self.loaded.contains_key(id)
     }
 
-    /// Load an extension by ID
+    /// Check if an extension is instantiated (ready to call)
+    pub fn is_instantiated(&self, id: &str) -> bool {
+        self.instances.contains_key(id)
+    }
+
+    /// Load an extension WASM by ID (lazy loading)
+    ///
+    /// This loads the WASM bytes but does not instantiate the component.
+    /// Call `instantiate()` to create a callable instance.
     ///
     /// # Arguments
     /// * `id` - Extension ID
     /// * `loader` - WASM loader to use
     ///
     /// # Returns
-    /// * `ExtensionResult<&LoadedExtension>` - Reference to loaded extension
-    pub async fn load(
+    /// * `ExtensionResult<()>` - Success if loaded
+    pub fn load_wasm(
         &mut self,
         id: &str,
-        loader: &mut ExtensionLoader,
-    ) -> ExtensionResult<&LoadedExtension> {
+        loader: &ExtensionLoader,
+    ) -> ExtensionResult<()> {
         // Check if already loaded
         if self.loaded.contains_key(id) {
-            // Return a LoadedExtension view
-            return self.get_loaded(id);
+            return Ok(());
         }
 
         // Get manifest and path
@@ -134,24 +146,53 @@ impl ExtensionRegistry {
         // Store loaded component
         self.loaded.insert(id.to_string(), loaded_wasm);
 
-        self.get_loaded(id)
+        Ok(())
     }
 
-    /// Get a loaded extension
-    fn get_loaded(&self, id: &str) -> ExtensionResult<&LoadedExtension> {
-        // This is a bit awkward due to Rust's borrow checker
-        // We need to return a view that combines manifest + loaded wasm
-        if !self.loaded.contains_key(id) {
-            return Err(ExtensionError::NotLoaded(id.to_string()));
+    /// Instantiate an extension by ID
+    ///
+    /// Creates a callable instance of the extension. Automatically loads
+    /// the WASM if not already loaded.
+    ///
+    /// # Arguments
+    /// * `id` - Extension ID
+    /// * `loader` - WASM loader to use
+    ///
+    /// # Returns
+    /// * `ExtensionResult<&mut ExtensionInstance>` - Mutable reference to instance
+    pub fn instantiate(
+        &mut self,
+        id: &str,
+        loader: &ExtensionLoader,
+    ) -> ExtensionResult<&mut ExtensionInstance> {
+        // Load WASM if needed
+        self.load_wasm(id, loader)?;
+
+        // Check if already instantiated
+        if !self.instances.contains_key(id) {
+            // Get loaded WASM
+            let loaded_wasm = self.loaded.get(id).ok_or_else(|| {
+                ExtensionError::NotLoaded(format!("Extension '{}' not loaded", id))
+            })?;
+
+            // Create instance
+            let instance =
+                ExtensionInstance::new(loaded_wasm.engine(), loaded_wasm.component())?;
+
+            self.instances.insert(id.to_string(), instance);
         }
 
-        // For now, we'll use a workaround with static lifetime
-        // In a real implementation, you might want to use interior mutability
-        // or return owned data
-        Err(ExtensionError::NotLoaded(format!(
-            "Use get_loaded_components() to access loaded extension '{}'",
-            id
-        )))
+        // Return mutable reference to instance
+        self.instances.get_mut(id).ok_or_else(|| {
+            ExtensionError::NotLoaded(format!("Extension '{}' instantiation failed", id))
+        })
+    }
+
+    /// Get a mutable reference to an instantiated extension
+    ///
+    /// Returns None if not instantiated. Use `instantiate()` first.
+    pub fn get_instance_mut(&mut self, id: &str) -> Option<&mut ExtensionInstance> {
+        self.instances.get_mut(id)
     }
 
     /// Get loaded WASM component by ID
@@ -164,9 +205,14 @@ impl ExtensionRegistry {
         self.manifests.len()
     }
 
-    /// Get number of loaded extensions
+    /// Get number of loaded extensions (WASM loaded)
     pub fn loaded_count(&self) -> usize {
         self.loaded.len()
+    }
+
+    /// Get number of instantiated extensions (ready to call)
+    pub fn instantiated_count(&self) -> usize {
+        self.instances.len()
     }
 }
 

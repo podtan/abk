@@ -30,11 +30,15 @@ mod error;
 mod loader;
 mod manifest;
 mod registry;
+mod bindings;
 
 pub use error::{ExtensionError, ExtensionResult};
 pub use loader::ExtensionLoader;
 pub use manifest::{Capabilities, ExtensionInfo, ExtensionManifest, LibInfo};
 pub use registry::{ExtensionRegistry, LoadedExtension};
+pub use bindings::{ExtensionInstance, ExtensionState};
+// Re-export generated WIT types for external use
+pub use bindings::{core, lifecycle, provider};
 
 use std::path::{Path, PathBuf};
 
@@ -121,15 +125,25 @@ impl ExtensionManager {
         Ok(manifests)
     }
 
-    /// Load a specific extension by ID
+    /// Instantiate a specific extension by ID
+    ///
+    /// Creates a callable instance of the extension. Automatically loads
+    /// the WASM if not already loaded.
     ///
     /// # Arguments
     /// * `id` - Extension ID from manifest
     ///
     /// # Returns
-    /// * `ExtensionResult<&LoadedExtension>` - Reference to loaded extension
-    pub async fn load(&mut self, id: &str) -> ExtensionResult<&LoadedExtension> {
-        self.registry.load(id, &mut self.loader).await
+    /// * `ExtensionResult<&mut ExtensionInstance>` - Mutable reference to instance
+    pub fn instantiate(&mut self, id: &str) -> ExtensionResult<&mut ExtensionInstance> {
+        self.registry.instantiate(id, &self.loader)
+    }
+
+    /// Get a mutable reference to an instantiated extension
+    ///
+    /// Returns None if not instantiated. Use `instantiate()` first.
+    pub fn get_instance_mut(&mut self, id: &str) -> Option<&mut ExtensionInstance> {
+        self.registry.get_instance_mut(id)
     }
 
     /// Get extensions by capability

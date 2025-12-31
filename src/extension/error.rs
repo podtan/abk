@@ -39,6 +39,18 @@ pub enum ExtensionError {
 
     /// Extension not loaded
     NotLoaded(String),
+
+    /// Extension function call error
+    CallError(String),
+
+    /// Extension initialization error
+    InitError(String),
+
+    /// Lifecycle capability error
+    LifecycleError(String),
+
+    /// Provider capability error
+    ProviderError(String),
 }
 
 impl fmt::Display for ExtensionError {
@@ -77,6 +89,18 @@ impl fmt::Display for ExtensionError {
             }
             ExtensionError::NotLoaded(id) => {
                 write!(f, "Extension not loaded: {}", id)
+            }
+            ExtensionError::CallError(msg) => {
+                write!(f, "Extension call error: {}", msg)
+            }
+            ExtensionError::InitError(msg) => {
+                write!(f, "Extension initialization error: {}", msg)
+            }
+            ExtensionError::LifecycleError(msg) => {
+                write!(f, "Lifecycle error: {}", msg)
+            }
+            ExtensionError::ProviderError(msg) => {
+                write!(f, "Provider error: {}", msg)
             }
         }
     }
