@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-12-31
+
+### Added
+- **Extension system**: New WASM component-based extension architecture
+  - `extension` feature flag enables extension support
+  - `ExtensionManager` for discovering, loading, and managing extensions
+  - `ExtensionManifest` for extension metadata from `extension.toml`
+  - Support for extensions in `~/.{agent}/extensions/` directory
+  - Extensions use WIT interface for type-safe communication
+
+- **Extension CLI commands** (when `cli` + `extension` features enabled):
+  - `trustee extension list` - List installed extensions
+  - `trustee extension install <path>` - Install extension from directory
+  - `trustee extension remove <name>` - Remove installed extension
+  - `trustee extension info <name>` - Show extension details
+
+- **CLI init extensions support**: `trustee init` now creates extensions directory
+  - Creates `~/.{agent}/extensions/` on init
+  - Symlinks project `extensions/` folder to home directory for development
+
+### Fixed
+- **Task classification template not sent**: The `handle_tool_calls` function in
+  `agent_orchestration.rs` was missing the call to send task-specific templates
+  after classification completed. Added `maybe_send_template()` function that:
+  - Loads `task/{task_type}` template from lifecycle WASM extension
+  - Renders with task_description, task_type, and working_dir variables
+  - Adds rendered template to conversation as user message
+  - Fixes bug where agent always used fallback workflow instead of specialized
+    task workflows (bug_fix, feature, maintenance, query)
+
+### Changed
+- **Breaking**: Extension system requires `wasmtime = "30"` for component model support
+- CLI `with_extension_commands()` builder method added to `CliConfig`
+
 ## [0.1.53] - 2025-12-11
 
 ### Fixed
