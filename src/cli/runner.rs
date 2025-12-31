@@ -704,6 +704,25 @@ async fn run_config_check<C: CommandContext>(ctx: &C) -> CliResult<()> {
     Ok(())
 }
 
+/// Recursively copy a directory and all its contents
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> CliResult<()> {
+    std::fs::create_dir_all(dst)?;
+    
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    
+    Ok(())
+}
+
 /// Handle the init command
 async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
     let force = matches.get_flag("force");
@@ -846,84 +865,58 @@ enable_streaming = true
         }
     }
 
-    // Create symlinks to project providers if they exist
+    // Copy project providers if they exist
     let project_providers = std::env::current_dir()?.join("providers");
     if project_providers.exists() {
         for entry in std::fs::read_dir(&project_providers)? {
             let entry = entry?;
             let entry_name = entry.file_name();
-            let target = entry.path();
-            let link = agent_dir.join("providers").join(&entry_name);
+            let source = entry.path();
+            let dest = agent_dir.join("providers").join(&entry_name);
 
-            if target.is_dir() {
-                // Only create symlink if the link doesn't exist or we're in force mode
-                if link.exists() {
+            if source.is_dir() {
+                // Only copy if the destination doesn't exist or we're in force mode
+                if dest.exists() {
                     if force {
-                        // Remove existing link/directory
-                        if link.is_dir() {
-                            std::fs::remove_dir_all(&link)?;
-                        } else {
-                            std::fs::remove_file(&link)?;
-                        }
+                        // Remove existing directory
+                        std::fs::remove_dir_all(&dest)?;
                     } else {
                         // Skip if not in force mode
                         continue;
                     }
                 }
 
-                // Create symlink to directory
-                #[cfg(unix)]
-                {
-                    std::os::unix::fs::symlink(&target, &link)?;
-                    ctx.log_info(&format!("Created symlink: {} -> {}", link.display(), target.display()));
-                }
-                #[cfg(windows)]
-                {
-                    // On Windows, create junction
-                    std::os::windows::fs::symlink_dir(&target, &link)?;
-                    ctx.log_info(&format!("Created directory symlink: {} -> {}", link.display(), target.display()));
-                }
+                // Copy directory recursively
+                copy_dir_recursive(&source, &dest)?;
+                ctx.log_info(&format!("Copied provider: {} -> {}", source.display(), dest.display()));
             }
         }
     }
 
-    // Create symlinks to project extensions if they exist
+    // Copy project extensions if they exist
     let project_extensions = std::env::current_dir()?.join("extensions");
     if project_extensions.exists() {
         for entry in std::fs::read_dir(&project_extensions)? {
             let entry = entry?;
             let entry_name = entry.file_name();
-            let target = entry.path();
-            let link = agent_dir.join("extensions").join(&entry_name);
+            let source = entry.path();
+            let dest = agent_dir.join("extensions").join(&entry_name);
 
-            if target.is_dir() {
-                // Only create symlink if the link doesn't exist or we're in force mode
-                if link.exists() {
+            if source.is_dir() {
+                // Only copy if the destination doesn't exist or we're in force mode
+                if dest.exists() {
                     if force {
-                        // Remove existing link/directory
-                        if link.is_dir() {
-                            std::fs::remove_dir_all(&link)?;
-                        } else {
-                            std::fs::remove_file(&link)?;
-                        }
+                        // Remove existing directory
+                        std::fs::remove_dir_all(&dest)?;
                     } else {
                         // Skip if not in force mode
                         continue;
                     }
                 }
 
-                // Create symlink to directory
-                #[cfg(unix)]
-                {
-                    std::os::unix::fs::symlink(&target, &link)?;
-                    ctx.log_info(&format!("Created extension symlink: {} -> {}", link.display(), target.display()));
-                }
-                #[cfg(windows)]
-                {
-                    // On Windows, create junction
-                    std::os::windows::fs::symlink_dir(&target, &link)?;
-                    ctx.log_info(&format!("Created extension directory symlink: {} -> {}", link.display(), target.display()));
-                }
+                // Copy directory recursively
+                copy_dir_recursive(&source, &dest)?;
+                ctx.log_info(&format!("Copied extension: {} -> {}", source.display(), dest.display()));
             }
         }
     }

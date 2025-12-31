@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-12-31
+
+### Fixed
+- **Init command copies files correctly**: The `init` command now properly COPIES
+  config files, providers, and extensions instead of creating symlinks. This ensures
+  the agent remains functional even if the source project directory is deleted.
+  - Config file: Copied from `config/{agent}.toml` to `~/.{agent}/config/{agent}.toml`
+  - Providers: Recursively copied from `providers/` to `~/.{agent}/providers/`
+  - Extensions: Recursively copied from `extensions/` to `~/.{agent}/extensions/`
+
+- **Extension discovery path**: `find_lifecycle_plugin()` now searches extension
+  paths in addition to provider paths, fixing discovery of WASM extensions in
+  `~/.{agent}/extensions/{ext-name}/` directories.
+
+- **Config boolean parsing**: `get_config_value()` in `AgentContext` now correctly
+  parses string boolean values ("true"/"false") from TOML config files, fixing the
+  issue where `enable_task_classification = true` was not being honored.
+
 ## [0.2.0] - 2025-12-31
 
 ### Added
