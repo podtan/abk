@@ -56,6 +56,8 @@ interface provider {
         delta-type: string,
         /// Content text delta (if type is content)
         content: option<string>,
+        /// Tool call index (for tool_call type, matches OpenAI streaming index)
+        tool-call-index: option<u32>,
         /// Tool call delta (if type is tool_call)
         tool-call: option<tool-call>,
         /// Error message (if type is error)

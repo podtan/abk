@@ -382,8 +382,10 @@ impl LlmProvider for ExtensionProvider {
                                             }
                                             "tool_call" => {
                                                 if let Some(tc) = delta.tool_call {
+                                                    // Use tool_call_index from delta, default to 0
+                                                    let index = delta.tool_call_index.unwrap_or(0) as usize;
                                                     let _ = tx.send(Ok(StreamChunk::ToolCallDelta {
-                                                        index: 0,
+                                                        index,
                                                         id: if tc.id.is_empty() { None } else { Some(tc.id) },
                                                         name: if tc.name.is_empty() { None } else { Some(tc.name) },
                                                         arguments_delta: if tc.arguments.is_empty() { None } else { Some(tc.arguments) },
