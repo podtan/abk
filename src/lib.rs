@@ -92,6 +92,10 @@ pub mod checkpoint;
 #[cfg(feature = "provider")]
 pub mod provider;
 
+/// Extension system (enabled with the `extension` feature)
+#[cfg(feature = "extension")]
+pub mod extension;
+
 /// Agent orchestration (enabled with the `orchestration` feature)
 #[cfg(feature = "orchestration")]
 pub mod orchestration;
