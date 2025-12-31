@@ -63,6 +63,11 @@ pub enum CliError {
     /// Unknown command
     #[error("Unknown command: {0}")]
     UnknownCommand(String),
+
+    /// Extension operation error
+    #[cfg(feature = "extension")]
+    #[error("Extension error: {0}")]
+    ExtensionError(String),
 }
 
 // Conversions from common error types

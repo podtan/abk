@@ -186,7 +186,13 @@ pub async fn run_configured_cli_from_config(
     let context = DefaultCommandContext::from_config_path(&actual_config_path)?;
     
     // Convert config to CLI config
-    let cli_config = CliConfig::from_agent_config(&context.config);
+    let mut cli_config = CliConfig::from_agent_config(&context.config);
+    
+    // Add extension commands if feature is enabled
+    #[cfg(feature = "extension")]
+    {
+        cli_config = cli_config.with_extension_commands();
+    }
     
     // Run the CLI
     run_configured_cli(&context, &cli_config).await?;
@@ -629,6 +635,10 @@ pub async fn run_configured_cli<C: CommandContext>(
         Some(("misc", sub_matches)) => {
             misc_command(ctx, sub_matches).await
         }
+        #[cfg(feature = "extension")]
+        Some(("extension", sub_matches)) => {
+            extension_command(ctx, sub_matches).await
+        }
         Some((cmd, _)) => {
             Err(CliError::UnknownCommand(cmd.to_string()))
         }
@@ -737,6 +747,7 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
         "providers",
         "providers/lifecycle",
         "providers/tanbal",
+        "extensions",
         "config",
         "cache",
         "checkpoints",
@@ -871,6 +882,47 @@ enable_streaming = true
                     // On Windows, create junction
                     std::os::windows::fs::symlink_dir(&target, &link)?;
                     ctx.log_info(&format!("Created directory symlink: {} -> {}", link.display(), target.display()));
+                }
+            }
+        }
+    }
+
+    // Create symlinks to project extensions if they exist
+    let project_extensions = std::env::current_dir()?.join("extensions");
+    if project_extensions.exists() {
+        for entry in std::fs::read_dir(&project_extensions)? {
+            let entry = entry?;
+            let entry_name = entry.file_name();
+            let target = entry.path();
+            let link = agent_dir.join("extensions").join(&entry_name);
+
+            if target.is_dir() {
+                // Only create symlink if the link doesn't exist or we're in force mode
+                if link.exists() {
+                    if force {
+                        // Remove existing link/directory
+                        if link.is_dir() {
+                            std::fs::remove_dir_all(&link)?;
+                        } else {
+                            std::fs::remove_file(&link)?;
+                        }
+                    } else {
+                        // Skip if not in force mode
+                        continue;
+                    }
+                }
+
+                // Create symlink to directory
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&target, &link)?;
+                    ctx.log_info(&format!("Created extension symlink: {} -> {}", link.display(), target.display()));
+                }
+                #[cfg(windows)]
+                {
+                    // On Windows, create junction
+                    std::os::windows::fs::symlink_dir(&target, &link)?;
+                    ctx.log_info(&format!("Created extension directory symlink: {} -> {}", link.display(), target.display()));
                 }
             }
         }
@@ -1051,6 +1103,23 @@ async fn misc_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
         crate::cli::commands::misc::clean_temp(ctx, opts).await
     } else {
         ctx.log_info("Use --doctor, --stats, or --clean flags");
+        Ok(())
+    }
+}
+
+/// Handle the extension command
+#[cfg(feature = "extension")]
+async fn extension_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
+    if matches.get_flag("list") {
+        crate::cli::commands::extension::list(ctx).await
+    } else if let Some(path) = matches.get_one::<String>("install") {
+        crate::cli::commands::extension::install(ctx, path, None).await
+    } else if let Some(name) = matches.get_one::<String>("remove") {
+        crate::cli::commands::extension::remove(ctx, name).await
+    } else if let Some(name) = matches.get_one::<String>("info") {
+        crate::cli::commands::extension::info(ctx, name).await
+    } else {
+        ctx.log_info("Use --list, --install <path>, --remove <name>, or --info <name> flags");
         Ok(())
     }
 }

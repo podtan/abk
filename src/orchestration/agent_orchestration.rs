@@ -320,7 +320,40 @@ async fn handle_tool_calls<A: AgentContext>(agent: &mut A, tool_calls: Vec<umf::
         .join("\n\n");
     agent.log_info(&format!("Tool results: {}", summary));
 
+    // Send classification template if classification just completed
+    maybe_send_template(agent).await?;
+
     Ok(!has_submit)
+}
+
+/// Send task-specific template after classification if not already sent
+async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
+    // Only send if classification is done and template hasn't been sent yet
+    if !agent.classification_done() || agent.template_sent() {
+        return Ok(());
+    }
+
+    if let Some(task_type) = agent.classified_task_type() {
+        let template_name = format!("task/{}", task_type);
+        
+        // Try to load the task-specific template
+        if let Ok(template) = agent.load_template(&template_name).await {
+            let variables = vec![
+                ("task_description".to_string(), agent.initial_task_description().to_string()),
+                ("task_type".to_string(), task_type.clone()),
+                ("working_dir".to_string(), agent.working_dir().display().to_string()),
+            ];
+            
+            // Render and add to conversation
+            if let Ok(content) = agent.render_template(&template, &variables).await {
+                agent.log_info(&format!("📋 Sending task template for: {}", task_type));
+                agent.chat_formatter_mut().add_user_message(content, None);
+                agent.set_template_sent(true);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Handle content response - returns false if should stop

@@ -173,4 +173,74 @@ impl CliConfig {
 
         cli_config
     }
+
+    /// Add extension commands to the CLI config when extension feature is enabled
+    #[cfg(feature = "extension")]
+    pub fn with_extension_commands(mut self) -> Self {
+        // Add extension to enabled commands if not already present
+        if !self.enabled_commands.contains(&"extension".to_string()) {
+            self.enabled_commands.push("extension".to_string());
+        }
+
+        // Add extension command configuration if not already present
+        if !self.commands.contains_key("extension") {
+            self.commands.insert("extension".to_string(), CommandConfig {
+                description: "Manage extensions".to_string(),
+                args: vec![
+                    ArgConfig {
+                        name: "list".to_string(),
+                        help: "List installed extensions".to_string(),
+                        arg_type: ArgType::Bool,
+                        short: Some('l'),
+                        long: Some("list".to_string()),
+                        required: false,
+                        default: None,
+                        multiple: false,
+                        trailing: false,
+                        choices: None,
+                    },
+                    ArgConfig {
+                        name: "install".to_string(),
+                        help: "Install extension from path".to_string(),
+                        arg_type: ArgType::String,
+                        short: Some('i'),
+                        long: Some("install".to_string()),
+                        required: false,
+                        default: None,
+                        multiple: false,
+                        trailing: false,
+                        choices: None,
+                    },
+                    ArgConfig {
+                        name: "remove".to_string(),
+                        help: "Remove extension by name".to_string(),
+                        arg_type: ArgType::String,
+                        short: Some('r'),
+                        long: Some("remove".to_string()),
+                        required: false,
+                        default: None,
+                        multiple: false,
+                        trailing: false,
+                        choices: None,
+                    },
+                    ArgConfig {
+                        name: "info".to_string(),
+                        help: "Show extension info".to_string(),
+                        arg_type: ArgType::String,
+                        short: None,
+                        long: Some("info".to_string()),
+                        required: false,
+                        default: None,
+                        multiple: false,
+                        trailing: false,
+                        choices: None,
+                    },
+                ],
+                enabled: true,
+                subcommands: None,
+            });
+        }
+
+        self
+    }
 }
