@@ -356,24 +356,34 @@ impl LifecyclePlugin {
 }
 
 /// Find and load the lifecycle plugin
+/// 
+/// Search order:
+/// 1. Project-local providers/lifecycle/lifecycle.wasm
+/// 2. Home directory ~/.{agent}/providers/lifecycle/lifecycle.wasm (legacy)
+/// 3. Home directory ~/.{agent}/extensions/coder-lifecycle/coder_lifecycle_wasm.wasm (new extension system)
 pub fn find_lifecycle_plugin() -> Result<LifecyclePlugin> {
     let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     
     // Try multiple locations
     let possible_paths = vec![
+        // Legacy project-local path
         PathBuf::from("providers/lifecycle/lifecycle.wasm"),
+        // Legacy home directory path
         PathBuf::from(format!("~/.{}/providers/lifecycle/lifecycle.wasm", agent_name)).expand_home()?,
+        // New extension system path (coder-lifecycle extension)
+        PathBuf::from(format!("~/.{}/extensions/coder-lifecycle/coder_lifecycle_wasm.wasm", agent_name)).expand_home()?,
     ];
 
-    for path in possible_paths {
+    for path in &possible_paths {
         if path.exists() {
             debug!("Found lifecycle plugin at: {}", path.display());
-            return LifecyclePlugin::new(path);
+            return LifecyclePlugin::new(path.clone());
         }
     }
 
     anyhow::bail!(
-        "Lifecycle plugin not found. Expected at: providers/lifecycle/lifecycle.wasm"
+        "Lifecycle plugin not found. Expected at one of:\n  - providers/lifecycle/lifecycle.wasm\n  - ~/.{}/providers/lifecycle/lifecycle.wasm\n  - ~/.{}/extensions/coder-lifecycle/coder_lifecycle_wasm.wasm",
+        agent_name, agent_name
     )
 }
 

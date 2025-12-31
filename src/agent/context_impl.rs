@@ -79,13 +79,20 @@ impl crate::checkpoint::AgentContext for Agent {
     // ========================================================================
 
     fn get_config_value(&self, key: &str) -> Option<JsonValue> {
-        // Handle different config value types
-        if let Some(s) = self.config.get_string(key) {
-            return Some(JsonValue::String(s));
-        }
+        // Try boolean first (direct)
         if let Some(b) = self.config.get_bool(key) {
             return Some(JsonValue::Bool(b));
         }
+        // Try string (may contain "true"/"false")
+        if let Some(s) = self.config.get_string(key) {
+            // Check if string is a boolean value
+            match s.to_lowercase().as_str() {
+                "true" => return Some(JsonValue::Bool(true)),
+                "false" => return Some(JsonValue::Bool(false)),
+                _ => return Some(JsonValue::String(s)),
+            }
+        }
+        // Try integer
         if let Some(u) = self.config.get_u64(key) {
             return Some(JsonValue::Number(u.into()));
         }
