@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -19,7 +19,7 @@ cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "a
 checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "uname", "hostname", "async-trait", "regex", "urlencoding"]
 provider = ["serde", "serde_json", "anyhow", "async-trait", "wasmtime", "wasmtime-wasi", "reqwest", "futures-util", "umf", "tokio", "config"]
 orchestration = ["anyhow", "tokio", "serde_json", "async-trait", "umf", "uuid", "futures-util", "provider"]
-agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "wasmtime", "wasmtime-wasi", "config", "observability", "checkpoint", "provider", "orchestration", "executor"]
+agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "wasmtime", "wasmtime-wasi", "config", "observability", "checkpoint", "provider", "orchestration", "executor", "extension"]
 executor = ["anyhow", "tokio"]
 extension = ["serde", "serde_json", "toml", "anyhow", "thiserror", "tokio", "wasmtime", "wasmtime-wasi", "wasmparser"]
 all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration", "agent", "extension"]

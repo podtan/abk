@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2025-12-31
+
+### Changed
+- **Lifecycle module now uses Extension System**: The `lifecycle` module has been
+  completely rewritten to use the new `abk:extension@0.3.0` interface instead of
+  the old `abk:lifecycle@0.2.0` interface.
+  - `LifecyclePlugin` now wraps `ExtensionInstance` from the extension system
+  - Uses interior mutability (`RefCell`) to allow `&self` methods
+  - More efficient: creates standalone instance directly instead of going through manager
+  - New extension format requires `extension.toml` manifest file
+  - Search order prefers `extensions/coder-lifecycle/` over legacy `providers/lifecycle/`
+
+### Migration
+- **Breaking change for lifecycle extensions**: Old bare `.wasm` files in
+  `providers/lifecycle/` are no longer supported. Extensions must now:
+  1. Be placed in `extensions/coder-lifecycle/` directory
+  2. Include an `extension.toml` manifest file
+  3. Implement the `abk:extension@0.3.0` WIT interface
+
+- Install new extension format with:
+  ```bash
+  mkdir -p ~/.trustee/extensions/coder-lifecycle
+  # Copy extension.toml and .wasm file to the directory
+  ```
+
 ## [0.2.2] - 2025-12-31
 
 ### Fixed

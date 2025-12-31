@@ -122,8 +122,8 @@ impl Agent {
         // Initialize components
         let chat_formatter = ChatMLFormatter::new();
 
-        // Load lifecycle plugin
-        let lifecycle = crate::lifecycle::find_lifecycle_plugin()
+        // Load lifecycle extension (uses new extension system)
+        let lifecycle = crate::lifecycle::find_lifecycle_plugin().await
             .context("Failed to load lifecycle plugin")?;
 
         // Create provider using factory (new provider-based architecture)

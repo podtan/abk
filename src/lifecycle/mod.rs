@@ -1,17 +1,21 @@
 //! Lifecycle WASM Plugin Loader
 //!
-//! This module loads and interfaces with the lifecycle.wasm plugin which handles
+//! This module loads and interfaces with lifecycle extensions which handle
 //! template management, task classification, and system information gathering.
 //!
-//! All templates are embedded in the WASM plugin, eliminating filesystem dependencies.
+//! All templates are embedded in the WASM extension, eliminating filesystem dependencies.
+//!
+//! # Extension System
+//!
+//! This module now uses the new ABK extension system (`abk:extension@0.3.0`).
+//! Lifecycle extensions are discovered via `ExtensionManager` and provide
+//! the `lifecycle` capability.
 
 use anyhow::{Context, Result};
+use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::OnceCell;
-use wasmtime::component::*;
-use wasmtime::Engine;
-use wasmtime_wasi::{WasiCtx, WasiView};
+
+use crate::extension::{ExtensionInstance, ExtensionManager};
 
 /// Conditional debug macro
 macro_rules! debug {
@@ -22,91 +26,50 @@ macro_rules! debug {
     };
 }
 
-// WASI host state for component instantiation
-struct ComponentState {
-    ctx: WasiCtx,
-    table: wasmtime::component::ResourceTable,
-}
-
-impl WasiView for ComponentState {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.ctx
-    }
-
-    fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
-        &mut self.table
-    }
-}
-
-// Generate bindings from WIT interface for lifecycle world
-bindgen!({
-    path: "wit/lifecycle",
-    world: "lifecycle",
-    async: true,
-});
-
-/// Lifecycle WASM plugin wrapper
+/// Lifecycle WASM extension wrapper
+///
+/// This is the public API for lifecycle functionality. Internally it uses
+/// the new extension system (`ExtensionManager` and `ExtensionInstance`).
+///
+/// Uses interior mutability (`RefCell`) to allow `&self` methods while
+/// the underlying `ExtensionInstance` requires `&mut self`.
 pub struct LifecyclePlugin {
-    /// Plugin name (always "lifecycle")
+    /// Extension instance for lifecycle calls (interior mutability for &self methods)
+    instance: RefCell<ExtensionInstance>,
+
+    /// Path to the extension (for debugging)
     #[allow(dead_code)]
-    name: String,
-
-    /// WASM module path
-    #[allow(dead_code)]
-    wasm_path: PathBuf,
-
-    /// Shared WASM engine
-    engine: Arc<Engine>,
-
-    /// Pre-compiled WASM component (cached)
-    component: Arc<Component>,
-
-    /// Linker for WASI (cached)
-    linker: Arc<OnceCell<Arc<Linker<ComponentState>>>>,
+    extension_path: PathBuf,
 }
 
 impl LifecyclePlugin {
-    /// Create a new lifecycle plugin loader
+    /// Create a new lifecycle plugin from an extension directory
     ///
     /// # Arguments
-    /// * `wasm_path` - Path to lifecycle.wasm file
-    pub fn new(wasm_path: PathBuf) -> Result<Self> {
-        debug!("Creating lifecycle plugin from: {}", wasm_path.display());
+    /// * `extension_dir` - Path to extension directory containing extension.toml
+    pub async fn new(extension_dir: PathBuf) -> Result<Self> {
+        debug!("Creating lifecycle plugin from: {}", extension_dir.display());
 
-        // Create shared WASM engine
-        let mut config = wasmtime::Config::new();
-        config.wasm_component_model(true);
-        config.async_support(true);
-        let engine = Arc::new(Engine::new(&config)?);
+        // Create standalone instance directly (more efficient than using manager)
+        let mut instance = create_standalone_instance(&extension_dir)?;
 
-        // Pre-compile component
-        let component_bytes = std::fs::read(&wasm_path)
-            .with_context(|| format!("Failed to read lifecycle WASM: {}", wasm_path.display()))?;
-        let component = Arc::new(Component::new(&engine, &component_bytes)?);
+        // Initialize the extension
+        instance.init()
+            .context("Failed to initialize lifecycle extension")?;
+
+        // Verify it has lifecycle capability
+        let caps = instance.list_capabilities()
+            .context("Failed to list capabilities")?;
+        if !caps.iter().any(|c| c == "lifecycle") {
+            anyhow::bail!("Extension at '{}' does not have lifecycle capability", extension_dir.display());
+        }
 
         debug!("Lifecycle plugin compiled successfully");
 
         Ok(Self {
-            name: "lifecycle".to_string(),
-            wasm_path,
-            engine,
-            component,
-            linker: Arc::new(OnceCell::new()),
+            instance: RefCell::new(instance),
+            extension_path: extension_dir,
         })
-    }
-
-    /// Get or create the linker (lazy initialization)
-    async fn get_linker(&self) -> Result<Arc<Linker<ComponentState>>> {
-        if let Some(linker) = self.linker.get() {
-            return Ok(linker.clone());
-        }
-
-        let mut linker = Linker::new(&self.engine);
-        wasmtime_wasi::add_to_linker_async(&mut linker)?;
-
-        let linker_arc = Arc::new(linker);
-        let _ = self.linker.set(linker_arc.clone());
-        Ok(linker_arc)
     }
 
     /// Load a template by name
@@ -119,35 +82,11 @@ impl LifecyclePlugin {
     pub async fn load_template(&self, template_name: &str) -> Result<String> {
         debug!("Loading template: {}", template_name);
 
-        let linker = self.get_linker().await?;
-        let wasi_ctx = WasiCtx::builder().inherit_stdio().build();
-        let mut store = wasmtime::Store::new(
-            &self.engine,
-            ComponentState {
-                ctx: wasi_ctx,
-                table: wasmtime::component::ResourceTable::new(),
-            },
-        );
+        let result = self.instance.borrow_mut().load_template(template_name)
+            .context(format!("Failed to load template: {}", template_name))?;
 
-        let instance = Lifecycle::instantiate_async(&mut store, &self.component, &linker)
-            .await
-            .with_context(|| "Failed to instantiate lifecycle plugin")?;
-
-        let result = instance
-            .abk_lifecycle_adapter()
-            .call_load_template(&mut store, template_name)
-            .await
-            .with_context(|| format!("Failed to call load_template for: {}", template_name))?;
-
-        match result {
-            Ok(content) => {
-                debug!("Template loaded successfully: {} ({} bytes)", template_name, content.len());
-                Ok(content)
-            }
-            Err(err) => {
-                anyhow::bail!("Lifecycle plugin error: {}", err.message);
-            }
-        }
+        debug!("Template loaded successfully: {} ({} bytes)", template_name, result.len());
+        Ok(result)
     }
 
     /// Render a template with variable substitution
@@ -165,44 +104,8 @@ impl LifecyclePlugin {
     ) -> Result<String> {
         debug!("Rendering template with {} variables", variables.len());
 
-        let linker = self.get_linker().await?;
-        let wasi_ctx = WasiCtx::builder().inherit_stdio().build();
-        let mut store = wasmtime::Store::new(
-            &self.engine,
-            ComponentState {
-                ctx: wasi_ctx,
-                table: wasmtime::component::ResourceTable::new(),
-            },
-        );
-
-        let instance = Lifecycle::instantiate_async(&mut store, &self.component, &linker)
-            .await
-            .with_context(|| "Failed to instantiate lifecycle plugin")?;
-
-        // Convert to WASM types
-        let wasm_vars: Vec<_> = variables
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    exports::abk::lifecycle::adapter::TemplateVariable {
-                        key: k.clone(),
-                        value: v.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        let wasm_vars_slice: Vec<_> = wasm_vars
-            .iter()
-            .map(|(_, v)| v.clone())
-            .collect();
-
-        let result = instance
-            .abk_lifecycle_adapter()
-            .call_render_template(&mut store, template_content, &wasm_vars_slice)
-            .await
-            .with_context(|| "Failed to call render_template")?;
+        let result = self.instance.borrow_mut().render_template(template_content, variables)
+            .context("Failed to render template")?;
 
         debug!("Template rendered successfully");
         Ok(result)
@@ -218,38 +121,11 @@ impl LifecyclePlugin {
     pub async fn classify_task(&self, task_description: &str) -> Result<(String, f32)> {
         debug!("Classifying task: {}", task_description);
 
-        let linker = self.get_linker().await?;
-        let wasi_ctx = WasiCtx::builder().inherit_stdio().build();
-        let mut store = wasmtime::Store::new(
-            &self.engine,
-            ComponentState {
-                ctx: wasi_ctx,
-                table: wasmtime::component::ResourceTable::new(),
-            },
-        );
+        let (task_type, confidence) = self.instance.borrow_mut().classify_task(task_description)
+            .context("Failed to classify task")?;
 
-        let instance = Lifecycle::instantiate_async(&mut store, &self.component, &linker)
-            .await
-            .with_context(|| "Failed to instantiate lifecycle plugin")?;
-
-        let result = instance
-            .abk_lifecycle_adapter()
-            .call_classify_task(&mut store, task_description)
-            .await
-            .with_context(|| "Failed to call classify_task")?;
-
-        match result {
-            Ok(classification) => {
-                debug!(
-                    "Task classified as: {} (confidence: {})",
-                    classification.task_type, classification.confidence
-                );
-                Ok((classification.task_type, classification.confidence))
-            }
-            Err(err) => {
-                anyhow::bail!("Lifecycle plugin error: {}", err.message);
-            }
-        }
+        debug!("Task classified as: {} (confidence: {})", task_type, confidence);
+        Ok((task_type, confidence))
     }
 
     /// Get system information variables
@@ -259,30 +135,8 @@ impl LifecyclePlugin {
     pub async fn get_system_info_variables(&self) -> Result<Vec<(String, String)>> {
         debug!("Getting system info variables");
 
-        let linker = self.get_linker().await?;
-        let wasi_ctx = WasiCtx::builder().inherit_stdio().build();
-        let mut store = wasmtime::Store::new(
-            &self.engine,
-            ComponentState {
-                ctx: wasi_ctx,
-                table: wasmtime::component::ResourceTable::new(),
-            },
-        );
-
-        let instance = Lifecycle::instantiate_async(&mut store, &self.component, &linker)
-            .await
-            .with_context(|| "Failed to instantiate lifecycle plugin")?;
-
-        let result = instance
-            .abk_lifecycle_adapter()
-            .call_get_system_info_variables(&mut store)
-            .await
-            .with_context(|| "Failed to call get_system_info_variables")?;
-
-        let vars: Vec<_> = result
-            .iter()
-            .map(|v| (v.key.clone(), v.value.clone()))
-            .collect();
+        let vars = self.instance.borrow_mut().get_system_info_variables()
+            .context("Failed to get system info variables")?;
 
         debug!("Retrieved {} system info variables", vars.len());
         Ok(vars)
@@ -295,95 +149,124 @@ impl LifecyclePlugin {
     pub async fn load_useful_commands(&self) -> Result<String> {
         debug!("Loading useful commands");
 
-        let linker = self.get_linker().await?;
-        let wasi_ctx = WasiCtx::builder().inherit_stdio().build();
-        let mut store = wasmtime::Store::new(
-            &self.engine,
-            ComponentState {
-                ctx: wasi_ctx,
-                table: wasmtime::component::ResourceTable::new(),
-            },
-        );
+        let result = self.instance.borrow_mut().load_useful_commands()
+            .context("Failed to load useful commands")?;
 
-        let instance = Lifecycle::instantiate_async(&mut store, &self.component, &linker)
-            .await
-            .with_context(|| "Failed to instantiate lifecycle plugin")?;
-
-        let result = instance
-            .abk_lifecycle_adapter()
-            .call_load_useful_commands(&mut store)
-            .await
-            .with_context(|| "Failed to call load_useful_commands")?;
-
-        match result {
-            Ok(content) => {
-                debug!("Useful commands loaded successfully ({} bytes)", content.len());
-                Ok(content)
-            }
-            Err(err) => {
-                anyhow::bail!("Lifecycle plugin error: {}", err.message);
-            }
-        }
+        debug!("Useful commands loaded successfully ({} bytes)", result.len());
+        Ok(result)
     }
 
     /// Get plugin metadata
     pub async fn get_metadata(&self) -> Result<String> {
         debug!("Getting lifecycle plugin metadata");
 
-        let linker = self.get_linker().await?;
-        let wasi_ctx = WasiCtx::builder().inherit_stdio().build();
-        let mut store = wasmtime::Store::new(
-            &self.engine,
-            ComponentState {
-                ctx: wasi_ctx,
-                table: wasmtime::component::ResourceTable::new(),
-            },
-        );
+        let metadata = self.instance.borrow_mut().get_metadata()
+            .context("Failed to get metadata")?;
 
-        let instance = Lifecycle::instantiate_async(&mut store, &self.component, &linker)
-            .await
-            .with_context(|| "Failed to instantiate lifecycle plugin")?;
-
-        let metadata = instance
-            .abk_lifecycle_adapter()
-            .call_get_lifecycle_metadata(&mut store)
-            .await
-            .with_context(|| "Failed to call get_lifecycle_metadata")?;
+        // Convert ExtensionMetadata to JSON string for compatibility
+        let json = serde_json::json!({
+            "id": metadata.id,
+            "name": metadata.name,
+            "version": metadata.version,
+            "api_version": metadata.api_version,
+            "description": metadata.description,
+        });
 
         debug!("Metadata retrieved");
-        Ok(metadata)
+        Ok(json.to_string())
     }
 }
 
-/// Find and load the lifecycle plugin
+/// Create a standalone ExtensionInstance for a lifecycle extension
+fn create_standalone_instance(extension_dir: &PathBuf) -> Result<ExtensionInstance> {
+    use crate::extension::ExtensionLoader;
+    use crate::extension::ExtensionManifest;
+
+    // Load manifest
+    let manifest_path = extension_dir.join("extension.toml");
+    let manifest = ExtensionManifest::from_file(&manifest_path)
+        .context("Failed to load extension manifest")?;
+
+    // Create loader and load component
+    let loader = ExtensionLoader::new()
+        .context("Failed to create extension loader")?;
+
+    let wasm_path = extension_dir.join(&manifest.lib.path);
+    let loaded_wasm = loader.load_wasm(&wasm_path)
+        .context("Failed to load WASM component")?;
+
+    // Create instance
+    let instance = ExtensionInstance::new(loaded_wasm.engine(), loaded_wasm.component())
+        .context("Failed to create extension instance")?;
+
+    Ok(instance)
+}
+
+/// Find and load the lifecycle extension
 /// 
-/// Search order:
-/// 1. Project-local providers/lifecycle/lifecycle.wasm
-/// 2. Home directory ~/.{agent}/providers/lifecycle/lifecycle.wasm (legacy)
-/// 3. Home directory ~/.{agent}/extensions/coder-lifecycle/coder_lifecycle_wasm.wasm (new extension system)
-pub fn find_lifecycle_plugin() -> Result<LifecyclePlugin> {
+/// Search order (new extension system):
+/// 1. Project-local extensions/coder-lifecycle/ (with extension.toml)
+/// 2. Home directory ~/.{agent}/extensions/coder-lifecycle/ (with extension.toml)
+///
+/// Legacy paths (deprecated, will be removed in future):
+/// 3. Project-local providers/lifecycle/lifecycle.wasm
+/// 4. Home directory ~/.{agent}/providers/lifecycle/lifecycle.wasm
+pub async fn find_lifecycle_plugin() -> Result<LifecyclePlugin> {
     let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     
-    // Try multiple locations
-    let possible_paths = vec![
-        // Legacy project-local path
-        PathBuf::from("providers/lifecycle/lifecycle.wasm"),
-        // Legacy home directory path
-        PathBuf::from(format!("~/.{}/providers/lifecycle/lifecycle.wasm", agent_name)).expand_home()?,
-        // New extension system path (coder-lifecycle extension)
-        PathBuf::from(format!("~/.{}/extensions/coder-lifecycle/coder_lifecycle_wasm.wasm", agent_name)).expand_home()?,
+    // New extension system paths (preferred)
+    let extension_paths = vec![
+        // Project-local extension
+        PathBuf::from("extensions/coder-lifecycle"),
+        // Home directory extension
+        PathBuf::from(format!("~/.{}/extensions/coder-lifecycle", agent_name)).expand_home()?,
     ];
 
-    for path in &possible_paths {
-        if path.exists() {
-            debug!("Found lifecycle plugin at: {}", path.display());
-            return LifecyclePlugin::new(path.clone());
+    // Check new extension system first
+    for path in &extension_paths {
+        let manifest_path = path.join("extension.toml");
+        if manifest_path.exists() {
+            debug!("Found lifecycle extension at: {}", path.display());
+            return LifecyclePlugin::new(path.clone()).await;
+        }
+    }
+
+    // Legacy paths (deprecated)
+    let legacy_paths = vec![
+        // Legacy project-local path
+        PathBuf::from("providers/lifecycle"),
+        // Legacy home directory path  
+        PathBuf::from(format!("~/.{}/providers/lifecycle", agent_name)).expand_home()?,
+    ];
+
+    for path in &legacy_paths {
+        // Check if there's an extension.toml (legacy extension format)
+        let manifest_path = path.join("extension.toml");
+        if manifest_path.exists() {
+            debug!("Found legacy lifecycle extension at: {}", path.display());
+            eprintln!("[WARN] Using deprecated lifecycle plugin location. Please migrate to ~/.{}/extensions/coder-lifecycle/", agent_name);
+            return LifecyclePlugin::new(path.clone()).await;
+        }
+        
+        // Check for bare WASM file (very old format - not supported by new system)
+        let wasm_path = path.join("lifecycle.wasm");
+        if wasm_path.exists() {
+            anyhow::bail!(
+                "Found old-format lifecycle plugin at {}. \n\
+                The new extension system requires an extension.toml manifest.\n\
+                Please update to the new coder-lifecycle-wasm extension format.\n\
+                See: https://github.com/podtan/coder-lifecycle-wasm",
+                wasm_path.display()
+            );
         }
     }
 
     anyhow::bail!(
-        "Lifecycle plugin not found. Expected at one of:\n  - providers/lifecycle/lifecycle.wasm\n  - ~/.{}/providers/lifecycle/lifecycle.wasm\n  - ~/.{}/extensions/coder-lifecycle/coder_lifecycle_wasm.wasm",
-        agent_name, agent_name
+        "Lifecycle extension not found. Expected at one of:\n  \
+        - extensions/coder-lifecycle/extension.toml\n  \
+        - ~/.{}/extensions/coder-lifecycle/extension.toml\n\n\
+        Install with: trustee extension install <path-to-coder-lifecycle-wasm>",
+        agent_name
     )
 }
 
