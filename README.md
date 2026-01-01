@@ -18,6 +18,7 @@ ABK provides feature-gated modules organized by functionality:
 - **`config`** - TOML configuration loading and environment variable resolution
 - **`observability`** - Structured logging with file/console output
 - **`checkpoint`** - Session persistence and resume capabilities
+- **`invoker`** - Unified abstraction for invocable operations (tools, MCP, A2A)
 
 ### Execution Features
 - **`executor`** - Command execution with timeout and validation
@@ -117,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Provider Feature
+### Checkpoint Feature
 
 ```rust
 use abk::checkpoint::{get_storage_manager, CheckpointResult};
@@ -129,6 +130,49 @@ let project_storage = manager.get_project_storage(project_path).await?;
 
 // Create a new session
 let session_storage = project_storage.create_session("my-task").await?;
+```
+
+### Invoker Feature
+
+```rust
+use abk::invoker::{
+    InvokerDefinition, InvokerSource, InvokerRegistry,
+    DefaultInvokerRegistry, InvokerAdapter, StaticAdapter,
+    generate_openai_tools,
+};
+use serde_json::json;
+
+// Create a registry
+let mut registry = DefaultInvokerRegistry::new();
+
+// Register tools from different sources
+registry.register(InvokerDefinition::new(
+    "read_file",
+    "Read the contents of a file",
+    json!({
+        "type": "object",
+        "properties": {
+            "path": { "type": "string", "description": "File path" }
+        },
+        "required": ["path"]
+    }),
+    InvokerSource::Native,
+)).unwrap();
+
+// Use adapters to bulk-register tools
+let mcp_adapter = StaticAdapter::new(
+    InvokerSource::Mcp,
+    vec![InvokerDefinition::new_simple("mcp_tool", "MCP tool", InvokerSource::Mcp)],
+);
+mcp_adapter.register_all(&mut registry).unwrap();
+
+// Generate OpenAI-compatible tool schemas for LLM
+let tools = generate_openai_tools(&registry);
+println!("Registered {} tools", tools.len());
+
+// Filter by source
+let native_tools = registry.list_by_source(InvokerSource::Native);
+let mcp_tools = registry.list_by_source(InvokerSource::Mcp);
 ```
 
 ### Provider Feature
@@ -181,6 +225,8 @@ ABK has evolved from a simple configuration utility to a comprehensive **Agent B
 - ✅ **Phase 7**: `lifecycle` feature (v0.1.23 - WASM plugin integration)
 - ✅ **Phase 8**: `cli` feature (v0.1.23 - command-line utilities)
 - ✅ **Phase 9**: `agent` feature (v0.1.23 - complete agent implementation)
+- ✅ **Phase 10**: `invoker` feature (v0.3.0 - unified tool abstraction for CATS/MCP/A2A)
+- 🔄 **Phase 11**: `tools` feature (v0.3.0 - CATS adapter for invoker system)
 
 ## Why ABK?
 

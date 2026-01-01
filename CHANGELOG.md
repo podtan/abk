@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`invoker` feature**: New unified abstraction for invocable operations (tools, skills, MCP tools, A2A skills)
+  - `InvokerSource` enum: `Native`, `Mcp`, `A2a` variants to track invoker origin
+  - `InvokerError` enum: Comprehensive error handling with `thiserror`
+  - `InvokerDefinition` struct: Source-agnostic tool representation with JSON Schema parameters
+  - `InvokerRegistry` trait: Object-safe registry interface for managing invokers
+  - `DefaultInvokerRegistry`: HashMap-based O(1) lookup implementation
+  - `InvokerAdapter` trait: Bridge for external sources (CATS, MCP, A2A) to invoker system
+  - `StaticAdapter`: Simple adapter for testing with fixed tool lists
+  - `create_registry()`: Convenience function for registry creation
+  - `generate_openai_tools()`: Generate OpenAI-compatible function schemas from registry
+- **Provider-Invoker Integration** (requires both `invoker` and `provider` features):
+  - `From<&InvokerDefinition> for InternalToolDefinition`: Convert invoker → provider tool
+  - `From<&InternalToolDefinition> for InvokerDefinition`: Convert provider tool → invoker
+  - `from_invoker_registry()`: Convert all registry tools to provider format
+  - `from_invoker_registry_by_source()`: Convert filtered by source
+
+### Changed
+- Added `invoker` to the `all` composite feature
+
 ## [0.2.4] - 2025-12-31
 
 ### Added

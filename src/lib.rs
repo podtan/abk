@@ -112,6 +112,13 @@ pub mod executor;
 #[cfg(feature = "agent")]
 pub mod lifecycle;
 
+/// Invoker module for unified tool/skill abstraction (enabled with the `invoker` feature)
+///
+/// The invoker module provides a source-agnostic way to manage invocable operations
+/// from multiple sources (CATS native tools, MCP servers, A2A peer agents).
+#[cfg(feature = "invoker")]
+pub mod invoker;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]
@@ -137,4 +144,11 @@ pub mod prelude {
         AgentRuntime, RuntimeConfig, WorkflowCoordinator, WorkflowStep, WorkflowStatus,
         ToolCoordinator, ToolExecutionResult, ExecutionResult, ExecutionMode, AgentMode,
     };
+
+    #[cfg(feature = "invoker")]
+    pub use crate::invoker::{
+        InvokerDefinition, InvokerSource, InvokerRegistry, DefaultInvokerRegistry,
+        InvokerAdapter, InvokerError, InvokerResult, create_registry, generate_openai_tools,
+    };
 }
+
