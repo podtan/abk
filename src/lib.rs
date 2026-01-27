@@ -112,6 +112,10 @@ pub mod executor;
 #[cfg(feature = "agent")]
 pub mod lifecycle;
 
+/// Tool Registry for multi-source tool aggregation (enabled with the `registry` feature)
+#[cfg(feature = "registry")]
+pub mod registry;
+
 /// Prelude module for convenient imports
 pub mod prelude {
     #[cfg(feature = "config")]
@@ -136,5 +140,10 @@ pub mod prelude {
     pub use crate::orchestration::{
         AgentRuntime, RuntimeConfig, WorkflowCoordinator, WorkflowStep, WorkflowStatus,
         ToolCoordinator, ToolExecutionResult, ExecutionResult, ExecutionMode, AgentMode,
+    };
+
+    #[cfg(feature = "registry")]
+    pub use crate::registry::{
+        RegisteredTool, RegistryError, RegistryResult, ToolRegistry, ToolSource,
     };
 }
