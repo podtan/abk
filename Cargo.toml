@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -24,7 +24,7 @@ executor = ["anyhow", "tokio"]
 extension = ["serde", "serde_json", "toml", "anyhow", "thiserror", "tokio", "wasmtime", "wasmtime-wasi", "wasmparser", "tracing"]
 # Registry features for multi-source tool aggregation
 registry = ["serde", "serde_json", "thiserror", "umf"]
-registry-mcp = ["registry"]
+registry-mcp = ["registry", "reqwest", "tokio", "anyhow"]
 all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration", "agent", "extension", "registry", "registry-mcp"]
 
 # Storage backend features (optional)
@@ -52,8 +52,8 @@ thiserror = { version = "1.0", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util", "sync", "time"], optional = true }
 sha2 = { version = "0.10", optional = true }
 uuid = { version = "1.0", features = ["v4"], optional = true }
-# Use local UMF for development - switch to crates.io version for release
-umf = { path = "../umf", features = ["streaming", "internal"], optional = true }
+# Use crates.io UMF for release
+umf = { version = "0.2.0", features = ["streaming", "internal", "mcp"], optional = true }
 uname = { version = "0.1", optional = true }
 hostname = { version = "0.4", optional = true }
 
@@ -61,7 +61,7 @@ hostname = { version = "0.4", optional = true }
 async-trait = { version = "0.1", optional = true }
 wasmtime = { version = "25", optional = true }
 wasmtime-wasi = { version = "25", optional = true }
-reqwest = { version = "0.12", features = ["stream", "rustls-tls-webpki-roots"], default-features = false, optional = true }
+reqwest = { version = "0.12", features = ["stream", "rustls-tls-webpki-roots", "json"], default-features = false, optional = true }
 futures-util = { version = "0.3", optional = true }
 
 # Extension feature dependencies
@@ -83,8 +83,8 @@ tokio-test = "0.4"
 serde_json = "1.0"
 anyhow = "1.0"
 async-trait = "0.1"
-# Use local UMF for development - switch to crates.io version for release
-umf = { path = "../umf", features = ["streaming", "internal", "mcp"] }
+# Use crates.io UMF for release
+umf = { version = "0.2.0", features = ["streaming", "internal", "mcp"] }
 
 
 [workspace]

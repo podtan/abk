@@ -27,6 +27,16 @@ pub enum RegistryError {
     /// Error during type conversion.
     #[error("Conversion error: {0}")]
     ConversionError(String),
+
+    /// Error communicating with an MCP server.
+    #[cfg(feature = "registry-mcp")]
+    #[error("MCP server '{server}' error: {message}")]
+    McpServerError {
+        /// Name of the MCP server.
+        server: String,
+        /// Error message.
+        message: String,
+    },
 }
 
 /// Result type for registry operations.

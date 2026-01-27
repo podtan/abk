@@ -170,7 +170,16 @@ impl AgentContext for super::Agent {
     }
     
     fn get_tool_schemas(&self) -> Vec<serde_json::Value> {
-        self.tool_registry.get_all_schemas()
+        // Start with CATS tools
+        let mut schemas = self.tool_registry.get_all_schemas();
+        
+        // Add MCP tools if available
+        #[cfg(feature = "registry-mcp")]
+        if let Some(ref mcp_loader) = self.mcp_tools {
+            schemas.extend(mcp_loader.get_openai_schemas());
+        }
+        
+        schemas
     }
     
     // Lifecycle/templates

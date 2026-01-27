@@ -36,6 +36,12 @@ pub mod tools;
 // Session orchestration - sophisticated workflow management
 pub mod session;
 
+// MCP tool integration (requires registry-mcp feature)
+#[cfg(feature = "registry-mcp")]
+pub mod mcp;
+#[cfg(feature = "registry-mcp")]
+pub use mcp::{McpToolLoader, McpToolExecutionResult};
+
 /// Main ABK agent structure.
 #[allow(dead_code)]
 pub struct Agent {
@@ -55,6 +61,9 @@ pub struct Agent {
     is_running: bool,
     tool_registry: ToolRegistry,
     execution_mode: ExecutionMode,
+    // MCP tools loaded from external servers
+    #[cfg(feature = "registry-mcp")]
+    mcp_tools: Option<McpToolLoader>,
     // Session management (replaces checkpoint_storage_manager, current_session, and classification state)
     // Wrapped in Option to allow taking ownership during delegation calls
     session_manager: Option<crate::checkpoint::SessionManager>,
@@ -182,6 +191,32 @@ impl Agent {
         let session_manager = Some(crate::checkpoint::SessionManager::new(checkpointing_enabled)
             .context("Failed to initialize session manager")?);
 
+        // Load MCP tools if configured
+        #[cfg(feature = "registry-mcp")]
+        let mcp_tools = {
+            if let Some(ref mcp_config) = config.config.mcp {
+                if mcp_config.enabled {
+                    match McpToolLoader::new(mcp_config).await {
+                        Ok(loader) => {
+                            if loader.has_tools() {
+                                Some(loader)
+                            } else {
+                                None
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to load MCP tools: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
         let open_window_size = config.config.tools.open_file_window_size;
         Ok(Self {
             env,
@@ -200,6 +235,8 @@ impl Agent {
             is_running: false,
             tool_registry: create_tool_registry_with_open_window_size(open_window_size),
             execution_mode: ExecutionMode::Hybrid,
+            #[cfg(feature = "registry-mcp")]
+            mcp_tools,
             session_manager,
             // TEMPORARY: Initialize deprecated fields for backward compatibility
             checkpoint_storage_manager: None,

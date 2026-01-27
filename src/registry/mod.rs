@@ -48,3 +48,9 @@ pub use source::ToolSource;
 // MCP support (requires registry-mcp feature)
 #[cfg(feature = "registry-mcp")]
 mod mcp;
+
+// MCP client (requires registry-mcp feature)
+#[cfg(feature = "registry-mcp")]
+mod client;
+#[cfg(feature = "registry-mcp")]
+pub use client::{McpClient, McpServerConfig, McpToolCallResult};

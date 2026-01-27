@@ -104,6 +104,64 @@ impl ToolRegistry {
 
         count
     }
+
+    /// Fetch tools from an MCP server and register them.
+    ///
+    /// This method connects to the MCP server, fetches the available tools,
+    /// and registers them in the registry. Existing tools with conflicting
+    /// names are skipped.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The MCP server configuration
+    ///
+    /// # Returns
+    ///
+    /// The count of successfully registered tools.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server is unreachable or returns invalid data.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use abk::registry::{ToolRegistry, McpServerConfig};
+    ///
+    /// let registry = ToolRegistry::new();
+    /// let config = McpServerConfig::new("pdt", "http://127.0.0.1:8000/pdt");
+    ///
+    /// // Fetch and register tools
+    /// let count = registry.fetch_from_server(&config).await?;
+    /// println!("Registered {} tools from MCP server", count);
+    /// ```
+    pub async fn fetch_from_server(
+        &self,
+        config: &super::McpServerConfig,
+    ) -> RegistryResult<usize> {
+        use super::McpClient;
+
+        let client = McpClient::new();
+        let tools = client.fetch_tools(config).await?;
+
+        self.register_mcp_batch(tools, &config.name)
+    }
+
+    /// Fetch tools from an MCP server with initialization.
+    ///
+    /// Like `fetch_from_server`, but also sends initialize/initialized
+    /// messages first (required by some MCP servers).
+    pub async fn fetch_from_server_with_init(
+        &self,
+        config: &super::McpServerConfig,
+    ) -> RegistryResult<usize> {
+        use super::McpClient;
+
+        let client = McpClient::new();
+        let tools = client.fetch_tools_with_init(config).await?;
+
+        self.register_mcp_batch(tools, &config.name)
+    }
 }
 
 #[cfg(test)]

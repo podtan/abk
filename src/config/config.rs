@@ -26,8 +26,62 @@ pub struct Configuration {
     pub tools: ToolsConfig,
     pub search_filtering: Option<SearchFilteringConfig>,
     pub llm: Option<LlmConfig>,
+    pub mcp: Option<McpConfig>,
     #[cfg(feature = "cli")]
     pub cli: Option<crate::cli::config::CliConfig>,
+}
+
+/// MCP (Model Context Protocol) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Enable MCP tool discovery
+    #[serde(default)]
+    pub enabled: bool,
+    /// Timeout for MCP server requests (seconds)
+    #[serde(default = "default_mcp_timeout")]
+    pub timeout_seconds: u64,
+    /// List of MCP servers to connect to
+    #[serde(default)]
+    pub servers: Vec<McpServerConfig>,
+}
+
+fn default_mcp_timeout() -> u64 {
+    30
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timeout_seconds: 30,
+            servers: vec![],
+        }
+    }
+}
+
+/// Configuration for a single MCP server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Server identifier (used for logging and tool namespacing)
+    pub name: String,
+    /// Server URL (SSE endpoint for HTTP transport)
+    pub url: String,
+    /// Transport type: "http" (SSE) or "stdio"
+    #[serde(default = "default_transport")]
+    pub transport: String,
+    /// Optional authentication token (supports env var substitution)
+    pub auth_token: Option<String>,
+    /// Auto-initialize connection (send initialize/initialized messages)
+    #[serde(default = "default_auto_init")]
+    pub auto_init: bool,
+}
+
+fn default_transport() -> String {
+    "http".to_string()
+}
+
+fn default_auto_init() -> bool {
+    true
 }
 
 /// Tools configuration
@@ -287,6 +341,7 @@ impl ConfigurationLoader {
                     auto_execute: false,
                 },
             },
+            mcp: None,
             #[cfg(feature = "cli")]
             cli: None,
         }

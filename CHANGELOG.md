@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-01-27
+
+### Added
+- **Registry Module** (`registry` feature): Multi-source tool aggregation system
+  - `ToolRegistry`: Central registry for tools from multiple sources (CATS, MCP, custom)
+  - `RegisteredTool`: Tool wrapper with source tracking and metadata
+  - `ToolSource`: Enum for tool origins (Cats, Mcp, Custom)
+  - `RegistryError`: Typed errors for registration and lookup failures
+  - Methods: `register_cats()`, `register_mcp()`, `register_mcp_batch()`, `find()`, `contains()`
+  - Conversion to internal format via `to_internal_tools()`
+
+- **MCP Client** (`registry-mcp` feature): HTTP client for MCP server communication
+  - `McpClient`: Async client for fetching tools from MCP servers
+  - `McpServerConfig`: Server configuration (name, URL, auth token)
+  - `McpToolCallResult`: Result type for tool execution
+  - `fetch_tools()`: Fetch tools via JSON-RPC `tools/list` request
+  - `fetch_tools_with_init()`: Initialize connection before fetching
+  - `call_tool()`: Execute tools on remote MCP servers
+  - Supports Bearer token authentication
+
+- **MCP Tool Integration for Agent** (`registry-mcp` + `agent` features)
+  - `McpToolLoader`: Loads tools from configured MCP servers at agent startup
+  - `McpToolExecutionResult`: Result type for MCP tool execution
+  - Automatic tool merging: MCP tools merged with CATS tools in `get_tool_schemas()`
+  - Smart routing: Tool calls automatically routed to MCP servers or CATS based on tool origin
+  - Server config storage for tool execution routing
+
+- **MCP Configuration** (`config` feature)
+  - `McpConfig`: Top-level MCP configuration struct
+  - `McpServerConfig`: Per-server configuration (name, URL, transport, auth_token, auto_init)
+  - Environment variable substitution for auth tokens (`${VAR_NAME}` syntax)
+  - TOML configuration support under `[mcp]` section
+
+### Changed
+- **Tool execution routing**: `execute_tool_calls()` and `execute_tool_calls_structured()` 
+  now check if a tool is from MCP and route to the appropriate server instead of CATS
+- **Agent initialization**: Agent now loads MCP tools during `Agent::new()` if MCP is 
+  enabled in configuration
+- **Dependencies**: Added `reqwest` with `json` feature for MCP HTTP client
+
+### Example Configuration
+```toml
+[mcp]
+enabled = true
+timeout_seconds = 30
+
+[[mcp.servers]]
+name = "pdt"
+url = "http://127.0.0.1:8000/pdt"
+transport = "http"
+auto_init = true
+# auth_token = "${MCP_AUTH_TOKEN}"
+```
+
 ## [0.2.4] - 2025-12-31
 
 ### Added
