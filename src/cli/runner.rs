@@ -144,6 +144,17 @@ impl CommandContext for DefaultCommandContext {
 pub async fn run_configured_cli_from_config(
     config_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    run_configured_cli_from_config_with_build_info(config_path, None).await
+}
+
+/// Convenience function to run CLI from a config file path with build info
+///
+/// Same as `run_configured_cli_from_config` but allows passing `BuildInfo`
+/// for enhanced version command output.
+pub async fn run_configured_cli_from_config_with_build_info(
+    config_path: &str,
+    build_info: Option<crate::cli::config::BuildInfo>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line args to detect which command is being run
     let args: Vec<String> = std::env::args().collect();
     let command = args.get(1).map(|s| s.as_str());
@@ -188,6 +199,11 @@ pub async fn run_configured_cli_from_config(
     
     // Convert config to CLI config
     let mut cli_config = CliConfig::from_agent_config(&context.config);
+    
+    // Attach build info if provided
+    if let Some(info) = build_info {
+        cli_config = cli_config.with_build_info(info);
+    }
     
     // Add extension commands if feature is enabled
     #[cfg(feature = "extension")]
@@ -237,6 +253,43 @@ pub async fn run_with_raw_config(
     config_toml: &str,
     secrets: std::collections::HashMap<String, String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_raw_config_and_build_info(config_toml, secrets, None).await
+}
+
+/// Run CLI with externally-provided configuration and build-time metadata
+///
+/// Same as `run_with_raw_config` but allows passing `BuildInfo` for 
+/// enhanced version command output (git SHA, build date, etc.).
+///
+/// # Arguments
+/// * `config_toml` - Raw TOML configuration string
+/// * `secrets` - Key-value pairs to inject into environment
+/// * `build_info` - Optional build-time metadata for version display
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use std::collections::HashMap;
+/// use abk::cli::BuildInfo;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config_toml = std::fs::read_to_string("config.toml")?;
+///     let secrets = HashMap::new();
+///     let build_info = BuildInfo::new(
+///         option_env!("GIT_SHA"),
+///         option_env!("BUILD_DATE"),
+///         option_env!("RUSTC_VERSION"),
+///         option_env!("BUILD_PROFILE"),
+///     );
+///     abk::cli::run_with_raw_config_and_build_info(&config_toml, secrets, Some(build_info)).await
+/// }
+/// ```
+pub async fn run_with_raw_config_and_build_info(
+    config_toml: &str,
+    secrets: std::collections::HashMap<String, String>,
+    build_info: Option<crate::cli::config::BuildInfo>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
         if std::env::var(key).is_err() {
@@ -256,6 +309,11 @@ pub async fn run_with_raw_config(
     
     // Convert config to CLI config
     let mut cli_config = CliConfig::from_agent_config(&context.config);
+    
+    // Attach build info if provided
+    if let Some(info) = build_info {
+        cli_config = cli_config.with_build_info(info);
+    }
     
     // Add extension commands if feature is enabled
     #[cfg(feature = "extension")]
@@ -797,6 +855,20 @@ pub async fn run_configured_cli<C: CommandContext>(
     match matches.subcommand() {
         Some(("version", _)) => {
             println!("{} {}", config.name, config.version);
+            if let Some(ref build_info) = config.build_info {
+                if let Some(ref sha) = build_info.git_sha {
+                    println!("commit: {}", sha);
+                }
+                if let Some(ref date) = build_info.build_date {
+                    println!("built:  {}", date);
+                }
+                if let Some(ref rustc) = build_info.rustc_version {
+                    println!("rustc:  {}", rustc);
+                }
+                if let Some(ref profile) = build_info.build_profile {
+                    println!("profile: {}", profile);
+                }
+            }
             Ok(())
         }
         Some(("run", sub_matches)) => {

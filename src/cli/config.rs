@@ -7,6 +7,39 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Build-time information for version display
+///
+/// This struct carries compile-time metadata (git SHA, build date, etc.)
+/// that downstream consumers can populate via their own `build.rs` scripts.
+#[derive(Debug, Clone, Default)]
+pub struct BuildInfo {
+    /// Short git commit SHA (e.g., "a1b2c3d")
+    pub git_sha: Option<String>,
+    /// Build date/time (e.g., "2026-02-05")
+    pub build_date: Option<String>,
+    /// Rust compiler version used for the build
+    pub rustc_version: Option<String>,
+    /// Build profile (e.g., "release" or "debug")
+    pub build_profile: Option<String>,
+}
+
+impl BuildInfo {
+    /// Create a new BuildInfo with all fields populated
+    pub fn new(
+        git_sha: Option<&str>,
+        build_date: Option<&str>,
+        rustc_version: Option<&str>,
+        build_profile: Option<&str>,
+    ) -> Self {
+        Self {
+            git_sha: git_sha.map(|s| s.to_string()),
+            build_date: build_date.map(|s| s.to_string()),
+            rustc_version: rustc_version.map(|s| s.to_string()),
+            build_profile: build_profile.map(|s| s.to_string()),
+        }
+    }
+}
+
 /// Top-level CLI configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CliConfig {
@@ -33,6 +66,9 @@ pub struct CliConfig {
     pub require_confirmation: bool,
     /// Command definitions
     pub commands: HashMap<String, CommandConfig>,
+    /// Build-time information (not serialized, set programmatically)
+    #[serde(skip)]
+    pub build_info: Option<BuildInfo>,
 }
 
 fn default_command() -> String { "run".to_string() }
@@ -117,6 +153,7 @@ impl CliConfig {
             interactive_mode: true,
             require_confirmation: true,
             commands: HashMap::new(),
+            build_info: None,
         };
 
         // Add basic commands - we'll expand this as we migrate
@@ -172,6 +209,27 @@ impl CliConfig {
         });
 
         cli_config
+    }
+
+    /// Set build-time information for version display
+    ///
+    /// This method allows downstream consumers to attach compile-time 
+    /// metadata (git SHA, build date, etc.) that will be shown in the 
+    /// version command output.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let cli_config = CliConfig::from_agent_config(&config)
+    ///     .with_build_info(BuildInfo::new(
+    ///         option_env!("GIT_SHA"),
+    ///         option_env!("BUILD_DATE"),
+    ///         option_env!("RUSTC_VERSION"),
+    ///         option_env!("BUILD_PROFILE"),
+    ///     ));
+    /// ```
+    pub fn with_build_info(mut self, build_info: BuildInfo) -> Self {
+        self.build_info = Some(build_info);
+        self
     }
 
     /// Add extension commands to the CLI config when extension feature is enabled
