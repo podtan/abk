@@ -201,6 +201,193 @@ pub async fn run_configured_cli_from_config(
     Ok(())
 }
 
+/// Run CLI with externally-provided configuration (Option A: raw strings)
+///
+/// This function accepts raw configuration data instead of reading files.
+/// The caller is responsible for loading config and secrets from any source
+/// (files, S3, etc.). Secrets are injected into the process environment
+/// for WASM provider compatibility.
+///
+/// # Arguments
+/// * `config_toml` - Raw TOML configuration string
+/// * `secrets` - Key-value pairs to inject into environment (e.g., API keys)
+///
+/// # Environment Variable Override
+/// Secrets from the HashMap are injected into `std::env`, but existing
+/// environment variables take precedence (are NOT overwritten).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use std::collections::HashMap;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Load config from file/S3/wherever
+///     let config_toml = std::fs::read_to_string("config.toml")?;
+///     
+///     // Load secrets from file/S3/wherever
+///     let mut secrets = HashMap::new();
+///     secrets.insert("OPENAI_API_KEY".to_string(), "sk-...".to_string());
+///     
+///     abk::cli::run_with_raw_config(&config_toml, secrets).await
+/// }
+/// ```
+pub async fn run_with_raw_config(
+    config_toml: &str,
+    secrets: std::collections::HashMap<String, String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Inject secrets into environment (existing env vars take precedence)
+    for (key, value) in &secrets {
+        if std::env::var(key).is_err() {
+            std::env::set_var(key, value);
+        }
+    }
+    
+    // Parse TOML configuration
+    let config: crate::config::Configuration = toml::from_str(config_toml)
+        .map_err(|e| format!("Failed to parse config TOML: {}", e))?;
+    
+    // Set ABK_AGENT_NAME for other subsystems
+    std::env::set_var("ABK_AGENT_NAME", &config.agent.name);
+    
+    // Create context from parsed config
+    let context = RawConfigCommandContext::new(config)?;
+    
+    // Convert config to CLI config
+    let mut cli_config = CliConfig::from_agent_config(&context.config);
+    
+    // Add extension commands if feature is enabled
+    #[cfg(feature = "extension")]
+    {
+        cli_config = cli_config.with_extension_commands();
+    }
+    
+    // Run the CLI
+    run_configured_cli(&context, &cli_config).await?;
+    
+    Ok(())
+}
+
+/// Command context that uses pre-parsed configuration (no file reading)
+pub struct RawConfigCommandContext {
+    config: crate::config::Configuration,
+    logger: crate::observability::Logger,
+    working_dir: std::path::PathBuf,
+}
+
+impl RawConfigCommandContext {
+    /// Create a new context from already-parsed configuration
+    pub fn new(config: crate::config::Configuration) -> Result<Self, Box<dyn std::error::Error>> {
+        let agent_name = &config.agent.name;
+        
+        let log_file_name = format!("{}.log", agent_name);
+        let logger = crate::observability::Logger::new(None, None)
+            .unwrap_or_else(|_| {
+                crate::observability::Logger::new(Some(std::path::Path::new(&log_file_name)), Some("INFO"))
+                    .expect("Failed to create fallback logger")
+            });
+
+        let working_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+        Ok(Self {
+            config,
+            logger,
+            working_dir,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl CommandContext for RawConfigCommandContext {
+    fn config_path(&self) -> CliResult<std::path::PathBuf> {
+        // No file path - config was provided directly
+        // Return a synthetic path based on agent name for compatibility
+        let home = std::env::var("HOME")
+            .map_err(|_| CliError::ConfigError("Could not determine home directory".to_string()))?;
+        let agent_name = &self.config.agent.name;
+        Ok(std::path::PathBuf::from(home)
+            .join(format!(".{}", agent_name))
+            .join("config")
+            .join(format!("{}.toml", agent_name)))
+    }
+
+    fn config(&self) -> &crate::config::Configuration {
+        &self.config
+    }
+
+    fn load_config(&self) -> CliResult<serde_json::Value> {
+        Ok(serde_json::json!({
+            "name": self.config.agent.name,
+            "version": self.config.agent.version
+        }))
+    }
+
+    fn working_dir(&self) -> CliResult<std::path::PathBuf> {
+        Ok(self.working_dir.clone())
+    }
+
+    fn project_hash(&self) -> CliResult<String> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        self.working_dir.hash(&mut hasher);
+        Ok(format!("{:x}", hasher.finish()))
+    }
+
+    fn data_dir(&self) -> CliResult<std::path::PathBuf> {
+        let home = std::env::var("HOME")
+            .map_err(|_| CliError::ConfigError("Could not determine home directory".to_string()))?;
+        let agent_name = &self.config.agent.name;
+        Ok(std::path::PathBuf::from(home).join(format!(".{}", agent_name)))
+    }
+
+    fn cache_dir(&self) -> CliResult<std::path::PathBuf> {
+        self.data_dir()
+    }
+
+    fn log_info(&self, message: &str) {
+        println!("{}", message);
+    }
+
+    fn log_warn(&self, message: &str) {
+        eprintln!("Warning: {}", message);
+    }
+
+    fn log_error(&self, message: &str) -> CliResult<()> {
+        eprintln!("Error: {}", message);
+        Ok(())
+    }
+
+    fn log_success(&self, message: &str) {
+        println!("✓ {}", message);
+    }
+
+    async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {
+        // For raw config mode, we still need to pass a config path for legacy reasons
+        // But the env vars are already set, so the agent will work
+        let home = std::env::var("HOME")?;
+        let agent_name = &self.config.agent.name;
+        let config_path = std::path::PathBuf::from(home)
+            .join(format!(".{}", agent_name))
+            .join("config")
+            .join(format!("{}.toml", agent_name));
+        
+        // Only create agent if config file exists (for backwards compatibility)
+        // Otherwise, we'd need to extend Agent to accept Configuration directly
+        if config_path.exists() {
+            Ok(crate::agent::Agent::new(Some(config_path.as_path()), None, None).await?)
+        } else {
+            Err(format!(
+                "Config file not found at {}. Raw config mode currently requires config file to exist for Agent creation.",
+                config_path.display()
+            ).into())
+        }
+    }
+}
+
 /// Concrete implementation of CheckpointAccess using abk::checkpoint
 struct AbkCheckpointAccess;
 

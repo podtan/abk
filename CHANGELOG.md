@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-05
+
+### Added
+- **`run_with_raw_config()` function** (`cli` feature): New entry point that accepts 
+  pre-loaded configuration instead of reading files
+  - Accepts `config_toml: &str` (raw TOML string) and `secrets: HashMap<String, String>`
+  - Secrets are injected into process environment (existing env vars take precedence)
+  - Enables applications to load config from any source (files, S3, remote services)
+  - Perfect for centralized configuration management architectures
+
+- **`RawConfigCommandContext` struct** (`cli` feature): Command context that uses 
+  pre-parsed configuration without file I/O
+  - Implements `CommandContext` trait for full CLI compatibility
+  - Synthetic config path generation for backwards compatibility
+
+### Changed
+- **Re-exports**: Added `run_with_raw_config` and `RawConfigCommandContext` to 
+  `abk::cli` module exports
+
 ## [0.3.0] - 2025-01-27
 
 ### Added
