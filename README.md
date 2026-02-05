@@ -97,12 +97,12 @@ logger.log_completion("Task completed successfully").unwrap();
 ### CLI Feature
 
 ```rust
-use abk::cli::{run_configured_cli_from_config, CommandContext};
+use abk::cli::{run_from_config_path, CommandContext};
 
 // Option 1: One-liner convenience function (recommended for simple apps)
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run_configured_cli_from_config("config/agent.toml").await
+    run_from_config_path("config/agent.toml", None).await
 }
 
 // Option 2: Full customization with CommandContext trait

@@ -138,20 +138,10 @@ impl CommandContext for DefaultCommandContext {
 /// ```rust,ignore
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     abk::cli::run_configured_cli_from_config("config/agent.toml").await
+///     abk::cli::run_from_config_path("config/agent.toml", None).await
 /// }
 /// ```
-pub async fn run_configured_cli_from_config(
-    config_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    run_configured_cli_from_config_with_build_info(config_path, None).await
-}
-
-/// Convenience function to run CLI from a config file path with build info
-///
-/// Same as `run_configured_cli_from_config` but allows passing `BuildInfo`
-/// for enhanced version command output.
-pub async fn run_configured_cli_from_config_with_build_info(
+pub async fn run_from_config_path(
     config_path: &str,
     build_info: Option<crate::cli::config::BuildInfo>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -217,7 +207,7 @@ pub async fn run_configured_cli_from_config_with_build_info(
     Ok(())
 }
 
-/// Run CLI with externally-provided configuration (Option A: raw strings)
+/// Run CLI with externally-provided configuration
 ///
 /// This function accepts raw configuration data instead of reading files.
 /// The caller is responsible for loading config and secrets from any source
@@ -227,6 +217,7 @@ pub async fn run_configured_cli_from_config_with_build_info(
 /// # Arguments
 /// * `config_toml` - Raw TOML configuration string
 /// * `secrets` - Key-value pairs to inject into environment (e.g., API keys)
+/// * `build_info` - Optional build-time metadata for version display
 ///
 /// # Environment Variable Override
 /// Secrets from the HashMap are injected into `std::env`, but existing
@@ -246,46 +237,10 @@ pub async fn run_configured_cli_from_config_with_build_info(
 ///     let mut secrets = HashMap::new();
 ///     secrets.insert("OPENAI_API_KEY".to_string(), "sk-...".to_string());
 ///     
-///     abk::cli::run_with_raw_config(&config_toml, secrets).await
+///     abk::cli::run_from_raw_config(&config_toml, secrets, None).await
 /// }
 /// ```
-pub async fn run_with_raw_config(
-    config_toml: &str,
-    secrets: std::collections::HashMap<String, String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    run_with_raw_config_and_build_info(config_toml, secrets, None).await
-}
-
-/// Run CLI with externally-provided configuration and build-time metadata
-///
-/// Same as `run_with_raw_config` but allows passing `BuildInfo` for 
-/// enhanced version command output (git SHA, build date, etc.).
-///
-/// # Arguments
-/// * `config_toml` - Raw TOML configuration string
-/// * `secrets` - Key-value pairs to inject into environment
-/// * `build_info` - Optional build-time metadata for version display
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use std::collections::HashMap;
-/// use abk::cli::BuildInfo;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let config_toml = std::fs::read_to_string("config.toml")?;
-///     let secrets = HashMap::new();
-///     let build_info = BuildInfo::new(
-///         option_env!("GIT_SHA"),
-///         option_env!("BUILD_DATE"),
-///         option_env!("RUSTC_VERSION"),
-///         option_env!("BUILD_PROFILE"),
-///     );
-///     abk::cli::run_with_raw_config_and_build_info(&config_toml, secrets, Some(build_info)).await
-/// }
-/// ```
-pub async fn run_with_raw_config_and_build_info(
+pub async fn run_from_raw_config(
     config_toml: &str,
     secrets: std::collections::HashMap<String, String>,
     build_info: Option<crate::cli::config::BuildInfo>,

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-05
+
+### Breaking Changes
+- **Renamed CLI entry points** (`cli` feature): Consolidated 4 functions into 2
+  with idiomatic `Option<BuildInfo>` parameter:
+  - `run_configured_cli_from_config()` + `run_configured_cli_from_config_with_build_info()` → `run_from_config_path(path, build_info: Option<BuildInfo>)`
+  - `run_with_raw_config()` + `run_with_raw_config_and_build_info()` → `run_from_raw_config(toml, secrets, build_info: Option<BuildInfo>)`
+
 ## [0.3.2] - 2026-02-05
 
 ### Added
