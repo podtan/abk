@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-02-05
+
+### Added
+- **`BuildInfo` struct** (`cli` feature): Compile-time metadata for version display
+  - Fields: `git_sha`, `build_date`, `rustc_version`, `build_profile`
+  - `BuildInfo::new()` constructor accepting `Option<&str>` for each field
+  - `CliConfig::with_build_info()` builder method to attach build info
+
+- **`run_with_raw_config_and_build_info()` function** (`cli` feature): Same as
+  `run_with_raw_config()` but accepts optional `BuildInfo` for enhanced version output
+
+- **`run_configured_cli_from_config_with_build_info()` function** (`cli` feature): 
+  Same as `run_configured_cli_from_config()` but accepts optional `BuildInfo`
+
+### Changed
+- **Version command**: Now displays git commit SHA, build date, rustc version, and
+  build profile when `BuildInfo` is attached to `CliConfig`
+- **`build.rs`**: Enhanced to set `BUILD_DATE`, `RUSTC_VERSION`, `BUILD_PROFILE` 
+  environment variables in addition to existing `GIT_SHA`
+- **Re-exports**: Added `run_with_raw_config_and_build_info` and 
+  `run_configured_cli_from_config_with_build_info` to `abk::cli` module
+
 ## [0.3.1] - 2026-02-05
 
 ### Added
