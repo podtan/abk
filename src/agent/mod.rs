@@ -109,6 +109,115 @@ impl Agent {
         Self::new_with_bases(config_path, env_file, mode, None, None).await
     }
 
+    /// Initialize the agent from a pre-parsed Configuration.
+    ///
+    /// This avoids reading any config files from disk. Use this when the caller
+    /// has already loaded and merged the configuration (e.g., via figment layered config).
+    pub async fn new_from_config(
+        config: crate::config::Configuration,
+        mode: Option<AgentMode>,
+    ) -> Result<Self> {
+        let env = EnvironmentLoader::new(None);
+        let config_loader = ConfigurationLoader::from_config(config);
+
+        let chat_formatter = ChatMLFormatter::new();
+
+        let lifecycle = crate::lifecycle::find_lifecycle_plugin().await
+            .context("Failed to load lifecycle plugin")?;
+
+        let provider = ProviderFactory::create(&env).await
+            .context("Failed to create LLM provider")?;
+
+        let timeout_seconds = config_loader.get_u64("execution.timeout_seconds").unwrap_or(120);
+        let enable_validation = config_loader
+            .get_bool("execution.enable_dangerous_command_validation")
+            .unwrap_or(true);
+        let executor =
+            CommandExecutor::new(timeout_seconds, Some(Path::new(".")), enable_validation);
+
+        let log_file_path = config_loader.get_string("logging.log_file").map(PathBuf::from);
+        let log_level = config_loader.get_string("logging.log_level");
+        let logger = Logger::new(log_file_path.as_deref(), log_level.as_deref())?;
+
+        let default_mode_str = config_loader
+            .get_string("agent.default_mode")
+            .unwrap_or_else(|| "confirm".to_string());
+        let default_mode = default_mode_str.parse().unwrap_or(AgentMode::Confirm);
+        let current_mode = mode.unwrap_or(default_mode);
+
+        // Read checkpointing.enabled directly from the already-parsed config (no file I/O)
+        let checkpointing_enabled = {
+            // Serialize config to toml::Value to check checkpointing section
+            let config_value = toml::Value::try_from(&config_loader.config)
+                .ok()
+                .and_then(|v| v.get("checkpointing")
+                    .and_then(|c| c.get("enabled"))
+                    .and_then(|e| e.as_bool()));
+            config_value.unwrap_or(false)
+        };
+
+        let session_manager = Some(crate::checkpoint::SessionManager::new(checkpointing_enabled)
+            .context("Failed to initialize session manager")?);
+
+        #[cfg(feature = "registry-mcp")]
+        let mcp_tools = {
+            if let Some(ref mcp_config) = config_loader.config.mcp {
+                if mcp_config.enabled {
+                    match McpToolLoader::new(mcp_config).await {
+                        Ok(loader) => {
+                            if loader.has_tools() {
+                                Some(loader)
+                            } else {
+                                None
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to load MCP tools: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let open_window_size = config_loader.config.tools.open_file_window_size;
+        Ok(Self {
+            env,
+            config: config_loader,
+            chat_formatter,
+            lifecycle,
+            provider,
+            executor,
+            logger,
+            current_mode,
+            current_step: WorkflowStep::Analyze,
+            current_iteration: 1,
+            api_call_count: 0,
+            task_description: String::new(),
+            completion_marker: "TASK_COMPLETED".to_string(),
+            is_running: false,
+            tool_registry: create_tool_registry_with_open_window_size(open_window_size),
+            execution_mode: ExecutionMode::Hybrid,
+            #[cfg(feature = "registry-mcp")]
+            mcp_tools,
+            session_manager,
+            checkpoint_storage_manager: None,
+            current_session: None,
+            checkpointing_enabled,
+            classification_done: false,
+            classified_task_type: None,
+            template_sent: false,
+            initial_task_description: String::new(),
+            initial_additional_context: None,
+            current_turn_id: None,
+            turn_request_count: 0,
+        })
+    }
+
     /// Initialize the agent with custom base paths.
     ///
     /// # Arguments

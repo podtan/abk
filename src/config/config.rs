@@ -226,6 +226,27 @@ impl ConfigurationLoader {
         Self::new_with_bases(config_path, None, None)
     }
 
+    /// Create a configuration loader from a pre-parsed Configuration.
+    ///
+    /// This avoids reading any files from disk. Use this when the caller
+    /// has already loaded and merged the configuration (e.g., via figment).
+    pub fn from_config(config: Configuration) -> Self {
+        let agent_name = &config.agent.name;
+        // Construct a synthetic config path for compatibility
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let config_path = PathBuf::from(home)
+            .join(format!(".{}", agent_name))
+            .join("config")
+            .join(format!("{}.toml", agent_name));
+
+        Self {
+            config_path,
+            config,
+            template_base: None,
+            _log_base: None,
+        }
+    }
+
     /// Initialize configuration loader with custom base paths.
     ///
     /// # Arguments

@@ -379,34 +379,26 @@ impl CommandContext for RawConfigCommandContext {
     }
 
     async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {
-        // For raw config mode, we still need to pass a config path for legacy reasons
-        // But the env vars are already set, so the agent will work
-        let home = std::env::var("HOME")?;
-        let agent_name = &self.config.agent.name;
-        let config_path = std::path::PathBuf::from(home)
-            .join(format!(".{}", agent_name))
-            .join("config")
-            .join(format!("{}.toml", agent_name));
-        
-        // Only create agent if config file exists (for backwards compatibility)
-        // Otherwise, we'd need to extend Agent to accept Configuration directly
-        if config_path.exists() {
-            Ok(crate::agent::Agent::new(Some(config_path.as_path()), None, None).await?)
-        } else {
-            Err(format!(
-                "Config file not found at {}. Raw config mode currently requires config file to exist for Agent creation.",
-                config_path.display()
-            ).into())
-        }
+        // Use pre-parsed config directly — no file I/O needed
+        Ok(crate::agent::Agent::new_from_config(self.config.clone(), None).await?)
     }
 }
 
 /// Concrete implementation of CheckpointAccess using abk::checkpoint
-struct AbkCheckpointAccess;
+struct AbkCheckpointAccess {
+    /// Pre-parsed config value to avoid re-reading files from disk
+    config_value: Option<toml::Value>,
+}
 
 impl AbkCheckpointAccess {
     fn new() -> Self {
-        Self
+        Self { config_value: None }
+    }
+
+    /// Create with a pre-parsed Configuration to avoid file I/O
+    fn with_config(config: &crate::config::Configuration) -> Self {
+        let config_value = toml::Value::try_from(config).ok();
+        Self { config_value }
     }
     
     /// Get storage manager with remote backend configuration if available.
@@ -414,29 +406,37 @@ impl AbkCheckpointAccess {
     /// and creates a storage manager with the appropriate backend settings.
     #[cfg(feature = "storage-documentdb")]
     async fn get_configured_storage_manager(&self) -> CliResult<crate::checkpoint::CheckpointStorageManager> {
-        // Try to load checkpoint config from the agent's config file
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let config_path = std::path::PathBuf::from(&home_dir)
-            .join(format!(".{}", agent_name))
-            .join("config")
-            .join(format!("{}.toml", agent_name));
-        
-        if config_path.exists() {
-            if let Ok(config_str) = std::fs::read_to_string(&config_path) {
-                if let Ok(config_value) = config_str.parse::<toml::Value>() {
-                    if let Some(checkpoint_table) = config_value.get("checkpointing") {
-                        let checkpoint_toml_str = toml::to_string(checkpoint_table)
-                            .unwrap_or_default();
-                        
-                        if let Ok(checkpoint_config) = toml::from_str::<crate::checkpoint::GlobalCheckpointConfig>(&checkpoint_toml_str) {
-                            match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config).await {
-                                Ok(m) => return Ok(m),
-                                Err(e) => {
-                                    // Log the error but fall back to default
-                                    eprintln!("Warning: Failed to create configured storage manager: {}", e);
-                                }
-                            }
+        // Use pre-parsed config if available, otherwise fall back to reading from disk
+        let config_value = if let Some(ref cv) = self.config_value {
+            Some(cv.clone())
+        } else {
+            // Legacy fallback: read from disk (for callers that don't pass config)
+            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+            let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let config_path = std::path::PathBuf::from(&home_dir)
+                .join(format!(".{}", agent_name))
+                .join("config")
+                .join(format!("{}.toml", agent_name));
+
+            if config_path.exists() {
+                std::fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|s| s.parse::<toml::Value>().ok())
+            } else {
+                None
+            }
+        };
+
+        if let Some(config_value) = config_value {
+            if let Some(checkpoint_table) = config_value.get("checkpointing") {
+                let checkpoint_toml_str = toml::to_string(checkpoint_table)
+                    .unwrap_or_default();
+
+                if let Ok(checkpoint_config) = toml::from_str::<crate::checkpoint::GlobalCheckpointConfig>(&checkpoint_toml_str) {
+                    match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config).await {
+                        Ok(m) => return Ok(m),
+                        Err(e) => {
+                            eprintln!("Warning: Failed to create configured storage manager: {}", e);
                         }
                     }
                 }
@@ -474,28 +474,39 @@ impl CheckpointAccess for AbkCheckpointAccess {
         // For remote storage, we don't require the project path to exist locally
         #[cfg(feature = "storage-documentdb")]
         let check_path = {
-            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
-            let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let config_path = std::path::PathBuf::from(&home_dir)
-                .join(format!(".{}", agent_name))
-                .join("config")
-                .join(format!("{}.toml", agent_name));
-            
-            // Check if we're using remote storage mode
-            if config_path.exists() {
-                if let Ok(config_str) = std::fs::read_to_string(&config_path) {
-                    // Check for storage_mode = "remote" (with or without quotes)
-                    let is_remote = config_str.contains("storage_mode") && 
-                        (config_str.contains("\"remote\"") || 
-                         config_str.contains("'remote'") ||
-                         config_str.contains("= remote") ||
-                         config_str.contains("=remote"));
-                    !is_remote // Only check path if NOT remote mode
-                } else {
-                    true // Check path by default
-                }
+            // Check if we're using remote storage mode from pre-parsed config
+            if let Some(ref config_value) = self.config_value {
+                let is_remote = config_value
+                    .get("checkpointing")
+                    .and_then(|c| c.get("storage_backend"))
+                    .and_then(|sb| sb.get("storage_mode"))
+                    .and_then(|sm| sm.as_str())
+                    .map(|s| s == "remote")
+                    .unwrap_or(false);
+                !is_remote // Only check path if NOT remote mode
             } else {
-                true // Check path by default
+                // Legacy fallback: read from disk
+                let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+                let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let config_path = std::path::PathBuf::from(&home_dir)
+                    .join(format!(".{}", agent_name))
+                    .join("config")
+                    .join(format!("{}.toml", agent_name));
+
+                if config_path.exists() {
+                    if let Ok(config_str) = std::fs::read_to_string(&config_path) {
+                        let is_remote = config_str.contains("storage_mode") &&
+                            (config_str.contains("\"remote\"") ||
+                             config_str.contains("'remote'") ||
+                             config_str.contains("= remote") ||
+                             config_str.contains("=remote"));
+                        !is_remote
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
             }
         };
         
@@ -633,11 +644,18 @@ impl CheckpointAccess for AbkCheckpointAccess {
 }
 
 /// Concrete implementation of RestorationAccess using abk::checkpoint
-struct AbkRestorationAccess;
+struct AbkRestorationAccess {
+    config_value: Option<toml::Value>,
+}
 
 impl AbkRestorationAccess {
     fn new() -> Self {
-        Self
+        Self { config_value: None }
+    }
+
+    fn with_config(config: &crate::config::Configuration) -> Self {
+        let config_value = toml::Value::try_from(config).ok();
+        Self { config_value }
     }
 }
 
@@ -645,7 +663,11 @@ impl AbkRestorationAccess {
 impl RestorationAccess for AbkRestorationAccess {
     async fn restore_checkpoint(&self, project_path: &PathBuf, session_id: &str, checkpoint_id: &str) -> CliResult<RestoredCheckpoint> {
         // Load the checkpoint data first
-        let checkpoint_access = AbkCheckpointAccess::new();
+        let checkpoint_access = if let Some(ref cv) = self.config_value {
+            AbkCheckpointAccess { config_value: Some(cv.clone()) }
+        } else {
+            AbkCheckpointAccess::new()
+        };
         let checkpoint = checkpoint_access.load_checkpoint(project_path, session_id, checkpoint_id).await?;
 
         // TODO: Implement actual restoration logic
@@ -1205,16 +1227,16 @@ async fn resume_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> Cli
         quiet: false,
     };
 
-    // Create concrete adapter implementations
-    let checkpoint_access = AbkCheckpointAccess::new();
-    let restoration_access = AbkRestorationAccess::new();
+    // Create concrete adapter implementations with pre-parsed config
+    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
+    let restoration_access = AbkRestorationAccess::with_config(ctx.config());
 
     crate::cli::commands::resume::resume_session(ctx, &checkpoint_access, &restoration_access, opts).await
 }
 
 /// Handle the checkpoints command
 async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    let checkpoint_access = AbkCheckpointAccess::new();
+    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
 
     if matches.get_flag("list") {
         let opts = crate::cli::commands::checkpoints::ListOptions {
@@ -1261,7 +1283,7 @@ async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -
 
 /// Handle the sessions command
 async fn sessions_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    let checkpoint_access = AbkCheckpointAccess::new();
+    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
 
     if matches.get_flag("list") {
         let opts = crate::cli::commands::sessions::ListOptions {

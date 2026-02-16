@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-02-06
+
+### Added
+- **`ConfigurationLoader::from_config()`** (`config` feature): Create a loader
+  from an already-parsed `Configuration` object, bypassing file I/O. Enables
+  callers that pre-merge configs (e.g. via figment) to pass the result directly.
+- **`Agent::new_from_config()`** (`agent` feature): Create an agent from a
+  pre-parsed `Configuration` without re-reading the config file from disk.
+  Loads MCP tools and checkpointing settings from the in-memory config.
+- **`AbkCheckpointAccess::with_config()`**: Constructor that stores a reference
+  to the parsed config so checkpoint/session operations use the merged config
+  instead of re-reading the minimal on-disk file.
+- **`AbkRestorationAccess::with_config()`**: Same pattern for restoration access.
+
+### Fixed
+- **Config re-read bug**: When using `run_from_raw_config()`, ABK no longer
+  re-reads the on-disk config file during agent creation, checkpoint access,
+  session listing, or checkpoint restoration. All code paths now use the
+  pre-parsed configuration passed by the caller.
+
 ## [0.4.0] - 2026-02-05
 
 ### Breaking Changes
