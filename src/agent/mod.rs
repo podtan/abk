@@ -429,6 +429,39 @@ impl Agent {
         Ok(())
     }
 
+    /// Initialize the remote storage backend from a pre-parsed Configuration.
+    ///
+    /// This avoids re-reading the config file from disk. Use this when the
+    /// caller has already loaded and merged the configuration.
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn initialize_remote_checkpoint_backend_from_config(&mut self, config: &crate::config::Configuration) -> Result<()> {
+        use crate::checkpoint::GlobalCheckpointConfig;
+
+        let config_value = toml::Value::try_from(config)
+            .context("Failed to serialize Configuration to toml::Value")?;
+
+        // Check if checkpointing section exists
+        let checkpointing = match config_value.get("checkpointing") {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+
+        // Re-serialize just the checkpointing section and parse with defaults
+        let checkpointing_toml = toml::to_string(checkpointing)
+            .context("Failed to serialize checkpointing config")?;
+
+        let checkpoint_config: GlobalCheckpointConfig = toml::from_str(&checkpointing_toml)
+            .context("Failed to parse checkpoint config")?;
+
+        // Initialize the remote backend in session manager
+        if let Some(ref mut session_manager) = self.session_manager {
+            session_manager.initialize_remote_backend(checkpoint_config).await
+                .context("Failed to initialize remote checkpoint backend")?;
+        }
+
+        Ok(())
+    }
+
     // ========================================================================
     // SessionManager accessors (for backward compatibility)
     // ========================================================================

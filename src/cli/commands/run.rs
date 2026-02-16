@@ -92,12 +92,9 @@ pub async fn execute_run<C: CommandContext>(
         agent_mode, run_mode
     ));
 
-    let mut agent = crate::agent::Agent::new_with_bases(
-        config_path.as_deref(),
-        env_path.as_deref(),
+    let mut agent = crate::agent::Agent::new_from_config(
+        ctx.config().clone(),
         Some(agent_mode),
-        template_base.as_deref(),
-        log_base.as_deref(),
     )
     .await
     .map_err(|e| CliError::ExecutionError(format!("Failed to create agent: {}", e)))?;
@@ -105,7 +102,7 @@ pub async fn execute_run<C: CommandContext>(
     // Initialize remote checkpoint backend if configured
     #[cfg(feature = "storage-documentdb")]
     {
-        if let Err(e) = agent.initialize_remote_checkpoint_backend(config_path.as_deref()).await {
+        if let Err(e) = agent.initialize_remote_checkpoint_backend_from_config(ctx.config()).await {
             ctx.log_info(&format!("Note: Remote checkpoint backend not initialized: {}", e));
         }
     }
