@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-02-17
+
+### Fixed
+- **Assistant text responses now saved in conversation history**: `handle_content_response` in `agent_orchestration.rs` was printing LLM text responses to stdout but never adding them to `chat_formatter`. This caused assistant messages to be missing from checkpoint conversation snapshots, breaking resume functionality. Fixed by calling `add_assistant_message()` before printing.
+
 ## [0.4.4] - 2026-02-17
 
 ### Removed

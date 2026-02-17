@@ -360,6 +360,9 @@ async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
 async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String) -> Result<bool> {
     agent.log_llm_response(&response_text, Some(&agent.default_model()))?;
 
+    // Store assistant message in conversation history (for checkpoints and context)
+    agent.chat_formatter_mut().add_assistant_message(response_text.clone(), None);
+
     if !response_text.trim().is_empty() {
         println!("\n{}\n", response_text);
     }
