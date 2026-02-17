@@ -6,14 +6,11 @@ use crate::cli::error::{CliError, CliResult};
 use crate::cli::adapters::CommandContext;
 use crate::orchestration::AgentContext;
 use crate::agent::AgentMode;
-use std::path::PathBuf;
 
 /// Options for running an agent
 #[derive(Debug, Clone)]
 pub struct RunOptions {
     pub task: String,
-    pub config_path: Option<PathBuf>,
-    pub env_path: Option<PathBuf>,
     pub yolo: bool,
     pub mode: Option<String>,
     pub run_mode: Option<String>,
@@ -25,49 +22,14 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<()> {
-    use std::env;
-    use std::fs;
-
-    let RunOptions { task, config_path, env_path, yolo, mode, run_mode, verbose } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose } = options;
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
 
-    // Determine paths based on run mode
-    let (config_path, env_path, template_base, log_base) = match run_mode.as_str() {
-        "global" => {
-            // Get agent name from context config
-            let agent_name = &ctx.config().agent.name;
-            
-            // Get home directory
-            let home_dir = env::var("HOME").map_err(|_| {
-                CliError::ConfigError("Could not determine home directory from HOME environment variable".to_string())
-            })?;
-            let home_path = PathBuf::from(home_dir);
-            let share_dir = home_path.join(format!(".{}", agent_name));
-
-            // Global paths
-            let config_file_name = format!("{}.toml", agent_name);
-            let config_path = share_dir.join("config").join(&config_file_name);
-            let env_path = share_dir.join(".env");
-            let template_base = share_dir.join("templates");
-
-            // Create logs directory in current directory for global mode
-            let log_base = PathBuf::from("/tmp");
-            fs::create_dir_all(&log_base)
-                .map_err(|e| CliError::IoError(e))?;
-
-            (
-                Some(config_path),
-                Some(env_path),
-                Some(template_base),
-                Some(log_base),
-            )
-        }
-        "local" => {
-            // Local paths (existing behavior)
-            (config_path, env_path, None, None)
-        }
+    // Validate run mode
+    match run_mode.as_str() {
+        "global" | "local" => {}
         _ => {
             return Err(CliError::ValidationError(format!(
                 "Invalid run mode: {}. Use 'local' or 'global'",
@@ -102,7 +64,7 @@ pub async fn execute_run<C: CommandContext>(
     // Initialize remote checkpoint backend if configured
     #[cfg(feature = "storage-documentdb")]
     {
-        if let Err(e) = agent.initialize_remote_checkpoint_backend_from_config(ctx.config()).await {
+        if let Err(e) = agent.initialize_remote_checkpoint_backend(ctx.config()).await {
             ctx.log_info(&format!("Note: Remote checkpoint backend not initialized: {}", e));
         }
     }

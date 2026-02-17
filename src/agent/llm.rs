@@ -269,11 +269,13 @@ impl super::Agent {
 mod tests {
     use super::super::Agent;
     use crate::test_utils;
+    use crate::config::ConfigurationLoader;
 
-    #[test]
-    fn parse_task_classification_recognizes_known_types() {
+    #[tokio::test]
+    async fn parse_task_classification_recognizes_known_types() {
         let _guard = test_utils::setup_env();
-        let agent = Agent::new(None, None, None).unwrap();
+        let config = ConfigurationLoader::get_default_config();
+        let agent = Agent::new_from_config(config, None).await.unwrap();
 
         let response = "TASK_CLASSIFICATION: bug_fix";
         assert_eq!(
@@ -288,10 +290,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_response_detects_submit_completion() {
+    #[tokio::test]
+    async fn parse_response_detects_submit_completion() {
         let _guard = test_utils::setup_env();
-        let agent = Agent::new(None, None, None).unwrap();
+        let config = ConfigurationLoader::get_default_config();
+        let agent = Agent::new_from_config(config, None).await.unwrap();
 
         let response = r#"THOUGHT: Task complete
 
@@ -300,10 +303,11 @@ mod tests {
         assert!(is_completion);
     }
 
-    #[test]
-    fn extract_json_objects_handles_multiple_objects() {
+    #[tokio::test]
+    async fn extract_json_objects_handles_multiple_objects() {
         let _guard = test_utils::setup_env();
-        let agent = Agent::new(None, None, None).unwrap();
+        let config = ConfigurationLoader::get_default_config();
+        let agent = Agent::new_from_config(config, None).await.unwrap();
 
         let response = r#"
         Some text
@@ -318,10 +322,11 @@ mod tests {
         assert!(objects[1].contains("\"submit\""));
     }
 
-    #[test]
-    fn extract_tool_calls_parses_json_tool_calls() {
+    #[tokio::test]
+    async fn extract_tool_calls_parses_json_tool_calls() {
         let _guard = test_utils::setup_env();
-        let agent = Agent::new(None, None, None).unwrap();
+        let config = ConfigurationLoader::get_default_config();
+        let agent = Agent::new_from_config(config, None).await.unwrap();
 
         let response = r#"{"name": "run_command", "arguments": {"command": "ls -la"}}
 {"name": "submit", "arguments": {}}"#;

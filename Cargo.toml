@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -80,6 +80,7 @@ mongodb = { version = "3.1", optional = true }
 tempfile = "3.0"
 tokio = { version = "1.0", features = ["macros", "rt", "test-util", "time"] }
 tokio-test = "0.4"
+toml = "0.8"
 serde_json = "1.0"
 anyhow = "1.0"
 async-trait = "0.1"

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-02-17
+
+### Removed
+- **`run_from_config_path()`**: Removed file-reading CLI entry point. Use `run_from_raw_config()` instead.
+- **`DefaultCommandContext`**: Removed file-reading command context. Use `RawConfigCommandContext` instead.
+- **`Agent::new()`**: Removed file-reading agent constructor.
+- **`Agent::new_with_bases()`**: Removed file-reading agent constructor with custom base paths.
+- **`initialize_remote_checkpoint_backend(&Path)`**: Removed file-reading checkpoint initializer. Use the `&Configuration` variant.
+- **`ConfigurationLoader::new_with_bases()`**: Removed redundant constructor.
+
+### Changed
+- **`ConfigurationLoader::get_default_config()`**: Now public for test usage.
+- All config must flow from the calling application. ABK never reads config files directly.
+
 ## [0.4.3] - 2026-02-17
 
 ### Fixed

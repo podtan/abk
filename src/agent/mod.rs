@@ -93,22 +93,6 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// Initialize the agent.
-    ///
-    /// # Arguments
-    /// * `config_path` - Path to TOML config file.
-    /// * `env_file` - Path to .env file.
-    /// * `mode` - Initial interaction mode.
-    /// * `template_base` - Base path for templates (optional).
-    /// * `log_base` - Base path for logs (optional).
-    pub async fn new(
-        config_path: Option<&Path>,
-        env_file: Option<&Path>,
-        mode: Option<AgentMode>,
-    ) -> Result<Self> {
-        Self::new_with_bases(config_path, env_file, mode, None, None).await
-    }
-
     /// Initialize the agent from a pre-parsed Configuration.
     ///
     /// This avoids reading any config files from disk. Use this when the caller
@@ -218,150 +202,6 @@ impl Agent {
         })
     }
 
-    /// Initialize the agent with custom base paths.
-    ///
-    /// # Arguments
-    /// * `config_path` - Path to TOML config file.
-    /// * `env_file` - Path to .env file.
-    /// * `mode` - Initial interaction mode.
-    /// * `template_base` - Base path for templates (optional).
-    /// * `log_base` - Base path for logs (optional).
-    pub async fn new_with_bases(
-        config_path: Option<&Path>,
-        env_file: Option<&Path>,
-        mode: Option<AgentMode>,
-        template_base: Option<&Path>,
-        log_base: Option<&Path>,
-    ) -> Result<Self> {
-        // Load environment and configuration
-        let env = EnvironmentLoader::new(env_file);
-        let config = ConfigurationLoader::new_with_bases(config_path, template_base, log_base)?;
-
-        // Initialize components
-        let chat_formatter = ChatMLFormatter::new();
-
-        // Load lifecycle extension (uses new extension system)
-        let lifecycle = crate::lifecycle::find_lifecycle_plugin().await
-            .context("Failed to load lifecycle plugin")?;
-
-        // Create provider using factory (new provider-based architecture)
-        let provider = ProviderFactory::create(&env).await
-            .context("Failed to create LLM provider")?;
-
-        let timeout_seconds = config.get_u64("execution.timeout_seconds").unwrap_or(120);
-        let enable_validation = config
-            .get_bool("execution.enable_dangerous_command_validation")
-            .unwrap_or(true);
-        let executor =
-            CommandExecutor::new(timeout_seconds, Some(Path::new(".")), enable_validation);
-
-        let log_file_path = config.get_string("logging.log_file").map(PathBuf::from);
-        let log_level = config.get_string("logging.log_level");
-        let logger = Logger::new(log_file_path.as_deref(), log_level.as_deref())?;
-
-        // Agent state
-        let default_mode_str = config
-            .get_string("agent.default_mode")
-            .unwrap_or_else(|| "confirm".to_string());
-        let default_mode = default_mode_str.parse().unwrap_or(AgentMode::Confirm);
-        let current_mode = mode.unwrap_or(default_mode);
-        // Capture tools-specific settings before moving `config` into the struct below
-
-        // Environment validation: WASM providers read their own env vars via WASI.
-        // Host only validates LLM_PROVIDER selection.
-
-        // Initialize session manager with checkpoint support
-        // Load checkpoint configuration directly from TOML
-        let checkpointing_enabled = {
-            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
-            let home_dir = std::env::var("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("."));
-            let config_path = home_dir.join(format!(".{}/config/{}.toml", agent_name, agent_name));
-
-            if config_path.exists() {
-                match std::fs::read_to_string(&config_path) {
-                    Ok(content) => match toml::from_str::<toml::Value>(&content) {
-                        Ok(config) => config
-                            .get("checkpointing")
-                            .and_then(|c| c.get("enabled"))
-                            .and_then(|e| e.as_bool())
-                            .unwrap_or(false),
-                        Err(_) => false,
-                    },
-                    Err(_) => false,
-                }
-            } else {
-                false
-            }
-        };
-
-        // Initialize session manager (replaces checkpoint_storage_manager)
-        let session_manager = Some(crate::checkpoint::SessionManager::new(checkpointing_enabled)
-            .context("Failed to initialize session manager")?);
-
-        // Load MCP tools if configured
-        #[cfg(feature = "registry-mcp")]
-        let mcp_tools = {
-            if let Some(ref mcp_config) = config.config.mcp {
-                if mcp_config.enabled {
-                    match McpToolLoader::new(mcp_config).await {
-                        Ok(loader) => {
-                            if loader.has_tools() {
-                                Some(loader)
-                            } else {
-                                None
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: Failed to load MCP tools: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-
-        let open_window_size = config.config.tools.open_file_window_size;
-        Ok(Self {
-            env,
-            config,
-            chat_formatter,
-            lifecycle,
-            provider, // Provider-based architecture
-            executor,
-            logger,
-            current_mode,
-            current_step: WorkflowStep::Analyze,
-            current_iteration: 1,
-            api_call_count: 0, // Initialize API call counter
-            task_description: String::new(),
-            completion_marker: "TASK_COMPLETED".to_string(),
-            is_running: false,
-            tool_registry: create_tool_registry_with_open_window_size(open_window_size),
-            execution_mode: ExecutionMode::Hybrid,
-            #[cfg(feature = "registry-mcp")]
-            mcp_tools,
-            session_manager,
-            // TEMPORARY: Initialize deprecated fields for backward compatibility
-            checkpoint_storage_manager: None,
-            current_session: None,
-            checkpointing_enabled,
-            classification_done: false,
-            classified_task_type: None,
-            template_sent: false,
-            initial_task_description: String::new(),
-            initial_additional_context: None,
-            // Initialize conversation turn management for X-Request-Id
-            current_turn_id: None,
-            turn_request_count: 0,
-        })
-    }
-
     /// Set the interaction mode.
     ///
     /// # Arguments
@@ -373,68 +213,19 @@ impl Agent {
         Ok(())
     }
     
-    /// Initialize the remote storage backend for checkpoints.
+    /// Initialize the remote storage backend from a pre-parsed Configuration.
     ///
     /// This method should be called after agent creation to enable remote
-    /// storage backends like DocumentDB. It loads the checkpoint config
-    /// from the agent's config file and initializes the backend connection.
+    /// storage backends like DocumentDB. It uses the pre-parsed Configuration
+    /// to avoid reading config files from disk.
     ///
     /// # Arguments
-    /// * `config_path` - Path to the TOML config file containing checkpoint settings
+    /// * `config` - Pre-parsed Configuration containing checkpoint settings
     ///
     /// # Returns
     /// Ok(()) if successful, or an error if backend initialization fails.
     #[cfg(feature = "storage-documentdb")]
-    pub async fn initialize_remote_checkpoint_backend(&mut self, config_path: Option<&Path>) -> Result<()> {
-        use crate::checkpoint::GlobalCheckpointConfig;
-        
-        // Load checkpoint config from TOML
-        let config_path = config_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
-            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
-            let home_dir = std::env::var("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("."));
-            home_dir.join(format!(".{}/config/{}.toml", agent_name, agent_name))
-        });
-        
-        if !config_path.exists() {
-            return Ok(()); // No config file, skip remote backend
-        }
-        
-        let content = std::fs::read_to_string(&config_path)
-            .with_context(|| format!("Failed to read config: {}", config_path.display()))?;
-            
-        let config_value: toml::Value = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse TOML: {}", config_path.display()))?;
-            
-        // Check if checkpointing section exists
-        let checkpointing = match config_value.get("checkpointing") {
-            Some(c) => c,
-            None => return Ok(()), // No checkpointing config
-        };
-        
-        // Re-serialize just the checkpointing section and parse with defaults
-        let checkpointing_toml = toml::to_string(checkpointing)
-            .with_context(|| "Failed to serialize checkpointing config")?;
-        
-        let checkpoint_config: GlobalCheckpointConfig = toml::from_str(&checkpointing_toml)
-            .with_context(|| "Failed to parse checkpoint config")?;
-        
-        // Initialize the remote backend in session manager
-        if let Some(ref mut session_manager) = self.session_manager {
-            session_manager.initialize_remote_backend(checkpoint_config).await
-                .context("Failed to initialize remote checkpoint backend")?;
-        }
-        
-        Ok(())
-    }
-
-    /// Initialize the remote storage backend from a pre-parsed Configuration.
-    ///
-    /// This avoids re-reading the config file from disk. Use this when the
-    /// caller has already loaded and merged the configuration.
-    #[cfg(feature = "storage-documentdb")]
-    pub async fn initialize_remote_checkpoint_backend_from_config(&mut self, config: &crate::config::Configuration) -> Result<()> {
+    pub async fn initialize_remote_checkpoint_backend(&mut self, config: &crate::config::Configuration) -> Result<()> {
         use crate::checkpoint::GlobalCheckpointConfig;
 
         let config_value = toml::Value::try_from(config)

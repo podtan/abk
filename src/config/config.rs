@@ -220,12 +220,27 @@ pub struct ConfigurationLoader {
 }
 
 impl ConfigurationLoader {
-    /// Initialize configuration loader.
+    /// Initialize configuration loader from a config file path.
     ///
     /// # Arguments
     /// * `config_path` - Path to TOML config file. If None, uses default config.
     pub fn new(config_path: Option<&Path>) -> Result<Self> {
-        Self::new_with_bases(config_path, None, None)
+        let config_path = config_path
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("config/agent.toml"));
+
+        let config = if config_path.exists() {
+            Self::load_config(&config_path)?
+        } else {
+            Self::get_default_config()
+        };
+
+        Ok(Self {
+            config_path,
+            config,
+            template_base: None,
+            _log_base: None,
+        })
     }
 
     /// Create a configuration loader from a pre-parsed Configuration.
@@ -249,55 +264,6 @@ impl ConfigurationLoader {
         }
     }
 
-    /// Initialize configuration loader with custom base paths.
-    ///
-    /// # Arguments
-    /// * `config_path` - Path to TOML config file. If None, uses default config.
-    /// * `template_base` - Base path for templates. If None, uses paths from config.
-    /// * `log_base` - Base path for logs. If None, uses path from config.
-    pub fn new_with_bases(
-        config_path: Option<&Path>,
-        template_base: Option<&Path>,
-        log_base: Option<&Path>,
-    ) -> Result<Self> {
-        let config_path = config_path
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("config/agent.toml"));
-
-        let mut config = if config_path.exists() {
-            Self::load_config(&config_path)?
-        } else {
-            Self::get_default_config()
-        };
-
-        // template_base parameter kept for backward compatibility but templates
-        // are now handled by lifecycle WASM plugins
-        let _ = template_base; // Suppress unused variable warning
-
-        if let Some(log_base) = log_base {
-            // Use agent name from config for log directory
-            let agent_name = &config.agent.name;
-            let log_dir = log_base.join(agent_name);
-            fs::create_dir_all(&log_dir).with_context(|| {
-                format!("Failed to create log directory: {}", log_dir.display())
-            })?;
-            let filename = format!(
-                "{}_{}_{}.md",
-                agent_name,
-                Utc::now().timestamp_millis(),
-                std::process::id()
-            );
-            config.logging.log_file = log_dir.join(filename).to_string_lossy().to_string();
-        }
-
-        Ok(Self {
-            config_path,
-            config,
-            template_base: template_base.map(|p| p.to_path_buf()),
-            _log_base: log_base.map(|p| p.to_path_buf()),
-        })
-    }
-
     /// Load configuration from TOML file.
     fn load_config(path: &Path) -> Result<Configuration> {
         let content = fs::read_to_string(path)
@@ -308,7 +274,7 @@ impl ConfigurationLoader {
     }
 
     /// Get default configuration.
-    fn get_default_config() -> Configuration {
+    pub fn get_default_config() -> Configuration {
         Configuration {
             agent: AgentConfig {
                 name: "NO_AGENT_NAME".to_string(),
