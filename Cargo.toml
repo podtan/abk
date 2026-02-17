@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"

@@ -63,11 +63,21 @@ pub async fn run_from_raw_config(
         }
     }
     
-    // Parse TOML configuration
+    // Pre-extract agent name and set ABK_AGENT_NAME BEFORE full config parsing.
+    // This is critical because serde defaults (e.g., checkpoint storage_location)
+    // read ABK_AGENT_NAME during deserialization. Without this, storage_location
+    // defaults to ~/.NO_AGENT_NAME instead of ~/.{agent_name}.
+    if let Ok(partial) = config_toml.parse::<toml::Value>() {
+        if let Some(name) = partial.get("agent").and_then(|a| a.get("name")).and_then(|n| n.as_str()) {
+            std::env::set_var("ABK_AGENT_NAME", name);
+        }
+    }
+    
+    // Parse TOML configuration (serde defaults now use correct ABK_AGENT_NAME)
     let config: crate::config::Configuration = toml::from_str(config_toml)
         .map_err(|e| format!("Failed to parse config TOML: {}", e))?;
     
-    // Set ABK_AGENT_NAME for other subsystems
+    // Ensure ABK_AGENT_NAME is set (redundant but safe)
     std::env::set_var("ABK_AGENT_NAME", &config.agent.name);
     
     // Create context from parsed config
