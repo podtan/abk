@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-02-17
+
+### Added
+- **Final checkpoint save**: `stop_session()` now saves a final checkpoint with all messages including the last assistant response, ensuring conversation snapshots are complete
+
+### Changed
+- **GenerateResult::ToolCalls handling**: Updated all orchestration code to use new struct variant with optional content field (from umf 0.2.1)
+- **handle_tool_calls signature**: Now accepts optional content parameter to preserve text that precedes tool calls
+
+### Fixed
+- **Assistant text responses preserved with tool calls**: When LLM returns both text and tool calls (e.g., jokes followed by submit), the text content is now captured in the assistant message
+- **Checkpoint conversation snapshots complete**: Full conversation history including final assistant responses now saved in checkpoints
+
+### Dependencies
+- Updated umf to 0.2.1
+
 ## [0.4.6] - 2026-02-17
 
 ### Fixed

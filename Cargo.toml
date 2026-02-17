@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -52,8 +52,7 @@ thiserror = { version = "1.0", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util", "sync", "time"], optional = true }
 sha2 = { version = "0.10", optional = true }
 uuid = { version = "1.0", features = ["v4"], optional = true }
-# Use crates.io UMF for release
-umf = { version = "0.2.0", features = ["streaming", "internal", "mcp"], optional = true }
+umf = { version = "0.2.1", features = ["streaming", "internal", "mcp"], optional = true }
 uname = { version = "0.1", optional = true }
 hostname = { version = "0.4", optional = true }
 
@@ -84,8 +83,7 @@ toml = "0.8"
 serde_json = "1.0"
 anyhow = "1.0"
 async-trait = "0.1"
-# Use crates.io UMF for release
-umf = { version = "0.2.0", features = ["streaming", "internal", "mcp"] }
+umf = { version = "0.2.1", features = ["streaming", "internal", "mcp"] }
 
 
 [workspace]

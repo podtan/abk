@@ -155,8 +155,8 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
 
         // Process response
         match response {
-            GenerateResult::ToolCalls(tool_calls) => {
-                if !handle_tool_calls(agent, tool_calls).await? {
+            GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                if !handle_tool_calls(agent, tool_calls, content).await? {
                     return stop_session(agent, "Task completed via submit tool").await;
                 }
             }
@@ -219,9 +219,9 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 }
                 
                 match result {
-                    GenerateResult::ToolCalls(tool_calls) => {
+                    GenerateResult::ToolCalls { calls: tool_calls, content } => {
                         // Check for completion
-                        if handle_tool_calls(agent, tool_calls).await? {
+                        if handle_tool_calls(agent, tool_calls, content).await? {
                             continue; // Continue loop
                         } else {
                             // Stop requested (submit tool or max iterations)
@@ -286,16 +286,20 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
 }
 
 /// Handle tool calls - returns false if should stop
-async fn handle_tool_calls<A: AgentContext>(agent: &mut A, tool_calls: Vec<umf::ToolCall>) -> Result<bool> {
+async fn handle_tool_calls<A: AgentContext>(
+    agent: &mut A, 
+    tool_calls: Vec<umf::ToolCall>,
+    content: Option<String>,
+) -> Result<bool> {
     println!(
         "🔧 Executing {} tools: [{}]",
         tool_calls.len(),
         tool_calls.iter().map(|tc| tc.function.name.as_str()).collect::<Vec<_>>().join(", ")
     );
 
-    // Add assistant message
-    let content = agent.generate_assistant_content_for_tools(&tool_calls);
-    agent.chat_formatter_mut().add_assistant_message_with_tool_calls(content, tool_calls.clone());
+    // Add assistant message - use provided content or generate placeholder
+    let message_content = content.unwrap_or_else(|| agent.generate_assistant_content_for_tools(&tool_calls));
+    agent.chat_formatter_mut().add_assistant_message_with_tool_calls(message_content, tool_calls.clone());
 
     // Check for submit
     let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
@@ -391,6 +395,14 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
 /// Stop session
 async fn stop_session<A: AgentContext>(agent: &mut A, reason: &str) -> Result<String> {
     agent.set_running(false);
+    
+    // Save final checkpoint with all messages including last assistant response
+    if agent.should_checkpoint() {
+        let final_iteration = agent.current_iteration() + 1;
+        if let Err(e) = agent.create_workflow_checkpoint(final_iteration).await {
+            agent.log_error(&format!("Failed to create final checkpoint: {}", e), None)?;
+        }
+    }
     
     if let Some(turn_id) = agent.get_current_turn_id() {
         println!("🔑 Ending conversation turn: {}", turn_id);

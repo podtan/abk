@@ -123,7 +123,10 @@ impl AgentContext for super::Agent {
                 if !collected_text.is_empty() {
                     self.logger.log_llm_response(&collected_text, Some(&self.provider.default_model()))?;
                 }
-                umf::GenerateResult::ToolCalls(collected_tool_calls)
+                umf::GenerateResult::ToolCalls { 
+                    calls: collected_tool_calls,
+                    content: if collected_text.is_empty() { None } else { Some(collected_text) },
+                }
             } else {
                 umf::GenerateResult::Content(collected_text)
             }
@@ -144,7 +147,7 @@ impl AgentContext for super::Agent {
                             },
                         })
                         .collect();
-                    umf::GenerateResult::ToolCalls(tool_calls)
+                    umf::GenerateResult::ToolCalls { calls: tool_calls, content: None }
                 }
             }
         };

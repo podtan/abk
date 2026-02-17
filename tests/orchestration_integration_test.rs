@@ -179,7 +179,7 @@ async fn test_orchestration_with_tool_calls() -> Result<()> {
     };
 
     let provider = MockProvider::new(vec![
-        GenerateResult::ToolCalls(vec![tool_call.clone()]),
+        GenerateResult::ToolCalls { calls: vec![tool_call.clone()], content: None },
         GenerateResult::Content("TASK_COMPLETE".to_string()),
     ]);
 
@@ -266,7 +266,7 @@ async fn test_orchestration_submit_completion() -> Result<()> {
     };
 
     let provider = MockProvider::new(vec![
-        GenerateResult::ToolCalls(vec![submit_call]),
+        GenerateResult::ToolCalls { calls: vec![submit_call], content: None },
     ]);
 
     let tools = MockTools::new();

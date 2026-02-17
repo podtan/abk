@@ -276,7 +276,7 @@ impl AgentRuntime {
 
             // Handle response
             match response {
-                GenerateResult::ToolCalls(tool_calls) => {
+                GenerateResult::ToolCalls { calls: tool_calls, content } => {
                     // Log tool execution
                     let tool_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
                     println!("🔧 Iteration {} → Executing {} tools: [{}]", iteration, tool_calls.len(), tool_names.join(", "));
@@ -284,8 +284,8 @@ impl AgentRuntime {
                     // Check for completion via submit tool
                     let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
 
-                    // Add assistant message with tool calls
-                    let assistant_content = format!("Executing {} tools", tool_calls.len());
+                    // Add assistant message with tool calls - use provided content or generate placeholder
+                    let assistant_content = content.unwrap_or_else(|| format!("Executing {} tools", tool_calls.len()));
                     formatter.add_assistant_message(assistant_content, Some(tool_calls.clone()));
 
                     // Execute tools

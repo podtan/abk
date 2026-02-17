@@ -400,8 +400,8 @@ where
 
             // Process response
             match response {
-                GenerateResult::ToolCalls(tool_calls) => {
-                    if !self.handle_tool_calls(tool_calls).await? {
+                GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                    if !self.handle_tool_calls_with_content(tool_calls, content).await? {
                         return self.stop_session("Task completed via submit tool").await;
                     }
                 }
@@ -472,11 +472,11 @@ where
             match self.generate_with_provider_internal(tools, true).await {
                 Ok(result) => {
                     match result {
-                        GenerateResult::ToolCalls(tool_calls) => {
+                        GenerateResult::ToolCalls { calls: tool_calls, content } => {
                             // Handle tool calls
                             let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
                             
-                            if !self.handle_tool_calls(tool_calls).await? || has_submit {
+                            if !self.handle_tool_calls_with_content(tool_calls, content).await? || has_submit {
                                 return self.stop_session("Task completed via streaming workflow").await;
                             }
 
@@ -519,8 +519,8 @@ where
                     match self.generate_with_provider_internal(fallback_tools, false).await {
                         Ok(fallback_result) => {
                             match fallback_result {
-                                GenerateResult::ToolCalls(tool_calls) => {
-                                    self.handle_tool_calls(tool_calls).await?;
+                                GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                                    self.handle_tool_calls_with_content(tool_calls, content).await?;
                                 }
                                 GenerateResult::Content(text) => {
                                     self.chat_formatter.add_assistant_message(
@@ -649,7 +649,7 @@ where
             GenerateResponse::Content(text) => Ok(GenerateResult::Content(text)),
             GenerateResponse::ToolCalls(invocations) => {
                 let tool_calls = ToolAdapter::invocations_to_tool_calls(&invocations)?;
-                Ok(GenerateResult::ToolCalls(tool_calls))
+                Ok(GenerateResult::ToolCalls { calls: tool_calls, content: None })
             }
         }
     }
@@ -731,6 +731,12 @@ where
     /// Handle tool calls execution
     /// Returns false if session should stop
     async fn handle_tool_calls(&mut self, tool_calls: Vec<umf::ToolCall>) -> Result<bool> {
+        self.handle_tool_calls_with_content(tool_calls, None).await
+    }
+
+    /// Handle tool calls execution with optional preceding content
+    /// Returns false if session should stop
+    async fn handle_tool_calls_with_content(&mut self, tool_calls: Vec<umf::ToolCall>, content: Option<String>) -> Result<bool> {
         println!(
             "🔧 API Call {} → Executing {} tools: [{}]",
             self.api_call_count,
@@ -738,8 +744,8 @@ where
             tool_calls.iter().map(|tc| tc.function.name.as_str()).collect::<Vec<_>>().join(", ")
         );
 
-        // Add assistant message with tool calls
-        let assistant_content = self.tool_executor.generate_assistant_content(&tool_calls);
+        // Add assistant message with tool calls - use provided content or generate placeholder
+        let assistant_content = content.unwrap_or_else(|| self.tool_executor.generate_assistant_content(&tool_calls));
         self.chat_formatter.add_assistant_message_with_tool_calls(
             assistant_content,
             tool_calls.clone(),
