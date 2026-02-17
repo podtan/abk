@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-02-17
+
+### Fixed
+- **Configuration struct now includes checkpointing**: Added `checkpointing` field to `Configuration` struct so checkpoint config passed from trustee is properly deserialized instead of being silently ignored.
+- **Removed disk-read fallbacks in checkpoint access**: `AbkCheckpointAccess` and `AbkRestorationAccess` no longer fall back to reading config files from disk. All config must be passed from the calling application, enforcing the design principle that ABK never reads config files directly.
+- **StorageMode now derives Copy**: The `StorageMode` enum now implements `Copy` trait for easier use in structs.
+
+### Changed
+- `AbkCheckpointAccess` now stores `GlobalCheckpointConfig` directly instead of `toml::Value`
+- `AbkRestorationAccess` now stores `GlobalCheckpointConfig` directly instead of `toml::Value`
+- Removed all `std::fs::read_to_string` fallbacks from checkpoint CLI adapters
+
 ## [0.4.2] - 2026-02-16
 
 ### Fixed

@@ -19,7 +19,7 @@ pub enum StorageBackendType {
 }
 
 /// Storage mode - determines where checkpoints are stored
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageMode {
     /// Only local file system (default when no remote backend)
@@ -37,42 +37,42 @@ pub struct StorageBackendConfig {
     /// Backend type: "file", "documentdb", or "mongodb"
     #[serde(default)]
     pub backend_type: StorageBackendType,
-    
+
     /// Storage mode: "local", "remote", or "mirror"
     /// - local: Only local files (default when backend_type is file)
     /// - remote: Only remote storage (no local files)
     /// - mirror: Both local and remote (default when remote backend is configured)
     #[serde(default)]
     pub storage_mode: StorageMode,
-    
+
     /// Connection URL for remote backends (supports env var substitution)
     /// Example: "${DOCUMENTDB_URL}" or "mongodb://localhost:10260"
     pub connection_url: Option<String>,
-    
+
     /// Database name for remote backends
     /// Example: "${DOCUMENTDB_DATABASE}" or "trustee_checkpoints"
     pub database: Option<String>,
-    
+
     /// Collection/table name for storing checkpoints
     #[serde(default = "default_collection_name")]
     pub collection: String,
-    
+
     /// Username for authentication (supports env var substitution)
     /// Example: "${DOCUMENTDB_USERNAME}"
     pub username: Option<String>,
-    
+
     /// Password for authentication (supports env var substitution)
     /// Example: "${DOCUMENTDB_PASSWORD}"
     pub password: Option<String>,
-    
+
     /// Enable TLS/SSL for connection
     #[serde(default)]
     pub tls_enabled: bool,
-    
+
     /// Allow invalid TLS certificates (for local development)
     #[serde(default)]
     pub tls_allow_invalid_certs: bool,
-    
+
     /// Connection timeout in seconds
     #[serde(default = "default_connection_timeout")]
     pub connection_timeout_secs: u64,
@@ -110,20 +110,20 @@ impl StorageBackendConfig {
         let url = self.resolve_env_var(self.connection_url.as_deref()?)?;
         let username = self.resolve_env_var(self.username.as_deref().unwrap_or(""))?;
         let password = self.resolve_env_var(self.password.as_deref().unwrap_or(""))?;
-        
+
         // Parse URL and inject credentials if needed
         if !username.is_empty() && !password.is_empty() {
             // Check if URL already has credentials
             if url.contains("@") {
                 return Some(url);
             }
-            
+
             // Inject credentials into URL
             if let Some(rest) = url.strip_prefix("mongodb://") {
                 let encoded_user = urlencoding::encode(&username);
                 let encoded_pass = urlencoding::encode(&password);
                 let mut conn_str = format!("mongodb://{}:{}@{}", encoded_user, encoded_pass, rest);
-                
+
                 // Add TLS options if enabled
                 if self.tls_enabled {
                     let separator = if conn_str.contains('?') { "&" } else { "?" };
@@ -132,11 +132,11 @@ impl StorageBackendConfig {
                         conn_str.push_str("&tlsAllowInvalidCertificates=true");
                     }
                 }
-                
+
                 return Some(conn_str);
             }
         }
-        
+
         // Return URL as-is with TLS options if needed
         let mut conn_str = url;
         if self.tls_enabled && !conn_str.contains("tls=") {
@@ -146,19 +146,19 @@ impl StorageBackendConfig {
                 conn_str.push_str("&tlsAllowInvalidCertificates=true");
             }
         }
-        
+
         Some(conn_str)
     }
-    
+
     /// Get the resolved database name
     pub fn get_database(&self) -> Option<String> {
         self.resolve_env_var(self.database.as_deref()?)
     }
-    
+
     /// Resolve environment variable placeholders like ${VAR_NAME}
     fn resolve_env_var(&self, value: &str) -> Option<String> {
         if value.starts_with("${") && value.ends_with("}") {
-            let var_name = &value[2..value.len()-1];
+            let var_name = &value[2..value.len() - 1];
             std::env::var(var_name).ok()
         } else if value.contains("${") {
             // Handle mixed content with env vars
@@ -176,7 +176,7 @@ impl StorageBackendConfig {
             Some(value.to_string())
         }
     }
-    
+
     /// Get effective storage mode based on configuration
     /// - If storage_mode is explicitly set, use that
     /// - If remote backend is configured and mode is Local, default to Mirror
@@ -184,24 +184,38 @@ impl StorageBackendConfig {
     pub fn effective_storage_mode(&self) -> StorageMode {
         match (&self.storage_mode, &self.backend_type) {
             // Explicit mode set - use it
-            (StorageMode::Remote, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => StorageMode::Remote,
-            (StorageMode::Mirror, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => StorageMode::Mirror,
+            (StorageMode::Remote, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => {
+                StorageMode::Remote
+            }
+            (StorageMode::Mirror, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => {
+                StorageMode::Mirror
+            }
             (StorageMode::Local, StorageBackendType::File) => StorageMode::Local,
             // Remote backend configured but mode is Local - default to Mirror for safety
-            (StorageMode::Local, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => StorageMode::Mirror,
+            (StorageMode::Local, StorageBackendType::DocumentDB | StorageBackendType::MongoDB) => {
+                StorageMode::Mirror
+            }
             // File backend with remote modes doesn't make sense - fallback to Local
-            (StorageMode::Remote | StorageMode::Mirror, StorageBackendType::File) => StorageMode::Local,
+            (StorageMode::Remote | StorageMode::Mirror, StorageBackendType::File) => {
+                StorageMode::Local
+            }
         }
     }
-    
+
     /// Check if local storage should be used
     pub fn should_use_local(&self) -> bool {
-        matches!(self.effective_storage_mode(), StorageMode::Local | StorageMode::Mirror)
+        matches!(
+            self.effective_storage_mode(),
+            StorageMode::Local | StorageMode::Mirror
+        )
     }
-    
+
     /// Check if remote storage should be used
     pub fn should_use_remote(&self) -> bool {
-        matches!(self.effective_storage_mode(), StorageMode::Remote | StorageMode::Mirror)
+        matches!(
+            self.effective_storage_mode(),
+            StorageMode::Remote | StorageMode::Mirror
+        )
     }
 }
 
@@ -299,44 +313,54 @@ impl Default for ProjectCheckpointConfig {
 #[serde(default)]
 pub struct RetentionPolicy {
     #[serde(default = "default_retention_days")]
-    pub max_age_days: Option<u32>,      // Delete data older than N days
+    pub max_age_days: Option<u32>, // Delete data older than N days
     #[serde(default = "default_retention_size")]
     pub max_total_size_gb: Option<u32>, // Delete oldest when total size exceeds N GB
     #[serde(default = "default_sessions_per_project")]
     pub max_sessions_per_project: Option<u32>, // Keep only N newest sessions per project
     #[serde(default = "default_cleanup_interval")]
-    pub cleanup_interval_hours: u32,    // Run cleanup every N hours
+    pub cleanup_interval_hours: u32, // Run cleanup every N hours
     #[serde(default = "default_true")]
-    pub enable_auto_cleanup: bool,      // Automatically clean up expired data
+    pub enable_auto_cleanup: bool, // Automatically clean up expired data
     #[serde(default = "default_true")]
-    pub preserve_tagged: bool,          // Never delete tagged checkpoints
+    pub preserve_tagged: bool, // Never delete tagged checkpoints
     #[serde(default = "default_true")]
     pub preserve_active_sessions: bool, // Never delete active sessions
 }
 
-fn default_retention_days() -> Option<u32> { Some(30) }
-fn default_retention_size() -> Option<u32> { Some(10) }
-fn default_sessions_per_project() -> Option<u32> { Some(20) }
-fn default_cleanup_interval() -> u32 { 24 }
-fn default_true() -> bool { true }
+fn default_retention_days() -> Option<u32> {
+    Some(30)
+}
+fn default_retention_size() -> Option<u32> {
+    Some(10)
+}
+fn default_sessions_per_project() -> Option<u32> {
+    Some(20)
+}
+fn default_cleanup_interval() -> u32 {
+    24
+}
+fn default_true() -> bool {
+    true
+}
 
 /// Git integration configuration
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
 pub struct GitIntegrationConfig {
     #[serde(default)]
-    pub enabled: bool,                         // Enable git integration
+    pub enabled: bool, // Enable git integration
     pub shadow_repo_location: Option<PathBuf>, // Location for shadow repos
     #[serde(default)]
-    pub auto_commit_before_checkpoint: bool,   // Auto-commit changes before checkpoint
+    pub auto_commit_before_checkpoint: bool, // Auto-commit changes before checkpoint
     #[serde(default = "default_true")]
-    pub create_git_snapshots: bool,            // Create git snapshots of file system
+    pub create_git_snapshots: bool, // Create git snapshots of file system
     #[serde(default = "default_true")]
-    pub track_uncommitted_changes: bool,       // Track uncommitted changes in checkpoints
+    pub track_uncommitted_changes: bool, // Track uncommitted changes in checkpoints
     #[serde(default = "default_true")]
-    pub exclude_gitignored_files: bool,        // Exclude gitignored files from checkpoints
+    pub exclude_gitignored_files: bool, // Exclude gitignored files from checkpoints
     #[serde(default = "default_commit_message_template")]
-    pub commit_message_template: String,       // Template for commit messages
+    pub commit_message_template: String, // Template for commit messages
 }
 
 fn default_commit_message_template() -> String {
@@ -515,9 +539,10 @@ pub struct MigrationReport {
 /// Get the default storage location (~/.{agent_name})
 /// Uses ABK_AGENT_NAME environment variable, defaults to "NO_AGENT_NAME" if not set
 fn get_default_storage_location() -> PathBuf {
-    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+    let agent_name =
+        std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     let dir_name = format!(".{}", agent_name);
-    
+
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(&dir_name)
     } else {
@@ -600,10 +625,7 @@ impl ProjectConfigManager {
         use std::fs;
 
         let content = fs::read_to_string(path).map_err(|e| {
-            super::errors::CheckpointError::config(format!(
-                "Failed to read projects config: {}",
-                e
-            ))
+            super::errors::CheckpointError::config(format!("Failed to read projects config: {}", e))
         })?;
 
         let projects: HashMap<String, ProjectCheckpointConfig> =
@@ -784,10 +806,7 @@ impl ConfigMigrator {
 
         // Read existing config
         let content = std::fs::read_to_string(config_path).map_err(|e| {
-            super::errors::CheckpointError::config(format!(
-                "Failed to read config file: {}",
-                e
-            ))
+            super::errors::CheckpointError::config(format!("Failed to read config file: {}", e))
         })?;
 
         // Try to parse as current format
@@ -815,9 +834,7 @@ impl ConfigMigrator {
     }
 
     /// Create default global configuration
-    fn create_default_global_config(
-        config_path: &Path,
-    ) -> super::errors::CheckpointResult<()> {
+    fn create_default_global_config(config_path: &Path) -> super::errors::CheckpointResult<()> {
         use std::fs;
 
         // Create config directory if needed

@@ -27,6 +27,8 @@ pub struct Configuration {
     pub search_filtering: Option<SearchFilteringConfig>,
     pub llm: Option<LlmConfig>,
     pub mcp: Option<McpConfig>,
+    #[cfg(feature = "checkpoint")]
+    pub checkpointing: Option<crate::checkpoint::GlobalCheckpointConfig>,
     #[cfg(feature = "cli")]
     pub cli: Option<crate::cli::config::CliConfig>,
 }
@@ -363,6 +365,8 @@ impl ConfigurationLoader {
                 },
             },
             mcp: None,
+            #[cfg(feature = "checkpoint")]
+            checkpointing: None,
             #[cfg(feature = "cli")]
             cli: None,
         }
