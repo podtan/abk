@@ -707,6 +707,18 @@ impl LlmProvider for WasmProvider {
                             if event.contains("data: ") {
                                 // Call WASM to handle stream chunk (pass complete event including event: line if present)
                                 if let Ok(delta) = process_stream_chunk(&component, &engine, &event).await {
+                                    // Handle reasoning delta (from thinking models like GLM, Qwen)
+                                    if let Some(reasoning) = delta.reasoning {
+                                        // Print reasoning to stderr so it's visible but separate from content
+                                        eprint!("\x1b[90m{}\x1b[0m", reasoning);
+                                        use std::io::Write;
+                                        let _ = std::io::stderr().flush();
+                                        // EMIT this chunk
+                                        if tx.send(Ok(crate::provider::StreamChunk::Reasoning(reasoning))).is_err() {
+                                            return; // Receiver dropped
+                                        }
+                                    }
+                                    
                                     if let Some(content) = delta.content {
                                         // Print content to stdout in real-time
                                         print!("{}", content);

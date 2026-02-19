@@ -388,9 +388,9 @@ dependencies = [
 
 [[package]]
 name = "cats"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3975a24975e268a07977ab445e753470b3c61988a9716a06a1cb6890130a1ba0"
+checksum = "925267bd1206e3f55473432b9970a747d4bb5dd9adf10df250d1a8d9a4969513"
 dependencies = [
  "anyhow",
  "clap",
@@ -3352,8 +3352,6 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 [[package]]
 name = "umf"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb9ecabc9f1f97fb0d8e300fe682847738650beb5e8fef2b421cfe497f7e81e8"
 dependencies = [
  "futures-util",
  "serde",

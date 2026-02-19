@@ -53,6 +53,8 @@ interface adapter {
     record content-delta {
         /// Text content delta (if any)
         content: option<string>,
+        /// Reasoning/thinking content delta (if any)
+        reasoning: option<string>,
         /// Tool call delta (if any)
         tool-call-delta: option<string>,
     }
