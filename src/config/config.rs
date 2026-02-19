@@ -27,10 +27,23 @@ pub struct Configuration {
     pub search_filtering: Option<SearchFilteringConfig>,
     pub llm: Option<LlmConfig>,
     pub mcp: Option<McpConfig>,
+    pub lifecycle: Option<LifecycleConfig>,
     #[cfg(feature = "checkpoint")]
     pub checkpointing: Option<crate::checkpoint::GlobalCheckpointConfig>,
     #[cfg(feature = "cli")]
     pub cli: Option<crate::cli::config::CliConfig>,
+}
+
+/// Lifecycle extension configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LifecycleConfig {
+    /// Enable lifecycle extension (templates, task classification)
+    #[serde(default = "default_lifecycle_enabled")]
+    pub enabled: bool,
+}
+
+fn default_lifecycle_enabled() -> bool {
+    true
 }
 
 /// MCP (Model Context Protocol) configuration
@@ -331,6 +344,7 @@ impl ConfigurationLoader {
                 },
             },
             mcp: None,
+            lifecycle: None,
             #[cfg(feature = "checkpoint")]
             checkpointing: None,
             #[cfg(feature = "cli")]
@@ -393,6 +407,13 @@ impl ConfigurationLoader {
                     .unwrap_or(false),
             ),
             "tools.truncate_large_results" => self.config.tools.truncate_large_results,
+            "lifecycle.enabled" => Some(
+                self.config
+                    .lifecycle
+                    .as_ref()
+                    .map(|l| l.enabled)
+                    .unwrap_or(false),
+            ),
             _ => None,
         }
     }

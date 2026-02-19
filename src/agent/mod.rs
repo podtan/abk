@@ -3,7 +3,7 @@
 use umf::chatml::ChatMLFormatter;
 use crate::checkpoint::{CheckpointStorageManager, SessionStorage};
 use crate::executor::{CommandExecutor, ExecutionResult};
-use crate::lifecycle::LifecyclePlugin;
+use crate::lifecycle::Lifecycle;
 use crate::config::{ConfigurationLoader, EnvironmentLoader};
 use crate::observability::Logger;
 use crate::provider::{ProviderFactory, LlmProvider};
@@ -48,7 +48,7 @@ pub struct Agent {
     env: EnvironmentLoader,
     config: ConfigurationLoader,
     chat_formatter: ChatMLFormatter,
-    lifecycle: LifecyclePlugin,
+    lifecycle: Box<dyn Lifecycle>,
     provider: Box<dyn LlmProvider>, // Provider-based interface
     executor: CommandExecutor,
     logger: Logger,
@@ -106,8 +106,17 @@ impl Agent {
 
         let chat_formatter = ChatMLFormatter::new();
 
-        let lifecycle = crate::lifecycle::find_lifecycle_plugin().await
-            .context("Failed to load lifecycle plugin")?;
+        // Check if lifecycle is enabled (default: false - use simple built-in lifecycle)
+        let lifecycle_enabled = config_loader
+            .get_bool("lifecycle.enabled")
+            .unwrap_or(false);
+        
+        if std::env::var("RUST_LOG").map(|v| v.to_lowercase().contains("debug")).unwrap_or(false) {
+            eprintln!("[DEBUG] Lifecycle enabled: {}", lifecycle_enabled);
+        }
+        
+        let lifecycle = crate::lifecycle::find_lifecycle_plugin_with_config(lifecycle_enabled).await
+            .context("Failed to load lifecycle")?;
 
         let provider = ProviderFactory::create(&env).await
             .context("Failed to create LLM provider")?;
