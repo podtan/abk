@@ -12,6 +12,42 @@ use wasmtime_wasi::WasiCtx;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::WasiView;
 
+/// Format a provider error with all available details
+fn format_provider_error(
+    message: String,
+    code: Option<String>,
+    http_status: Option<u16>,
+    response_body: Option<String>,
+    is_retryable: Option<bool>,
+    retry_after: Option<u32>,
+) -> String {
+    let mut parts = vec![message];
+    
+    if let Some(c) = code {
+        parts.push(format!("code={}", c));
+    }
+    if let Some(status) = http_status {
+        parts.push(format!("http_status={}", status));
+    }
+    if let Some(body) = response_body {
+        // Truncate long bodies
+        let truncated = if body.len() > 500 {
+            format!("{}... (truncated)", &body[..500])
+        } else {
+            body
+        };
+        parts.push(format!("response_body={}", truncated));
+    }
+    if let Some(retryable) = is_retryable {
+        parts.push(format!("retryable={}", retryable));
+    }
+    if let Some(seconds) = retry_after {
+        parts.push(format!("retry_after={}s", seconds));
+    }
+    
+    parts.join(" | ")
+}
+
 // Generate bindings for the full extension world (requires all interfaces)
 wasmtime::component::bindgen!({
     path: "wit/extension",
@@ -311,7 +347,9 @@ impl ExtensionInstance {
             .abk_extension_provider()
             .call_format_request(&mut self.store, &msgs, config, tools)
             .map_err(|e| ExtensionError::CallError(format!("format_request failed: {}", e)))?
-            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+            .map_err(|e| ExtensionError::ProviderError(format_provider_error(
+                e.message, e.code, e.http_status, e.response_body, e.is_retryable, e.retry_after
+            )))
     }
 
     /// Parse response from provider API (provider capability)
@@ -324,7 +362,9 @@ impl ExtensionInstance {
             .abk_extension_provider()
             .call_parse_response(&mut self.store, body, model)
             .map_err(|e| ExtensionError::CallError(format!("parse_response failed: {}", e)))?
-            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+            .map_err(|e| ExtensionError::ProviderError(format_provider_error(
+                e.message, e.code, e.http_status, e.response_body, e.is_retryable, e.retry_after
+            )))
     }
 
     /// Handle streaming chunk (provider capability)
@@ -379,7 +419,9 @@ impl ExtensionInstance {
                 enable_streaming,
             )
             .map_err(|e| ExtensionError::CallError(format!("format_request_from_json failed: {}", e)))?
-            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+            .map_err(|e| ExtensionError::ProviderError(format_provider_error(
+                e.message, e.code, e.http_status, e.response_body, e.is_retryable, e.retry_after
+            )))
     }
 }
 
@@ -474,7 +516,9 @@ impl ProviderExtensionInstance {
             .call_format_request(&mut self.store, &msgs, config, tools)
             .await
             .map_err(|e| ExtensionError::CallError(format!("format_request failed: {}", e)))?
-            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+            .map_err(|e| ExtensionError::ProviderError(format_provider_error(
+                e.message, e.code, e.http_status, e.response_body, e.is_retryable, e.retry_after
+            )))
     }
 
     /// Parse response from provider API (provider capability)
@@ -488,7 +532,9 @@ impl ProviderExtensionInstance {
             .call_parse_response(&mut self.store, body, model)
             .await
             .map_err(|e| ExtensionError::CallError(format!("parse_response failed: {}", e)))?
-            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+            .map_err(|e| ExtensionError::ProviderError(format_provider_error(
+                e.message, e.code, e.http_status, e.response_body, e.is_retryable, e.retry_after
+            )))
     }
 
     /// Handle streaming chunk (provider capability)
@@ -547,7 +593,9 @@ impl ProviderExtensionInstance {
             )
             .await
             .map_err(|e| ExtensionError::CallError(format!("format_request_from_json failed: {}", e)))?
-            .map_err(|e| ExtensionError::ProviderError(format!("{}: {:?}", e.message, e.code)))
+            .map_err(|e| ExtensionError::ProviderError(format_provider_error(
+                e.message, e.code, e.http_status, e.response_body, e.is_retryable, e.retry_after
+            )))
     }
 }
 

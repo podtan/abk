@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-02-19
+
+### Changed
+- **Enhanced provider error types**: `ProviderError` in WIT now includes `http-status`, `response-body`, `is-retryable`, and `retry-after` fields for better debugging
+- **Improved error formatting**: Host-side bindings now format all error fields into readable messages instead of opaque "Streaming workflow failed" errors
+
+### Fixed
+- **WASM extension error visibility**: Provider extensions can now report HTTP status codes, raw response bodies, and retry information when API calls fail
+
 ## [0.4.7] - 2026-02-17
 
 ### Added
