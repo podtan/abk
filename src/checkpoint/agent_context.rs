@@ -163,6 +163,12 @@ pub trait AgentContext {
     /// Set the running state.
     fn set_running(&mut self, running: bool);
 
+    /// Set whether classification is done.
+    fn set_classification_done(&mut self, done: bool);
+
+    /// Set whether template has been sent.
+    fn set_template_sent(&mut self, sent: bool);
+
     // ========================================================================
     // Provider Information (Read-Only)
     // ========================================================================

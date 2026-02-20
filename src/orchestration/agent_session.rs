@@ -727,8 +727,9 @@ where
             })
             .collect();
 
-        // Remove classify_task if classification is done
-        if self.classification_done && self.config.enable_task_classification {
+        // Remove classify_task if classification is done (regardless of config)
+        // This prevents the tool from being called multiple times
+        if self.classification_done {
             tools.retain(|t| t.function.name != "classify_task");
         }
 

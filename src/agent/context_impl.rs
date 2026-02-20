@@ -147,6 +147,14 @@ impl crate::checkpoint::AgentContext for Agent {
         self.is_running = running;
     }
 
+    fn set_classification_done(&mut self, done: bool) {
+        self.classification_done = done;
+    }
+
+    fn set_template_sent(&mut self, sent: bool) {
+        self.template_sent = sent;
+    }
+
     // ========================================================================
     // Provider Information (Read-Only)
     // ========================================================================

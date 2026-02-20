@@ -429,7 +429,8 @@ fn get_tools_for_call<A: AgentContext>(agent: &A) -> Option<Vec<umf::Tool>> {
         })
         .collect();
 
-    if agent.classification_done() && agent.enable_task_classification() {
+    // Remove classify_task if classification is done (regardless of config)
+    if agent.classification_done() {
         tools.retain(|t| t.function.name != "classify_task");
     }
 

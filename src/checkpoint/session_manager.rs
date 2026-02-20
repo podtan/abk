@@ -316,21 +316,73 @@ impl SessionManager {
             }
         }
 
-        // Check if task classification is enabled
-        let enable_classification = context
-            .get_config_value("agent.enable_task_classification")
+        // Check if lifecycle WASM is enabled
+        let lifecycle_enabled = context
+            .get_config_value("lifecycle.enabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+
+        // Check if task classification is enabled (only relevant when lifecycle WASM is enabled)
+        let enable_classification = if lifecycle_enabled {
+            context
+                .get_config_value("agent.enable_task_classification")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        } else {
+            // When lifecycle WASM is disabled, skip classification entirely
+            false
+        };
 
         if enable_classification {
             // New workflow: Task classification + modular templates
             self.start_session_with_classification(context, task_description, additional_context)
                 .await
         } else {
-            // Original workflow: Direct task template usage
-            self.start_session_legacy(context, task_description, additional_context)
+            // Simple workflow: Direct task without classification
+            self.start_session_simple(context, task_description, additional_context)
                 .await
         }
+    }
+
+    /// Start session with simple workflow (no classification, no templates).
+    ///
+    /// Used when lifecycle WASM is disabled.
+    async fn start_session_simple<C: AgentContext>(
+        &mut self,
+        context: &mut C,
+        task_description: &str,
+        additional_context: Option<&str>,
+    ) -> Result<String> {
+        // Load simple system template
+        let system_content = context
+            .load_template("system")
+            .await
+            .context("Failed to load system template")?;
+
+        // Build user message directly - no templates, no classification
+        let user_message = if let Some(ctx) = additional_context {
+            format!("{}\n\nAdditional context: {}", task_description, ctx)
+        } else {
+            task_description.to_string()
+        };
+
+        // Initialize chat with system message and direct task
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+        context.clear_messages();
+        context.add_system_message(system_content, Some(agent_name));
+        context.add_user_message(user_message, Some("user".to_string()));
+
+        // Skip classification and template logic entirely
+        self.classification_done = true;
+        self.template_sent = true;
+        context.set_classification_done(true);
+        context.set_template_sent(true);
+
+        Ok(format!(
+            "Session started in {} mode: {}",
+            context.get_current_mode(),
+            task_description
+        ))
     }
 
     /// Start session with unified classification and task execution.
