@@ -83,7 +83,7 @@ toml = "0.8"
 serde_json = "1.0"
 anyhow = "1.0"
 async-trait = "0.1"
-umf = { path = "../umf", features = ["streaming", "internal", "mcp"] }
+umf = { version = "0.2.2", features = ["streaming", "internal", "mcp"] }
 
 
 [workspace]
