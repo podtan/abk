@@ -372,6 +372,15 @@ impl LlmProvider for ExtensionProvider {
                                 if let Some(instance) = mgr.get_provider_instance_mut(&name) {
                                     if let Ok(Some(delta)) = instance.handle_stream_chunk(&event).await {
                                         match delta.delta_type.as_str() {
+                                            "reasoning" => {
+                                                if let Some(reasoning) = delta.reasoning {
+                                                    // Print reasoning to stderr in gray
+                                                    eprint!("\x1b[90m{}\x1b[0m", reasoning);
+                                                    use std::io::Write;
+                                                    let _ = std::io::stderr().flush();
+                                                    let _ = tx.send(Ok(StreamChunk::Reasoning(reasoning)));
+                                                }
+                                            }
                                             "content" => {
                                                 if let Some(content) = delta.content {
                                                     print!("{}", content);
