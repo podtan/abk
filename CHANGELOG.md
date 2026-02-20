@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-02-20
+
+### Added
+- **Reasoning/Thinking Model Support**: Full support for thinking models (GLM-4.7, GLM-5, Qwen3, DeepSeek)
+  - `GenerateResponse::Content { text, reasoning }`: Changed from tuple to struct variant with optional reasoning
+  - `StreamChunk::Reasoning` handling in extension provider (prints to stderr in gray)
+  - WIT `content-delta` now includes `reasoning` field
+- **Optional Lifecycle Extension**: New simple built-in lifecycle when WASM lifecycle is disabled
+  - `LifecycleConfig` with `enabled` field in configuration
+  - `Lifecycle` trait for polymorphic lifecycle handling
+  - `SimpleLifecycle`: Built-in minimal lifecycle without templates/classification
+  - `WasmLifecycle`: WASM-based lifecycle extension wrapper
+  - `find_lifecycle_plugin_with_config()` to select based on config
+- **AgentContext extensions**: Added `set_classification_done()` and `set_template_sent()` methods
+
+### Changed
+- **Session manager**: When `lifecycle.enabled = false`, uses simple flow (no templates, no classification)
+  - Direct system prompt + user task without intermediate steps
+  - Sets `classification_done = true` and `template_sent = true` to skip those flows
+- **Tool filtering**: Always removes `classify_task` when `classification_done = true` (regardless of config)
+- Removed legacy WASM plugin fallback from `factory.rs`
+- Updated to umf 0.2.2
+
+### Fixed
+- **Flow with disabled lifecycle**: No more classification tool calls or template placeholders when using simple lifecycle
+- **Template rendering**: SimpleLifecycle uses simple `{key}` placeholders instead of Handlebars
+
 ## [0.4.8] - 2026-02-19
 
 ### Changed
