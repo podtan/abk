@@ -19,8 +19,13 @@ pub use umf::{ToolCall, FunctionCall};
 /// Response from a generation request
 #[derive(Debug, Clone)]
 pub enum GenerateResponse {
-    /// Text content response
-    Content(String),
+    /// Text content response with optional reasoning
+    Content {
+        /// The main response text
+        text: String,
+        /// Reasoning/thinking content (for thinking models like GLM, DeepSeek)
+        reasoning: Option<String>,
+    },
     /// Tool calls that need to be executed
     ToolCalls(Vec<ToolInvocation>),
 }
@@ -59,7 +64,12 @@ pub type StreamingResponse = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Se
 ///     
 ///     let response = provider.generate(messages, &config).await?;
 ///     match response {
-///         GenerateResponse::Content(text) => println!("Response: {}", text),
+///         GenerateResponse::Content { text, reasoning } => {
+///             println!("Response: {}", text);
+///             if let Some(r) = reasoning {
+///                 println!("Reasoning: {}", r);
+///             }
+///         }
 ///         GenerateResponse::ToolCalls(calls) => println!("Tool calls: {:?}", calls),
 ///     }
 ///     Ok(())

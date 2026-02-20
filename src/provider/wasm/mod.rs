@@ -473,7 +473,10 @@ impl LlmProvider for WasmProvider {
                 .collect();
             Ok(GenerateResponse::ToolCalls(invocations))
         } else if let Some(content) = result.content {
-            Ok(GenerateResponse::Content(content))
+            Ok(GenerateResponse::Content {
+                text: content,
+                reasoning: None, // Non-streaming doesn't have reasoning
+            })
         } else {
             anyhow::bail!("Empty response from WASM parse-response")
         }
@@ -527,9 +530,16 @@ impl LlmProvider for WasmProvider {
             tokio::spawn(async move {
                 use crate::provider::StreamChunk;
                 match response {
-                    GenerateResponse::Content(content) => {
+                    GenerateResponse::Content { text, reasoning } => {
+                        // Send reasoning first if present
+                        if let Some(reasoning_text) = reasoning {
+                            for chunk in reasoning_text.chars().collect::<Vec<_>>().chunks(10) {
+                                let chunk_str: String = chunk.iter().collect();
+                                let _ = tx.send(Ok(StreamChunk::Reasoning(chunk_str)));
+                            }
+                        }
                         // Send content in chunks
-                        for chunk in content.chars().collect::<Vec<_>>().chunks(10) {
+                        for chunk in text.chars().collect::<Vec<_>>().chunks(10) {
                             let chunk_str: String = chunk.iter().collect();
                             let _ = tx.send(Ok(StreamChunk::Text(chunk_str)));
                         }

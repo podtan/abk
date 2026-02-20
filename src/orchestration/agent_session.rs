@@ -646,7 +646,7 @@ where
         };
 
         match response {
-            GenerateResponse::Content(text) => Ok(GenerateResult::Content(text)),
+            GenerateResponse::Content { text, reasoning: _ } => Ok(GenerateResult::Content(text)),
             GenerateResponse::ToolCalls(invocations) => {
                 let tool_calls = ToolAdapter::invocations_to_tool_calls(&invocations)?;
                 Ok(GenerateResult::ToolCalls { calls: tool_calls, content: None })
@@ -698,7 +698,14 @@ where
             }
             Ok(crate::provider::GenerateResponse::ToolCalls(invocations))
         } else {
-            Ok(crate::provider::GenerateResponse::Content(accumulated.text))
+            Ok(crate::provider::GenerateResponse::Content {
+                text: accumulated.text,
+                reasoning: if accumulated.reasoning.is_empty() {
+                    None
+                } else {
+                    Some(accumulated.reasoning)
+                },
+            })
         }
     }
 

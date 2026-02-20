@@ -219,7 +219,10 @@ impl LlmProvider for ExtensionProvider {
                 .collect();
             Ok(GenerateResponse::ToolCalls(invocations))
         } else {
-            Ok(GenerateResponse::Content(assistant_msg.content.unwrap_or_default()))
+            Ok(GenerateResponse::Content {
+                text: assistant_msg.content.unwrap_or_default(),
+                reasoning: None, // Non-streaming doesn't have reasoning
+            })
         }
     }
 
@@ -252,8 +255,16 @@ impl LlmProvider for ExtensionProvider {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(async move {
                 match response {
-                    GenerateResponse::Content(content) => {
-                        for chunk in content.chars().collect::<Vec<_>>().chunks(10) {
+                    GenerateResponse::Content { text, reasoning } => {
+                        // First send reasoning if present
+                        if let Some(reasoning_text) = reasoning {
+                            for chunk in reasoning_text.chars().collect::<Vec<_>>().chunks(10) {
+                                let chunk_str: String = chunk.iter().collect();
+                                let _ = tx.send(Ok(StreamChunk::Reasoning(chunk_str)));
+                            }
+                        }
+                        // Then send content
+                        for chunk in text.chars().collect::<Vec<_>>().chunks(10) {
                             let chunk_str: String = chunk.iter().collect();
                             let _ = tx.send(Ok(StreamChunk::Text(chunk_str)));
                         }

@@ -134,7 +134,7 @@ impl AgentContext for super::Agent {
             let provider_response = self.provider.generate(messages, &config).await?;
             
             match provider_response {
-                GenerateResponse::Content(text) => umf::GenerateResult::Content(text),
+                GenerateResponse::Content { text, reasoning: _ } => umf::GenerateResult::Content(text),
                 GenerateResponse::ToolCalls(invocations) => {
                     let tool_calls = invocations
                         .into_iter()

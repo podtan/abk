@@ -175,26 +175,13 @@ You have access to tools. Use them when needed to accomplish tasks.
 2. Execute the necessary actions using available tools
 3. Provide clear, helpful responses
 
-When you have completed the task, use the `submit` tool:
+When you have completed the task, use the `submit` tool to indicate completion."#;
 
-```json
-{"name": "submit", "arguments": {}}
-```
-"#;
+const SIMPLE_TASK_TEMPLATE: &str = r#"Task: {task_description}
 
-const SIMPLE_TASK_TEMPLATE: &str = r#"## Current Task
+{task_context}
 
-{{task}}
-
-{{#if additional_context}}
-## Additional Context
-
-{{additional_context}}
-{{/if}}
-
-## Instructions
-
-Complete this task. Use available tools as needed. When done, call the `submit` tool."#;
+Complete this task using available tools. When done, call the submit tool."#;
 
 impl Lifecycle for SimpleLifecycle {
     fn load_template(&self, name: &str) -> Pin<Box<dyn Future<Output = Result<String>> + Send + '_>> {
@@ -216,7 +203,7 @@ impl Lifecycle for SimpleLifecycle {
         Box::pin(async move {
             let mut result = template;
             for (key, value) in variables {
-                result = result.replace(&format!("{{{{{}}}}}", key), &value);
+                result = result.replace(&format!("{{{}}}", key), &value);
             }
             Ok(result)
         })
