@@ -156,14 +156,13 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
         // Process response
         match response {
             GenerateResult::ToolCalls { calls: tool_calls, content } => {
-                if !handle_tool_calls(agent, tool_calls, content).await? {
-                    return stop_session(agent, "Task completed via submit tool").await;
-                }
+                // Execute tools and continue loop
+                handle_tool_calls(agent, tool_calls, content).await?;
             }
             GenerateResult::Content(response_text) => {
-                if !handle_content_response(agent, response_text).await? {
-                    return stop_session(agent, "Task completed successfully").await;
-                }
+                // LLM finished naturally - stop the loop
+                handle_content_response(agent, response_text).await?;
+                return stop_session(agent, "Task completed").await;
             }
         }
     }
@@ -220,18 +219,14 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 
                 match result {
                     GenerateResult::ToolCalls { calls: tool_calls, content } => {
-                        // Check for completion
-                        if handle_tool_calls(agent, tool_calls, content).await? {
-                            continue; // Continue loop
-                        } else {
-                            // Stop requested (submit tool or max iterations)
-                            return stop_session(agent, "Task completed via submit tool").await;
-                        }
+                        // Execute tools and continue loop
+                        handle_tool_calls(agent, tool_calls, content).await?;
+                        continue;
                     }
                     GenerateResult::Content(response_text) => {
-                        if !handle_content_response(agent, response_text).await? {
-                            return stop_session(agent, "Task completed successfully").await;
-                        }
+                        // LLM finished naturally - stop the loop
+                        handle_content_response(agent, response_text).await?;
+                        return stop_session(agent, "Task completed").await;
                     }
                 }
             }
@@ -285,12 +280,12 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Unknown error")))
 }
 
-/// Handle tool calls - returns false if should stop
+/// Handle tool calls - executes tools and returns Ok(()) 
 async fn handle_tool_calls<A: AgentContext>(
     agent: &mut A, 
     tool_calls: Vec<umf::ToolCall>,
     content: Option<String>,
-) -> Result<bool> {
+) -> Result<()> {
     println!(
         "🔧 Executing {} tools: [{}]",
         tool_calls.len(),
@@ -300,9 +295,6 @@ async fn handle_tool_calls<A: AgentContext>(
     // Add assistant message - use provided content or generate placeholder
     let message_content = content.unwrap_or_else(|| agent.generate_assistant_content_for_tools(&tool_calls));
     agent.chat_formatter_mut().add_assistant_message_with_tool_calls(message_content, tool_calls.clone());
-
-    // Check for submit
-    let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
 
     // Execute tools
     let results = agent.execute_tool_calls_structured(tool_calls).await?;
@@ -327,7 +319,7 @@ async fn handle_tool_calls<A: AgentContext>(
     // Send classification template if classification just completed
     maybe_send_template(agent).await?;
 
-    Ok(!has_submit)
+    Ok(())
 }
 
 /// Send task-specific template after classification if not already sent
@@ -360,8 +352,9 @@ async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
     Ok(())
 }
 
-/// Handle content response - returns false if should stop
-async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String) -> Result<bool> {
+/// Handle content response - LLM finished naturally, add message and stop.
+/// Returns Ok(()) - the caller should stop the loop.
+async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String) -> Result<()> {
     agent.log_llm_response(&response_text, Some(&agent.default_model()))?;
 
     // Store assistant message in conversation history (for checkpoints and context)
@@ -371,25 +364,8 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
         println!("\n{}\n", response_text);
     }
 
-    // Check completion
-    if response_text.to_uppercase().contains("TASK_COMPLETED") 
-        || response_text.to_uppercase().contains("COMPLETED") {
-        return Ok(false);
-    }
-
-    // Error: no tools and no completion
-    let mut error_context = HashMap::new();
-    error_context.insert("response".to_string(), serde_json::Value::String(response_text.clone()));
-
-    let error_msg = agent.format_error(
-        "INVALID_RESPONSE",
-        "No tool calls found in response.",
-        &error_context,
-    ).await?;
-
-    agent.chat_formatter_mut().add_user_message(error_msg, Some("system".to_string()));
-    
-    Ok(true)
+    // LLM finished naturally - no error, just stop
+    Ok(())
 }
 
 /// Stop session

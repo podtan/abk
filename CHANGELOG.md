@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-21
+
+### Added
+- **Unified ToolSource Architecture**: New multi-source tool aggregation system
+  - `ToolSourceProvider` trait: Abstraction for tool providers (cats, MCP, WASM, etc.)
+  - `ToolDescriptor`: Uniform tool schema for LLM consumption
+  - `ToolResult`: Standardized tool execution result
+  - `UnifiedRegistry`: Aggregates tools from multiple sources with priority routing
+  - `NativeToolSource`: Wraps cats::ToolRegistry for in-process tools
+  - `McpToolSource`: Wraps MCP server connections for remote tools
+  - `build_registry_from_config()`: Factory function for config-driven registry creation
+- **Tool Source Configuration**: New `[[tool_sources]]` section in config
+  - `type = "native"`: In-process cats tools
+  - `type = "mcp"`: Remote MCP server tools
+  - Environment variable substitution for auth tokens (e.g., `${PDT_TOKEN}`)
+- `ToolSourceConfig` enum in config module
+
+### Changed
+- **BREAKING**: Agent loop termination now uses OpenCode's approach
+  - Removed `submit` tool requirement for completion
+  - Removed `TASK_COMPLETED`/`COMPLETED` text markers
+  - LLM returning content without tool calls now signals natural completion
+  - Tool execution always continues loop (LLM decides when to stop)
+- **BREAKING**: Removed `INVALID_RESPONSE` error for text-only responses
+  - Text responses are now treated as natural completion, not errors
+  - No more error messages sent as "user" role for missing tool calls
+- Updated to cats 0.1.4 (opencode toolset now default)
+
+### Fixed
+- Conversational tasks (e.g., "tell me jokes") now work correctly
+  - LLM can respond with text without triggering error loop
+  - Natural conversation flow preserved
+
 ## [0.4.9] - 2026-02-20
 
 ### Added

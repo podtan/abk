@@ -401,14 +401,13 @@ where
             // Process response
             match response {
                 GenerateResult::ToolCalls { calls: tool_calls, content } => {
-                    if !self.handle_tool_calls_with_content(tool_calls, content).await? {
-                        return self.stop_session("Task completed via submit tool").await;
-                    }
+                    // Continue loop after tool execution - LLM will decide when to stop
+                    self.handle_tool_calls_with_content(tool_calls, content).await?;
                 }
                 GenerateResult::Content(response_text) => {
-                    if !self.handle_content_response(response_text).await? {
-                        return self.stop_session("Task completed successfully").await;
-                    }
+                    // LLM finished naturally (no tool calls) - stop the loop
+                    self.handle_content_response(response_text).await?;
+                    return self.stop_session("Task completed").await;
                 }
             }
         }
@@ -473,41 +472,22 @@ where
                 Ok(result) => {
                     match result {
                         GenerateResult::ToolCalls { calls: tool_calls, content } => {
-                            // Handle tool calls
-                            let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
-                            
-                            if !self.handle_tool_calls_with_content(tool_calls, content).await? || has_submit {
-                                return self.stop_session("Task completed via streaming workflow").await;
-                            }
+                            // Execute tools and continue loop - LLM will decide when to stop
+                            self.handle_tool_calls_with_content(tool_calls, content).await?;
 
                             // Send template after classification
                             self.maybe_send_template().await?;
 
                             if self.current_iteration >= max_iterations {
-                                return self.stop_session("Streaming workflow completed after max iterations").await;
+                                return self.stop_session("Max iterations reached").await;
                             }
 
                             self.current_iteration += 1;
                         }
                         GenerateResult::Content(response_text) => {
-                            self.logger.log_llm_response(&response_text, Some(&self.provider.default_model()))?;
-
-                            // Check for completion markers
-                            if response_text.to_uppercase().contains("TASK_COMPLETED") 
-                                || response_text.to_uppercase().contains("COMPLETED") {
-                                return self.stop_session("Task completed via streaming response").await;
-                            }
-
-                            self.chat_formatter.add_assistant_message(
-                                response_text,
-                                Some("assistant".to_string()),
-                            );
-
-                            if self.current_iteration >= max_iterations {
-                                return self.stop_session("Streaming workflow reached max iterations").await;
-                            }
-
-                            self.current_iteration += 1;
+                            // LLM finished naturally - stop the loop
+                            self.handle_content_response(response_text).await?;
+                            return self.stop_session("Task completed").await;
                         }
                     }
                 }
@@ -521,16 +501,15 @@ where
                             match fallback_result {
                                 GenerateResult::ToolCalls { calls: tool_calls, content } => {
                                     self.handle_tool_calls_with_content(tool_calls, content).await?;
+                                    self.current_iteration += 1;
+                                    continue;
                                 }
                                 GenerateResult::Content(text) => {
-                                    self.chat_formatter.add_assistant_message(
-                                        text,
-                                        Some("assistant".to_string()),
-                                    );
+                                    // LLM finished naturally - stop the loop
+                                    self.handle_content_response(text).await?;
+                                    return self.stop_session("Task completed").await;
                                 }
                             }
-                            self.current_iteration += 1;
-                            continue;
                         }
                         Err(e2) => {
                             self.logger.log_error(&format!("Fallback failed: {}", e2), None)?;
@@ -743,7 +722,7 @@ where
     }
 
     /// Handle tool calls execution with optional preceding content
-    /// Returns false if session should stop
+    /// Returns true if session should continue, false if should stop.
     async fn handle_tool_calls_with_content(&mut self, tool_calls: Vec<umf::ToolCall>, content: Option<String>) -> Result<bool> {
         println!(
             "🔧 API Call {} → Executing {} tools: [{}]",
@@ -758,9 +737,6 @@ where
             assistant_content,
             tool_calls.clone(),
         );
-
-        // Check for submit tool (completion signal)
-        let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
 
         // Execute tools
         let results = self.tool_executor.execute_tools(tool_calls).await?;
@@ -784,37 +760,32 @@ where
             .join("\n\n");
         self.logger.info(&format!("Tool execution results: {}", summary));
 
-        Ok(!has_submit)
+        // Always continue after tool execution - let LLM decide when to stop
+        Ok(true)
     }
 
-    /// Handle content response
-    /// Returns false if session should stop
+    /// Handle content response (LLM returned text without tool calls).
+    /// Returns true if session should continue, false if should stop.
+    /// 
+    /// When LLM returns content without tool calls, it means the LLM has finished
+    /// naturally (equivalent to finish_reason = "stop"). This is the normal way
+    /// conversational agents signal completion.
     async fn handle_content_response(&mut self, response_text: String) -> Result<bool> {
         self.logger.log_llm_response(&response_text, Some(&self.provider.default_model()))?;
 
+        // Print the response
         if !response_text.trim().is_empty() {
             println!("\n{}\n", response_text);
         }
 
-        // Check for completion markers
-        if response_text.to_uppercase().contains("TASK_COMPLETED") 
-            || response_text.to_uppercase().contains("COMPLETED") {
-            return Ok(false);
-        }
+        // Add assistant message to conversation
+        self.chat_formatter.add_assistant_message(
+            response_text,
+            Some("assistant".to_string()),
+        );
 
-        // Error: no tools and no completion
-        let mut error_context = HashMap::new();
-        error_context.insert("response".to_string(), serde_json::Value::String(response_text.clone()));
-
-        let error_msg = self.error_formatter.format_error(
-            "INVALID_RESPONSE",
-            "No tool calls found in response. Please use tools appropriately.",
-            &error_context,
-        ).await?;
-
-        self.chat_formatter.add_user_message(error_msg, Some("system".to_string()));
-        
-        Ok(true)
+        // LLM finished naturally - stop the loop
+        Ok(false)
     }
 
     /// Send template after classification if not already sent

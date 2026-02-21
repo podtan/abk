@@ -28,10 +28,42 @@ pub struct Configuration {
     pub llm: Option<LlmConfig>,
     pub mcp: Option<McpConfig>,
     pub lifecycle: Option<LifecycleConfig>,
+    /// Unified tool source configuration
+    #[serde(default)]
+    pub tool_sources: Vec<ToolSourceConfig>,
     #[cfg(feature = "checkpoint")]
     pub checkpointing: Option<crate::checkpoint::GlobalCheckpointConfig>,
     #[cfg(feature = "cli")]
     pub cli: Option<crate::cli::config::CliConfig>,
+}
+
+/// Tool source configuration for unified registry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ToolSourceConfig {
+    /// Native cats tool source
+    Native {
+        /// Toolset to use: "opencode", "old", etc.
+        #[serde(default = "default_toolset")]
+        toolset: String,
+    },
+    /// MCP server tool source
+    Mcp {
+        /// Server name/identifier
+        name: String,
+        /// Server URL
+        url: String,
+        /// Optional authentication token (supports env var substitution)
+        #[serde(default)]
+        auth_token: Option<String>,
+        /// Auto-initialize connection
+        #[serde(default = "default_auto_init")]
+        auto_init: bool,
+    },
+}
+
+fn default_toolset() -> String {
+    "opencode".to_string()
 }
 
 /// Lifecycle extension configuration
@@ -345,6 +377,9 @@ impl ConfigurationLoader {
             },
             mcp: None,
             lifecycle: None,
+            tool_sources: vec![ToolSourceConfig::Native {
+                toolset: "opencode".to_string(),
+            }],
             #[cfg(feature = "checkpoint")]
             checkpointing: None,
             #[cfg(feature = "cli")]

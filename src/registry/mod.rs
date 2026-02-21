@@ -4,6 +4,15 @@
 //! Tools from Native, MCP, and A2A sources are stored and converted
 //! to `InternalTool` format for LLM consumption.
 //!
+//! ## Architecture
+//!
+//! The registry uses a **Unified ToolSource Architecture**:
+//!
+//! - `ToolSourceProvider` trait - abstraction for tool providers (cats, MCP, WASM, etc.)
+//! - `UnifiedRegistry` - aggregates all tool sources into a single interface
+//! - `NativeToolSource` - wraps cats::ToolRegistry for in-process tools
+//! - `McpToolSource` - wraps MCP server connections for remote tools
+//!
 //! ## Features
 //!
 //! - `registry` - Core registry functionality with native tool support
@@ -12,38 +21,37 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use abk::registry::ToolRegistry;
-//! use umf::InternalTool;
-//! use serde_json::json;
+//! use abk::registry::{UnifiedRegistry, NativeToolSource, ToolSourceProvider};
 //!
-//! // Create a new registry
-//! let registry = ToolRegistry::new();
+//! // Create unified registry
+//! let mut registry = UnifiedRegistry::new();
 //!
-//! // Register native tools
-//! let tool = InternalTool::new("search", "Search files", json!({"type": "object"}));
-//! registry.register_native(tool)?;
-//!
-//! // With registry-mcp feature, register MCP tools
-//! #[cfg(feature = "registry-mcp")]
-//! {
-//!     use umf::McpTool;
-//!     let mcp_tool: McpTool = /* from server */;
-//!     registry.register_mcp(mcp_tool, "weather-server")?;
-//! }
+//! // Add native tools (from cats)
+//! let native = NativeToolSource::new("opencode")?;
+//! registry.add_source(Box::new(native));
 //!
 //! // Get all tools for LLM
-//! let tools = registry.to_internal_tools();
+//! let tools = registry.all_schemas();
+//!
+//! // Execute a tool (routes to correct source automatically)
+//! let result = registry.execute("bash", json!({"command": "ls"})).await?;
 //! ```
 
 mod error;
 mod registered;
 mod registry;
-mod source;
+mod source_kind;
+mod provider;
+mod unified;
+mod factory;
 
 pub use error::{RegistryError, RegistryResult};
 pub use registered::RegisteredTool;
 pub use registry::ToolRegistry;
-pub use source::ToolSource;
+pub use source_kind::ToolSource;
+pub use provider::{ToolSourceProvider, ToolDescriptor, ToolResult, BoxedToolSource};
+pub use unified::UnifiedRegistry;
+pub use factory::build_registry_from_config;
 
 // MCP support (requires registry-mcp feature)
 #[cfg(feature = "registry-mcp")]
@@ -54,3 +62,15 @@ mod mcp;
 mod client;
 #[cfg(feature = "registry-mcp")]
 pub use client::{McpClient, McpServerConfig, McpToolCallResult};
+
+// Native tool source (requires cats feature)
+#[cfg(feature = "agent")]
+mod native_source;
+#[cfg(feature = "agent")]
+pub use native_source::NativeToolSource;
+
+// MCP tool source (requires registry-mcp feature)
+#[cfg(feature = "registry-mcp")]
+mod mcp_source;
+#[cfg(feature = "registry-mcp")]
+pub use mcp_source::McpToolSource;

@@ -281,9 +281,6 @@ impl AgentRuntime {
                     let tool_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
                     println!("🔧 Iteration {} → Executing {} tools: [{}]", iteration, tool_calls.len(), tool_names.join(", "));
 
-                    // Check for completion via submit tool
-                    let has_submit = tool_calls.iter().any(|tc| tc.function.name.to_lowercase() == "submit");
-
                     // Add assistant message with tool calls - use provided content or generate placeholder
                     let assistant_content = content.unwrap_or_else(|| format!("Executing {} tools", tool_calls.len()));
                     formatter.add_assistant_message(assistant_content, Some(tool_calls.clone()));
@@ -309,25 +306,14 @@ impl AgentRuntime {
                     }
 
                     println!("✅ Iteration {} → Tool execution completed", iteration);
-
-                    // Check for completion
-                    if has_submit {
-                        self.stop(None).await?;
-                        return Ok(self.result().await);
-                    }
+                    // Continue loop - LLM will decide when to stop
                 }
                 GenerateResult::Content(content) => {
-                    // Add assistant message
+                    // LLM finished naturally - stop the loop
                     formatter.add_assistant_message(content.clone(), None);
-
-                    // Check for completion marker
-                    if content.contains("TASK_COMPLETE") || content.contains("##DONE##") {
-                        self.stop(None).await?;
-                        return Ok(self.result().await);
-                    }
-
-                    // No tools and no completion - this might be an error
-                    println!("⚠️ Iteration {} → No tool calls in response", iteration);
+                    println!("✅ Task completed");
+                    self.stop(None).await?;
+                    return Ok(self.result().await);
                 }
             }
         }
