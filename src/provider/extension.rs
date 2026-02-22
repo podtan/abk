@@ -10,6 +10,7 @@ use crate::provider::types::{GenerateConfig, InternalMessage};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// Conditional debug macro
@@ -97,9 +98,21 @@ impl ExtensionProvider {
 
         debug!("ExtensionProvider created: {}", name);
 
+        let timeout_secs = std::env::var("LLM_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(120);
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .connect_timeout(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(60))
+            .build()
+            .context("Failed to create HTTP client")?;
+
         Ok(Self {
             name,
-            client: reqwest::Client::new(),
+            client,
             env,
             manager: Arc::new(Mutex::new(manager)),
             metadata: None,
@@ -123,6 +136,81 @@ impl ExtensionProvider {
             api_key,
             default_model,
         })
+    }
+
+    fn max_retries() -> u32 {
+        std::env::var("LLM_MAX_RETRIES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3)
+    }
+
+    async fn make_request_with_retry(
+        &self,
+        api_url: &str,
+        request_body: String,
+        api_key: &str,
+        stream: bool,
+    ) -> Result<reqwest::Response> {
+        let max_retries = Self::max_retries();
+        let mut last_error = None;
+
+        for attempt in 0..=max_retries {
+            let mut request = self.client
+                .post(api_url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .body(request_body.clone());
+
+            if stream {
+                request = request.header("Accept", "text/event-stream");
+            }
+
+            match request.send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+
+                    if status.is_success() {
+                        return Ok(resp);
+                    }
+
+                    if status.as_u16() == 429 {
+                        let retry_after = resp.headers()
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.parse::<u64>().ok())
+                            .unwrap_or(60);
+
+                        debug!("Rate limited (429), waiting {}s (attempt {}/{})", retry_after, attempt, max_retries);
+                        tokio::time::sleep(Duration::from_secs(retry_after)).await;
+                        last_error = Some(anyhow::anyhow!("Rate limited (429)"));
+                        continue;
+                    }
+
+                    if status.is_server_error() {
+                        let body = resp.text().await.unwrap_or_default();
+                        debug!("Server error {}: {}, retrying (attempt {}/{})", status, body, attempt, max_retries);
+                        tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                        last_error = Some(anyhow::anyhow!("Server error {}: {}", status, body));
+                        continue;
+                    }
+
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(anyhow::anyhow!("API error {}: {}", status, body));
+                }
+                Err(e) => {
+                    if e.is_timeout() || e.is_connect() {
+                        debug!("Network error: {}, retrying (attempt {}/{})", e, attempt, max_retries);
+                        tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                        last_error = Some(e.into());
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Max retries exceeded")))
     }
 }
 
@@ -178,21 +266,7 @@ impl LlmProvider for ExtensionProvider {
 
         debug!("ExtensionProvider: POST {}", api_url);
 
-        // Make HTTP request (only standard headers - no X-Request-Id, X-Initiator, etc.)
-        let response = self.client
-            .post(&api_url)
-            .header("Authorization", format!("Bearer {}", provider_config.api_key))
-            .header("Content-Type", "application/json")
-            .body(request_body)
-            .send()
-            .await
-            .context("HTTP request failed")?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await?;
-            anyhow::bail!("API error {}: {}", status, error_body);
-        }
+        let response = self.make_request_with_retry(&api_url, request_body, &provider_config.api_key, false).await?;
 
         let response_body = response.text().await?;
 
@@ -328,24 +402,8 @@ impl LlmProvider for ExtensionProvider {
 
         debug!("ExtensionProvider streaming: POST {}", api_url);
 
-        // Make streaming HTTP request (only standard headers)
-        let response = self.client
-            .post(&api_url)
-            .header("Authorization", format!("Bearer {}", provider_config.api_key))
-            .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")
-            .body(request_body)
-            .send()
-            .await
-            .context("HTTP streaming request failed")?;
+        let response = self.make_request_with_retry(&api_url, request_body, &provider_config.api_key, true).await?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await?;
-            anyhow::bail!("API error {}: {}", status, error_body);
-        }
-
-        // Process stream
         let byte_stream = response.bytes_stream();
         let manager = Arc::clone(&self.manager);
         let name = self.name.clone();
