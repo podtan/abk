@@ -3606,9 +3606,9 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "umf"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5ad3aec578a64d041c8f81d97a5bc3d5215d1b15d7b49b884bcdf6708a8efb6"
+checksum = "b58d6e2e036d0316cd93130f5341508ea8002efcf57e928c4ab30016b0242102"
 dependencies = [
  "futures-util",
  "serde",
