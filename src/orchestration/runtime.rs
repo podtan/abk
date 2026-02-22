@@ -123,6 +123,9 @@ pub trait OrchestrationFormatter: Send + Sync {
     /// Add assistant message with optional tool calls
     fn add_assistant_message(&mut self, content: String, tool_calls: Option<Vec<umf::ToolCall>>);
     
+    /// Add assistant message with reasoning content
+    fn add_assistant_message_with_reasoning(&mut self, content: String, reasoning: String, tool_calls: Option<Vec<umf::ToolCall>>);
+    
     /// Add tool result message
     fn add_tool_message(&mut self, content: String, tool_call_id: String, tool_name: String);
     
@@ -276,14 +279,19 @@ impl AgentRuntime {
 
             // Handle response
             match response {
-                GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                     // Log tool execution
                     let tool_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
                     println!("🔧 Iteration {} → Executing {} tools: [{}]", iteration, tool_calls.len(), tool_names.join(", "));
 
                     // Add assistant message with tool calls - use provided content or generate placeholder
                     let assistant_content = content.unwrap_or_else(|| format!("Executing {} tools", tool_calls.len()));
-                    formatter.add_assistant_message(assistant_content, Some(tool_calls.clone()));
+                    
+                    if let Some(reasoning_content) = reasoning {
+                        formatter.add_assistant_message_with_reasoning(assistant_content, reasoning_content, Some(tool_calls.clone()));
+                    } else {
+                        formatter.add_assistant_message(assistant_content, Some(tool_calls.clone()));
+                    }
 
                     // Execute tools
                     for tool_call in tool_calls {
@@ -308,9 +316,13 @@ impl AgentRuntime {
                     println!("✅ Iteration {} → Tool execution completed", iteration);
                     // Continue loop - LLM will decide when to stop
                 }
-                GenerateResult::Content(content) => {
+                GenerateResult::Content { text: content, reasoning } => {
                     // LLM finished naturally - stop the loop
-                    formatter.add_assistant_message(content.clone(), None);
+                    if let Some(reasoning_content) = reasoning {
+                        formatter.add_assistant_message_with_reasoning(content.clone(), reasoning_content, None);
+                    } else {
+                        formatter.add_assistant_message(content.clone(), None);
+                    }
                     println!("✅ Task completed");
                     self.stop(None).await?;
                     return Ok(self.result().await);

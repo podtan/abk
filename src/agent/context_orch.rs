@@ -117,6 +117,7 @@ impl AgentContext for super::Agent {
 
             let accumulated = accumulator.finish();
             let collected_text = accumulated.text;
+            let collected_reasoning = accumulated.reasoning;
             let collected_tool_calls = accumulated.tool_calls;
 
             if !collected_tool_calls.is_empty() {
@@ -126,15 +127,19 @@ impl AgentContext for super::Agent {
                 umf::GenerateResult::ToolCalls { 
                     calls: collected_tool_calls,
                     content: if collected_text.is_empty() { None } else { Some(collected_text) },
+                    reasoning: if collected_reasoning.is_empty() { None } else { Some(collected_reasoning) },
                 }
             } else {
-                umf::GenerateResult::Content(collected_text)
+                umf::GenerateResult::Content { 
+                    text: collected_text,
+                    reasoning: if collected_reasoning.is_empty() { None } else { Some(collected_reasoning) },
+                }
             }
         } else {
             let provider_response = self.provider.generate(messages, &config).await?;
             
             match provider_response {
-                GenerateResponse::Content { text, reasoning: _ } => umf::GenerateResult::Content(text),
+                GenerateResponse::Content { text, reasoning } => umf::GenerateResult::Content { text, reasoning },
                 GenerateResponse::ToolCalls(invocations) => {
                     let tool_calls = invocations
                         .into_iter()
@@ -147,7 +152,7 @@ impl AgentContext for super::Agent {
                             },
                         })
                         .collect();
-                    umf::GenerateResult::ToolCalls { calls: tool_calls, content: None }
+                    umf::GenerateResult::ToolCalls { calls: tool_calls, content: None, reasoning: None }
                 }
             }
         };

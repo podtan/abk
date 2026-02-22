@@ -124,6 +124,10 @@ impl OrchestrationFormatter for MockFormatter {
         self.messages.lock().unwrap().push(format!("assistant: {}", content));
     }
 
+    fn add_assistant_message_with_reasoning(&mut self, content: String, reasoning: String, _tool_calls: Option<Vec<ToolCall>>) {
+        self.messages.lock().unwrap().push(format!("assistant: {} [reasoning: {}]", content, reasoning));
+    }
+
     fn add_tool_message(&mut self, content: String, _tool_call_id: String, tool_name: String) {
         self.messages.lock().unwrap().push(format!("tool[{}]: {}", tool_name, content));
     }

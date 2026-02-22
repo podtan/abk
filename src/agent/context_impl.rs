@@ -24,6 +24,7 @@ impl crate::checkpoint::AgentContext for Agent {
             .map(|msg| ChatMessage {
                 role: msg.role.to_string(),
                 content: msg.content.clone(),
+                reasoning: msg.reasoning_content.clone(),
                 timestamp: chrono::Utc::now(), // TODO: Track actual message timestamps
                 token_count: Some(self.estimate_token_count(&msg.content)),
                 tool_calls: msg.tool_calls.clone(),
@@ -55,6 +56,24 @@ impl crate::checkpoint::AgentContext for Agent {
             .add_assistant_message_with_tool_calls(content, tool_calls);
         // Note: ChatMLFormatter's add_assistant_message_with_tool_calls doesn't take name parameter
         // This is a known limitation that may need to be addressed in umf crate
+    }
+
+    fn add_assistant_message_with_reasoning(
+        &mut self,
+        content: String,
+        reasoning: Option<String>,
+        tool_calls: Option<Vec<umf::ToolCall>>,
+        _name: Option<String>,
+    ) {
+        if let Some(reasoning_content) = reasoning {
+            self.chat_formatter
+                .add_assistant_message_with_reasoning(content, reasoning_content, tool_calls);
+        } else if let Some(calls) = tool_calls {
+            self.chat_formatter
+                .add_assistant_message_with_tool_calls(content, calls);
+        } else {
+            self.chat_formatter.add_assistant_message(content, _name);
+        }
     }
 
     fn add_tool_message(&mut self, content: String, tool_call_id: String, name: String) {

@@ -97,6 +97,21 @@ pub trait AgentContext {
         name: Option<String>,
     );
 
+    /// Add an assistant message with reasoning content to the conversation.
+    ///
+    /// # Arguments
+    /// * `content` - The message content
+    /// * `reasoning` - Optional reasoning/thinking content from the model
+    /// * `tool_calls` - Optional vector of tool calls made by the assistant
+    /// * `name` - Optional assistant identifier
+    fn add_assistant_message_with_reasoning(
+        &mut self,
+        content: String,
+        reasoning: Option<String>,
+        tool_calls: Option<Vec<umf::ToolCall>>,
+        name: Option<String>,
+    );
+
     /// Add a tool result message to the conversation.
     ///
     /// # Arguments
@@ -282,6 +297,7 @@ mod tests {
             self.messages.push(ChatMessage {
                 role: "system".to_string(),
                 content,
+                reasoning: None,
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
@@ -294,6 +310,7 @@ mod tests {
             self.messages.push(ChatMessage {
                 role: "user".to_string(),
                 content,
+                reasoning: None,
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
@@ -306,6 +323,7 @@ mod tests {
             self.messages.push(ChatMessage {
                 role: "assistant".to_string(),
                 content,
+                reasoning: None,
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,
@@ -323,9 +341,29 @@ mod tests {
             self.messages.push(ChatMessage {
                 role: "assistant".to_string(),
                 content,
+                reasoning: None,
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: Some(tool_calls),
+                tool_call_id: None,
+                name: None,
+            });
+        }
+
+        fn add_assistant_message_with_reasoning(
+            &mut self,
+            content: String,
+            reasoning: Option<String>,
+            tool_calls: Option<Vec<umf::ToolCall>>,
+            _name: Option<String>,
+        ) {
+            self.messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content,
+                reasoning,
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                tool_calls,
                 tool_call_id: None,
                 name: None,
             });
@@ -335,6 +373,7 @@ mod tests {
             self.messages.push(ChatMessage {
                 role: "tool".to_string(),
                 content: format!("[{}] {}", name, content),
+                reasoning: None,
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 tool_calls: None,

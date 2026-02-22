@@ -190,6 +190,9 @@ pub trait ChatFormatter: Send + Sync {
     /// Add assistant message with tool calls
     fn add_assistant_message_with_tool_calls(&mut self, content: String, tool_calls: Vec<umf::ToolCall>);
     
+    /// Add assistant message with reasoning content
+    fn add_assistant_message_with_reasoning(&mut self, content: String, reasoning: String, tool_calls: Option<Vec<umf::ToolCall>>);
+    
     /// Add tool message
     fn add_tool_message(&mut self, content: String, tool_call_id: String, tool_name: String);
     
@@ -400,13 +403,13 @@ where
 
             // Process response
             match response {
-                GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                     // Continue loop after tool execution - LLM will decide when to stop
-                    self.handle_tool_calls_with_content(tool_calls, content).await?;
+                    self.handle_tool_calls_with_content(tool_calls, content, reasoning).await?;
                 }
-                GenerateResult::Content(response_text) => {
+                GenerateResult::Content { text: response_text, reasoning } => {
                     // LLM finished naturally (no tool calls) - stop the loop
-                    self.handle_content_response(response_text).await?;
+                    self.handle_content_response(response_text, reasoning).await?;
                     return self.stop_session("Task completed").await;
                 }
             }
@@ -471,9 +474,9 @@ where
             match self.generate_with_provider_internal(tools, true).await {
                 Ok(result) => {
                     match result {
-                        GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                        GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                             // Execute tools and continue loop - LLM will decide when to stop
-                            self.handle_tool_calls_with_content(tool_calls, content).await?;
+                            self.handle_tool_calls_with_content(tool_calls, content, reasoning).await?;
 
                             // Send template after classification
                             self.maybe_send_template().await?;
@@ -484,9 +487,9 @@ where
 
                             self.current_iteration += 1;
                         }
-                        GenerateResult::Content(response_text) => {
+                        GenerateResult::Content { text: response_text, reasoning } => {
                             // LLM finished naturally - stop the loop
-                            self.handle_content_response(response_text).await?;
+                            self.handle_content_response(response_text, reasoning).await?;
                             return self.stop_session("Task completed").await;
                         }
                     }
@@ -499,14 +502,14 @@ where
                     match self.generate_with_provider_internal(fallback_tools, false).await {
                         Ok(fallback_result) => {
                             match fallback_result {
-                                GenerateResult::ToolCalls { calls: tool_calls, content } => {
-                                    self.handle_tool_calls_with_content(tool_calls, content).await?;
+                                GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
+                                    self.handle_tool_calls_with_content(tool_calls, content, reasoning).await?;
                                     self.current_iteration += 1;
                                     continue;
                                 }
-                                GenerateResult::Content(text) => {
+                                GenerateResult::Content { text, reasoning } => {
                                     // LLM finished naturally - stop the loop
-                                    self.handle_content_response(text).await?;
+                                    self.handle_content_response(text, reasoning).await?;
                                     return self.stop_session("Task completed").await;
                                 }
                             }
@@ -625,10 +628,10 @@ where
         };
 
         match response {
-            GenerateResponse::Content { text, reasoning: _ } => Ok(GenerateResult::Content(text)),
+            GenerateResponse::Content { text, reasoning } => Ok(GenerateResult::Content { text, reasoning }),
             GenerateResponse::ToolCalls(invocations) => {
                 let tool_calls = ToolAdapter::invocations_to_tool_calls(&invocations)?;
-                Ok(GenerateResult::ToolCalls { calls: tool_calls, content: None })
+                Ok(GenerateResult::ToolCalls { calls: tool_calls, content: None, reasoning: None })
             }
         }
     }
@@ -718,12 +721,12 @@ where
     /// Handle tool calls execution
     /// Returns false if session should stop
     async fn handle_tool_calls(&mut self, tool_calls: Vec<umf::ToolCall>) -> Result<bool> {
-        self.handle_tool_calls_with_content(tool_calls, None).await
+        self.handle_tool_calls_with_content(tool_calls, None, None).await
     }
 
-    /// Handle tool calls execution with optional preceding content
+    /// Handle tool calls execution with optional preceding content and reasoning
     /// Returns true if session should continue, false if should stop.
-    async fn handle_tool_calls_with_content(&mut self, tool_calls: Vec<umf::ToolCall>, content: Option<String>) -> Result<bool> {
+    async fn handle_tool_calls_with_content(&mut self, tool_calls: Vec<umf::ToolCall>, content: Option<String>, reasoning: Option<String>) -> Result<bool> {
         println!(
             "🔧 API Call {} → Executing {} tools: [{}]",
             self.api_call_count,
@@ -733,10 +736,19 @@ where
 
         // Add assistant message with tool calls - use provided content or generate placeholder
         let assistant_content = content.unwrap_or_else(|| self.tool_executor.generate_assistant_content(&tool_calls));
-        self.chat_formatter.add_assistant_message_with_tool_calls(
-            assistant_content,
-            tool_calls.clone(),
-        );
+        
+        if let Some(reasoning_content) = reasoning {
+            self.chat_formatter.add_assistant_message_with_reasoning(
+                assistant_content,
+                reasoning_content,
+                Some(tool_calls.clone()),
+            );
+        } else {
+            self.chat_formatter.add_assistant_message_with_tool_calls(
+                assistant_content,
+                tool_calls.clone(),
+            );
+        }
 
         // Execute tools
         let results = self.tool_executor.execute_tools(tool_calls).await?;
@@ -770,7 +782,7 @@ where
     /// When LLM returns content without tool calls, it means the LLM has finished
     /// naturally (equivalent to finish_reason = "stop"). This is the normal way
     /// conversational agents signal completion.
-    async fn handle_content_response(&mut self, response_text: String) -> Result<bool> {
+    async fn handle_content_response(&mut self, response_text: String, reasoning: Option<String>) -> Result<bool> {
         self.logger.log_llm_response(&response_text, Some(&self.provider.default_model()))?;
 
         // Print the response
@@ -779,10 +791,18 @@ where
         }
 
         // Add assistant message to conversation
-        self.chat_formatter.add_assistant_message(
-            response_text,
-            Some("assistant".to_string()),
-        );
+        if let Some(reasoning_content) = reasoning {
+            self.chat_formatter.add_assistant_message_with_reasoning(
+                response_text,
+                reasoning_content,
+                None,
+            );
+        } else {
+            self.chat_formatter.add_assistant_message(
+                response_text,
+                Some("assistant".to_string()),
+            );
+        }
 
         // LLM finished naturally - stop the loop
         Ok(false)

@@ -155,13 +155,13 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
 
         // Process response
         match response {
-            GenerateResult::ToolCalls { calls: tool_calls, content } => {
+            GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                 // Execute tools and continue loop
-                handle_tool_calls(agent, tool_calls, content).await?;
+                handle_tool_calls(agent, tool_calls, content, reasoning).await?;
             }
-            GenerateResult::Content(response_text) => {
+            GenerateResult::Content { text: response_text, reasoning } => {
                 // LLM finished naturally - stop the loop
-                handle_content_response(agent, response_text).await?;
+                handle_content_response(agent, response_text, reasoning).await?;
                 return stop_session(agent, "Task completed").await;
             }
         }
@@ -218,14 +218,14 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 }
                 
                 match result {
-                    GenerateResult::ToolCalls { calls: tool_calls, content } => {
+                    GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                         // Execute tools and continue loop
-                        handle_tool_calls(agent, tool_calls, content).await?;
+                        handle_tool_calls(agent, tool_calls, content, reasoning).await?;
                         continue;
                     }
-                    GenerateResult::Content(response_text) => {
+                    GenerateResult::Content { text: response_text, reasoning } => {
                         // LLM finished naturally - stop the loop
-                        handle_content_response(agent, response_text).await?;
+                        handle_content_response(agent, response_text, reasoning).await?;
                         return stop_session(agent, "Task completed").await;
                     }
                 }
@@ -285,6 +285,7 @@ async fn handle_tool_calls<A: AgentContext>(
     agent: &mut A, 
     tool_calls: Vec<umf::ToolCall>,
     content: Option<String>,
+    reasoning: Option<String>,
 ) -> Result<()> {
     println!(
         "🔧 Executing {} tools: [{}]",
@@ -294,7 +295,16 @@ async fn handle_tool_calls<A: AgentContext>(
 
     // Add assistant message - use provided content or generate placeholder
     let message_content = content.unwrap_or_else(|| agent.generate_assistant_content_for_tools(&tool_calls));
-    agent.chat_formatter_mut().add_assistant_message_with_tool_calls(message_content, tool_calls.clone());
+    
+    if let Some(reasoning_content) = reasoning {
+        agent.chat_formatter_mut().add_assistant_message_with_reasoning(
+            message_content,
+            reasoning_content,
+            Some(tool_calls.clone()),
+        );
+    } else {
+        agent.chat_formatter_mut().add_assistant_message_with_tool_calls(message_content, tool_calls.clone());
+    }
 
     // Execute tools
     let results = agent.execute_tool_calls_structured(tool_calls).await?;
@@ -354,11 +364,19 @@ async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
 
 /// Handle content response - LLM finished naturally, add message and stop.
 /// Returns Ok(()) - the caller should stop the loop.
-async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String) -> Result<()> {
+async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String, reasoning: Option<String>) -> Result<()> {
     agent.log_llm_response(&response_text, Some(&agent.default_model()))?;
 
     // Store assistant message in conversation history (for checkpoints and context)
-    agent.chat_formatter_mut().add_assistant_message(response_text.clone(), None);
+    if let Some(reasoning_content) = reasoning {
+        agent.chat_formatter_mut().add_assistant_message_with_reasoning(
+            response_text.clone(),
+            reasoning_content,
+            None,
+        );
+    } else {
+        agent.chat_formatter_mut().add_assistant_message(response_text.clone(), None);
+    }
 
     if !response_text.trim().is_empty() {
         println!("\n{}\n", response_text);
