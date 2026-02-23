@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-02-23
+
+### Fixed
+- **Working Directory Resolution**: Agent now sets working directory for tools after determining project directory
+  - Added `Agent::set_working_directory()` and `Agent::get_working_directory()` methods
+  - CLI run command now sets working directory before any tool execution
+  - This fixes the issue where tools would use the wrong directory when invoked from a different context
+
+### Changed
+- Updated cats dependency to 0.1.5
+
 ## [0.5.0] - 2026-02-21
 
 ### Added

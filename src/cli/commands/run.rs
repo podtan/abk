@@ -73,6 +73,9 @@ pub async fn execute_run<C: CommandContext>(
     let current_dir = std::env::current_dir()
         .map_err(|e| CliError::IoError(e))?;
     
+    // Set the working directory for all tools (fixes issue where tools use wrong directory)
+    agent.set_working_directory(current_dir.clone());
+
     let resume_tracker = crate::checkpoint::ResumeTracker::new()
         .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
     

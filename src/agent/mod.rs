@@ -221,7 +221,24 @@ impl Agent {
         self.logger.log_mode_change(&old_mode, &mode.to_string())?;
         Ok(())
     }
-    
+
+    /// Set the working directory for all tools.
+    ///
+    /// This should be called after determining the project directory,
+    /// before any tool execution. Tools will read from ToolState at
+    /// execution time rather than capturing the directory at instantiation.
+    ///
+    /// # Arguments
+    /// * `path` - The working directory path
+    pub fn set_working_directory(&mut self, path: PathBuf) {
+        self.tool_registry.set_working_directory(path);
+    }
+
+    /// Get the current working directory from tool state.
+    pub fn get_working_directory(&self) -> PathBuf {
+        self.tool_registry.get_working_directory()
+    }
+
     /// Initialize the remote storage backend from a pre-parsed Configuration.
     ///
     /// This method should be called after agent creation to enable remote

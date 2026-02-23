@@ -388,9 +388,9 @@ dependencies = [
 
 [[package]]
 name = "cats"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbf8a004d5c2a739c450f568808009efc219e5d6fecb24afa182a1d14d4a5a36"
+checksum = "03b66b7317fec5031f1166cd214afadeae215a94715817cb5357d704ac48d0cd"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
