@@ -111,11 +111,14 @@ impl Agent {
             .get_bool("lifecycle.enabled")
             .unwrap_or(false);
         
+        // Get custom system template for simple lifecycle (if provided)
+        let system_template = config_loader.get_string("lifecycle.system_template");
+        
         if std::env::var("RUST_LOG").map(|v| v.to_lowercase().contains("debug")).unwrap_or(false) {
             eprintln!("[DEBUG] Lifecycle enabled: {}", lifecycle_enabled);
         }
         
-        let lifecycle = crate::lifecycle::find_lifecycle_plugin_with_config(lifecycle_enabled).await
+        let lifecycle = crate::lifecycle::find_lifecycle_plugin_with_config(lifecycle_enabled, system_template).await
             .context("Failed to load lifecycle")?;
 
         let provider = ProviderFactory::create(&env).await

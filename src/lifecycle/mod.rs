@@ -148,18 +148,20 @@ impl Lifecycle for WasmLifecycle {
 }
 
 /// Simple built-in lifecycle (no classification, no templates)
-pub struct SimpleLifecycle;
+pub struct SimpleLifecycle {
+    system_template: Option<String>,
+}
 
 impl SimpleLifecycle {
-    pub fn new() -> Self {
+    pub fn new(system_template: Option<String>) -> Self {
         debug!("Using simple built-in lifecycle (no WASM extension)");
-        Self
+        Self { system_template }
     }
 }
 
 impl Default for SimpleLifecycle {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -186,9 +188,10 @@ Complete this task using available tools. When done, call the submit tool."#;
 impl Lifecycle for SimpleLifecycle {
     fn load_template(&self, name: &str) -> Pin<Box<dyn Future<Output = Result<String>> + Send + '_>> {
         let name = name.to_string();
+        let system_template = self.system_template.clone();
         Box::pin(async move {
             match name.as_str() {
-                "system" => Ok(SIMPLE_SYSTEM_TEMPLATE.to_string()),
+                "system" => Ok(system_template.unwrap_or_else(|| SIMPLE_SYSTEM_TEMPLATE.to_string())),
                 "task/query" | "task/feature" | "task/bug_fix" | "task/maintenance" | "task/fallback" => {
                     Ok(SIMPLE_TASK_TEMPLATE.to_string())
                 }
@@ -301,9 +304,12 @@ impl ExpandHome for PathBuf {
 /// 
 /// If `lifecycle_enabled` is false, returns the simple built-in lifecycle.
 /// Otherwise searches for WASM extension.
-pub async fn find_lifecycle_plugin_with_config(lifecycle_enabled: bool) -> Result<Box<dyn Lifecycle>> {
+pub async fn find_lifecycle_plugin_with_config(
+    lifecycle_enabled: bool,
+    system_template: Option<String>,
+) -> Result<Box<dyn Lifecycle>> {
     if !lifecycle_enabled {
-        return Ok(Box::new(SimpleLifecycle::new()));
+        return Ok(Box::new(SimpleLifecycle::new(system_template)));
     }
     
     let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
@@ -349,7 +355,7 @@ pub async fn find_lifecycle_plugin_with_config(lifecycle_enabled: bool) -> Resul
 
     // Not found, fall back to simple lifecycle
     debug!("Lifecycle extension not found, using simple built-in lifecycle");
-    Ok(Box::new(SimpleLifecycle::new()))
+    Ok(Box::new(SimpleLifecycle::new(system_template)))
 }
 
 /// Legacy function for backward compatibility (always tries to load WASM)

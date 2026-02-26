@@ -72,6 +72,9 @@ pub struct LifecycleConfig {
     /// Enable lifecycle extension (templates, task classification)
     #[serde(default = "default_lifecycle_enabled")]
     pub enabled: bool,
+    /// Custom system template for simple lifecycle (used when enabled = false)
+    #[serde(default)]
+    pub system_template: Option<String>,
 }
 
 fn default_lifecycle_enabled() -> bool {
@@ -412,6 +415,19 @@ impl ConfigurationLoader {
             "templates.format_error_template" => None,
             "logging.log_file" => Some(self.config.logging.log_file.clone()),
             "logging.log_level" => Some(self.config.logging.log_level.clone()),
+            "lifecycle.enabled" => Some(
+                self.config
+                    .lifecycle
+                    .as_ref()
+                    .map(|l| l.enabled)
+                    .unwrap_or(true)
+                    .to_string(),
+            ),
+            "lifecycle.system_template" => self
+                .config
+                .lifecycle
+                .as_ref()
+                .and_then(|l| l.system_template.clone()),
             _ => None,
         }
     }

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-02-26
+
+### Added
+- **Configurable System Template for Simple Lifecycle**: Allow customizing system template via config
+  - `lifecycle.system_template` field in configuration
+  - SimpleLifecycle uses provided template or falls back to hardcoded default
+  - Enables agents to customize system message without WASM lifecycle extension
+
+### Changed
+- `find_lifecycle_plugin_with_config()` now accepts `system_template: Option<String>` parameter
+- `SimpleLifecycle::new()` accepts optional system template
+
 ## [0.5.3] - 2026-02-23
 
 ### Fixed
