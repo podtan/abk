@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-03-11
+
+### Changed
+- Updated `umf` dependency to 0.2.4
+- Updated `cats` dependency to 0.1.11
+
 ## [0.5.6] - 2026-03-10
 
 ### Changed
