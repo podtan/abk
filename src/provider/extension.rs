@@ -437,6 +437,9 @@ impl LlmProvider for ExtensionProvider {
 
                             // Process through extension (async)
                             if event.contains("data: ") {
+                                // Debug: log raw SSE event before sending to WASM
+                                debug!("[EXTENSION PROVIDER] Raw SSE event to WASM: {}", event);
+                                
                                 let mut mgr = manager.lock().await;
                                 if let Some(instance) = mgr.get_provider_instance_mut(&name) {
                                     if let Ok(Some(delta)) = instance.handle_stream_chunk(&event).await {
@@ -462,6 +465,14 @@ impl LlmProvider for ExtensionProvider {
                                                 if let Some(tc) = delta.tool_call {
                                                     // Use tool_call_index from delta, default to 0
                                                     let index = delta.tool_call_index.unwrap_or(0) as usize;
+                                                    
+                                                    // Debug: log tool call delta received from WASM
+                                                    debug!("[EXTENSION PROVIDER] Received tool_call delta from WASM:");
+                                                    debug!("[EXTENSION PROVIDER]   index: {}", index);
+                                                    debug!("[EXTENSION PROVIDER]   id: {:?}", if tc.id.is_empty() { None } else { Some(&tc.id) });
+                                                    debug!("[EXTENSION PROVIDER]   name: {:?}", if tc.name.is_empty() { None } else { Some(&tc.name) });
+                                                    debug!("[EXTENSION PROVIDER]   arguments: {:?}", if tc.arguments.is_empty() { None } else { Some(&tc.arguments) });
+                                                    
                                                     let _ = tx.send(Ok(StreamChunk::ToolCallDelta {
                                                         index,
                                                         id: if tc.id.is_empty() { None } else { Some(tc.id) },
