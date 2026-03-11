@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "abk"
-version = "0.5.6"
+version = "0.5.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -388,9 +388,9 @@ dependencies = [
 
 [[package]]
 name = "cats"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "076952a0782f383c99654579d68a388190d66ca0655b22229538deae979b4cbf"
+checksum = "1710d61c681f8d7775dda84db1aa95d6a12525f53eb67eb1a5f03493ca3536ab"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3397,15 +3397,16 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "umf"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b58d6e2e036d0316cd93130f5341508ea8002efcf57e928c4ab30016b0242102"
+checksum = "76baae670924c2fff4951a486b64fe6a83be620e0b97278b7330e0542f5a6728"
 dependencies = [
  "futures-util",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tiktoken-rs",
+ "tracing",
 ]
 
 [[package]]
