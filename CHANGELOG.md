@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-03-13
+
+### Changed
+- Refactored Logger to tee-write all console output to log file (plain text instead of markdown)
+- Added `tee_println()` and `tee_eprintln()` methods to Logger for dual console+file output
+- Changed default log path to `/tmp/{agent_name}.log`
+- Replaced all `println!`/`eprintln!` in orchestration with logging methods
+- Added `log_tee()` to `AgentContext` trait and `tee_println()` to `OrchestrationLogger` trait
+- Added optional Logger support to `AgentRuntime`
+
+### Fixed
+- `RawConfigCommandContext` now reads `logging.log_file` from config instead of falling back to default path (prevented duplicate log files)
+
 ## [0.5.7] - 2026-03-11
 
 ### Changed
