@@ -337,15 +337,7 @@ impl ConfigurationLoader {
             }),
             // Templates removed - now handled by lifecycle WASM plugins
             logging: LoggingConfig {
-                log_file: std::env::temp_dir()
-                    .join("agent")
-                    .join(format!(
-                        "agent_{}_{}.md",
-                        Utc::now().timestamp_millis(),
-                        std::process::id()
-                    ))
-                    .to_string_lossy()
-                    .to_string(),
+                log_file: String::new(), // Empty string - Logger will use its default path
                 log_level: "INFO".to_string(),
             },
             execution: ExecutionConfig {
