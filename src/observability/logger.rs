@@ -483,5 +483,43 @@ impl Default for Logger {
     }
 }
 
+/// Derive the current log file path from ABK_AGENT_NAME env var.
+/// Falls back to /tmp/agent.log if not set.
+fn current_log_path() -> PathBuf {
+    let agent_name = std::env::var("ABK_AGENT_NAME")
+        .unwrap_or_else(|_| "agent".to_string());
+    std::env::temp_dir().join(format!("{}.log", agent_name))
+}
+
+/// Append a message to the current log file (standalone, no Logger needed).
+fn append_to_current_log(content: &str) {
+    let log_path = current_log_path();
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _ = write!(file, "{}", content);
+    }
+}
+
+/// Tee-print to stdout and the log file (standalone, no Logger needed).
+/// Use this from components that don't have a Logger reference.
+pub fn tee_print(message: &str) {
+    print!("{}", message);
+    let _ = std::io::stdout().flush();
+    append_to_current_log(message);
+}
+
+/// Tee-eprint to stderr and the log file (standalone, no Logger needed).
+/// Use this from components that don't have a Logger reference.
+pub fn tee_eprint(message: &str) {
+    eprint!("{}", message);
+    let _ = std::io::stderr().flush();
+    append_to_current_log(message);
+}
+
+/// Tee-eprintln to stderr and the log file (standalone, no Logger needed).
+pub fn tee_eprintln(message: &str) {
+    eprintln!("{}", message);
+    append_to_current_log(&format!("{}\n", message));
+}
+
 #[cfg(test)]
 mod tests;

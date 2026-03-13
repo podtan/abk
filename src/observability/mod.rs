@@ -28,3 +28,6 @@ pub mod logger;
 
 // Re-export main types for convenience
 pub use logger::Logger;
+
+// Re-export standalone tee-write functions for components without Logger reference
+pub use logger::{tee_print, tee_eprint, tee_eprintln};

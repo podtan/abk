@@ -719,10 +719,10 @@ impl LlmProvider for WasmProvider {
                                 if let Ok(delta) = process_stream_chunk(&component, &engine, &event).await {
                                     // Handle reasoning delta (from thinking models like GLM, Qwen)
                                     if let Some(reasoning) = delta.reasoning {
-                                        // Print reasoning to stderr so it's visible but separate from content
-                                        eprint!("\x1b[90m{}\x1b[0m", reasoning);
-                                        use std::io::Write;
-                                        let _ = std::io::stderr().flush();
+                                        // Tee-write reasoning to stderr and log file
+                                        crate::observability::tee_eprint(
+                                            &format!("\x1b[90m{}\x1b[0m", reasoning)
+                                        );
                                         // EMIT this chunk
                                         if tx.send(Ok(crate::provider::StreamChunk::Reasoning(reasoning))).is_err() {
                                             return; // Receiver dropped
@@ -730,10 +730,8 @@ impl LlmProvider for WasmProvider {
                                     }
                                     
                                     if let Some(content) = delta.content {
-                                        // Print content to stdout in real-time
-                                        print!("{}", content);
-                                        use std::io::Write;
-                                        let _ = std::io::stdout().flush();
+                                        // Tee-write content to stdout and log file
+                                        crate::observability::tee_print(&content);
                                         // EMIT this chunk immediately
                                         if tx.send(Ok(crate::provider::StreamChunk::Text(content))).is_err() {
                                             return; // Receiver dropped

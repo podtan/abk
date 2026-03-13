@@ -240,20 +240,20 @@ impl CommandContext for RawConfigCommandContext {
     }
 
     fn log_info(&self, message: &str) {
-        println!("{}", message);
+        self.logger.tee_println(message);
     }
 
     fn log_warn(&self, message: &str) {
-        eprintln!("Warning: {}", message);
+        self.logger.tee_eprintln(&format!("Warning: {}", message));
     }
 
     fn log_error(&self, message: &str) -> CliResult<()> {
-        eprintln!("Error: {}", message);
+        self.logger.tee_eprintln(&format!("Error: {}", message));
         Ok(())
     }
 
     fn log_success(&self, message: &str) {
-        println!("✓ {}", message);
+        self.logger.tee_println(&format!("✓ {}", message));
     }
 
     async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {

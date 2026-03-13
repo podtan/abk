@@ -968,7 +968,9 @@ impl SessionStorage {
                 .join(format!("{}_conversation.json", checkpoint_id));
             AtomicOps::write_json(&conversation_file, &checkpoint.conversation_state)?;
             
-            eprintln!("[checkpoint] ✅ Saved checkpoint {} to local storage", checkpoint_id);
+            crate::observability::tee_eprintln(
+                &format!("[checkpoint] ✅ Saved checkpoint {} to local storage", checkpoint_id)
+            );
         }
         
         // Write to remote backend if configured
@@ -981,21 +983,29 @@ impl SessionStorage {
                 
                 // Write metadata
                 if let Err(e) = backend.write_json(&format!("{}_metadata.json", key_prefix), &checkpoint.metadata).await {
-                    eprintln!("[checkpoint] Warning: Failed to write metadata to remote backend: {}", e);
+                    crate::observability::tee_eprintln(
+                        &format!("[checkpoint] Warning: Failed to write metadata to remote backend: {}", e)
+                    );
                 }
                 
                 // Write agent state
                 if let Err(e) = backend.write_json(&format!("{}_agent.json", key_prefix), &checkpoint.agent_state).await {
-                    eprintln!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e);
+                    crate::observability::tee_eprintln(
+                        &format!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e)
+                    );
                 }
                 
                 // Write conversation state
                 if let Err(e) = backend.write_json(&format!("{}_conversation.json", key_prefix), &checkpoint.conversation_state).await {
-                    eprintln!("[checkpoint] Warning: Failed to write conversation to remote backend: {}", e);
+                    crate::observability::tee_eprintln(
+                        &format!("[checkpoint] Warning: Failed to write conversation to remote backend: {}", e)
+                    );
                 }
                 
                 let mode_str = if matches!(self.storage_mode, StorageMode::Mirror) { "mirrored" } else { "saved" };
-                eprintln!("[checkpoint] ✅ {} checkpoint {} to remote storage", mode_str.to_uppercase(), checkpoint_id);
+                crate::observability::tee_eprintln(
+                    &format!("[checkpoint] ✅ {} checkpoint {} to remote storage", mode_str.to_uppercase(), checkpoint_id)
+                );
             } else if matches!(self.storage_mode, StorageMode::Remote) {
                 return Err(CheckpointError::Storage {
                     message: "Remote storage mode requires a remote backend to be configured".to_string(),
