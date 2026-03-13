@@ -113,14 +113,20 @@ pub struct RawConfigCommandContext {
 impl RawConfigCommandContext {
     /// Create a new context from already-parsed configuration
     pub fn new(config: crate::config::Configuration) -> Result<Self, Box<dyn std::error::Error>> {
-        let agent_name = &config.agent.name;
-        
-        let log_file_name = format!("{}.log", agent_name);
-        let logger = crate::observability::Logger::new(None, None)
-            .unwrap_or_else(|_| {
-                crate::observability::Logger::new(Some(std::path::Path::new(&log_file_name)), Some("INFO"))
-                    .expect("Failed to create fallback logger")
-            });
+        let log_file_path = if config.logging.log_file.is_empty() {
+            None
+        } else {
+            Some(std::path::PathBuf::from(&config.logging.log_file))
+        };
+        let log_level = if config.logging.log_level.is_empty() {
+            None
+        } else {
+            Some(config.logging.log_level.as_str())
+        };
+        let logger = crate::observability::Logger::new(
+            log_file_path.as_deref(),
+            log_level,
+        )?;
 
         let working_dir = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."));
