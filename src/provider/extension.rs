@@ -446,18 +446,17 @@ impl LlmProvider for ExtensionProvider {
                                         match delta.delta_type.as_str() {
                                             "reasoning" => {
                                                 if let Some(reasoning) = delta.reasoning {
-                                                    // Print reasoning to stderr in gray
-                                                    eprint!("\x1b[90m{}\x1b[0m", reasoning);
-                                                    use std::io::Write;
-                                                    let _ = std::io::stderr().flush();
+                                                    // Tee-write reasoning to stderr and log file
+                                                    crate::observability::tee_eprintln(
+                                                        &format!("\x1b[90m{}\x1b[0m", reasoning)
+                                                    );
                                                     let _ = tx.send(Ok(StreamChunk::Reasoning(reasoning)));
                                                 }
                                             }
                                             "content" => {
                                                 if let Some(content) = delta.content {
-                                                    print!("{}", content);
-                                                    use std::io::Write;
-                                                    let _ = std::io::stdout().flush();
+                                                    // Tee-write content to stdout and log file
+                                                    crate::observability::tee_print(&content);
                                                     let _ = tx.send(Ok(StreamChunk::Text(content)));
                                                 }
                                             }
