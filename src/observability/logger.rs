@@ -28,17 +28,10 @@ impl Logger {
         let log_file = match log_file {
             Some(p) => p.to_path_buf(),
             None => {
-                let mut dir = std::env::temp_dir();
-                dir.push("abk-logs");
-                std::fs::create_dir_all(&dir).with_context(|| {
-                    format!("Failed to create log directory: {}", dir.display())
-                })?;
-                let filename = format!(
-                    "agent_{}_{}.md",
-                    Utc::now().timestamp_millis(),
-                    std::process::id()
-                );
-                dir.join(filename)
+                let agent_name = std::env::var("ABK_AGENT_NAME")
+                    .unwrap_or_else(|_| "agent".to_string());
+                let filename = format!("{}.log", agent_name);
+                std::env::temp_dir().join(filename)
             }
         };
 
@@ -70,9 +63,9 @@ impl Logger {
 
         let now: DateTime<Utc> = Utc::now();
 
-        writeln!(file, "# Agent Interaction Log\n")?;
-        writeln!(file, "Log started: {}\n", now.to_rfc3339())?;
-        writeln!(file, "---\n")?;
+        writeln!(file, "Agent Interaction Log")?;
+        writeln!(file, "Log started: {}", now.to_rfc3339())?;
+        writeln!(file, "---")?;
 
         Ok(())
     }
@@ -411,7 +404,7 @@ impl Logger {
         // Print to stdout at INFO level (always visible)
         println!("INFO: Tool request: {}", tool_call_json);
 
-        // Append to markdown log file for persistence
+        // Append to log file for persistence
         let now: DateTime<Utc> = Utc::now();
         let content = format!(
             "### Tool Request - {}\n\n**Tool Request (compact):** {}\n\n",
@@ -448,14 +441,29 @@ impl Logger {
         Ok(())
     }
 
-    /// Log info message.
+    /// Log info message (console + file).
     pub fn info(&self, message: &str) {
         println!("INFO: {}", message);
+        let _ = self.append_to_log(&format!("INFO: {}\n", message));
     }
 
-    /// Log error message.
+    /// Log error message (console + file).
     pub fn error(&self, message: &str) {
         eprintln!("ERROR: {}", message);
+        let _ = self.append_to_log(&format!("ERROR: {}\n", message));
+    }
+
+    /// Tee-print: write to both stdout and log file.
+    /// Use this for raw output that should be mirrored exactly.
+    pub fn tee_println(&self, message: &str) {
+        println!("{}", message);
+        let _ = self.append_to_log(&format!("{}\n", message));
+    }
+
+    /// Tee-eprint: write to both stderr and log file.
+    pub fn tee_eprintln(&self, message: &str) {
+        eprintln!("{}", message);
+        let _ = self.append_to_log(&format!("{}\n", message));
     }
 
     /// Get the log file path.

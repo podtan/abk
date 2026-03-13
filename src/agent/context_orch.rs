@@ -228,6 +228,10 @@ impl AgentContext for super::Agent {
         self.logger.info(message);
     }
     
+    fn log_tee(&self, message: &str) {
+        self.logger.tee_println(message);
+    }
+    
     // Error formatting  
     async fn format_error(&self, error_type: &str, message: &str, context: &HashMap<String, serde_json::Value>) -> Result<String> {
         // This is a workaround for the &self vs &mut self mismatch

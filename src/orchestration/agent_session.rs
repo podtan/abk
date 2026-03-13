@@ -77,6 +77,8 @@ pub trait OrchestrationLogger: Send + Sync {
     fn log_error(&self, message: &str, context: Option<&str>) -> Result<()>;
     fn log_completion(&self, reason: &str) -> Result<()>;
     fn info(&self, message: &str);
+    /// Tee-print: write raw message to both stdout and log file.
+    fn tee_println(&self, message: &str);
 }
 
 /// Tool execution result with success tracking
@@ -301,10 +303,10 @@ where
         
         // End conversation turn
         if let Some(turn_id) = &self.current_turn_id {
-            println!(
+            self.logger.info(&format!(
                 "🔑 Ending conversation turn: {} (Total requests: {})",
                 turn_id, self.turn_request_count
-            );
+            ));
         }
         self.end_conversation_turn();
         
@@ -350,10 +352,10 @@ where
         // Ensure conversation turn exists
         if self.get_current_turn_id().is_none() {
             let turn_id = self.start_conversation_turn();
-            println!(
+            self.logger.info(&format!(
                 "🔑 Started conversation turn: {} (X-Request-Id for request grouping)",
                 turn_id
-            );
+            ));
         }
 
         let max_iterations = self.config.max_iterations;
@@ -427,17 +429,17 @@ where
         // Ensure conversation turn exists
         if self.get_current_turn_id().is_none() {
             let turn_id = self.start_conversation_turn();
-            println!(
+            self.logger.info(&format!(
                 "🔑 Started conversation turn: {} (X-Request-Id for request grouping)",
                 turn_id
-            );
+            ));
         }
 
         if !self.config.streaming_enabled {
             return self.run_workflow().await;
         }
 
-        println!("🚀 Starting TRUE unified streaming workflow (One API call)");
+        self.logger.info("🚀 Starting TRUE unified streaming workflow (One API call)");
 
         let max_iterations = self.config.max_iterations;
         
@@ -461,14 +463,14 @@ where
             // Log API call
             self.api_call_count += 1;
             let context_tokens = self.chat_formatter.count_tokens();
-            println!(
+            self.logger.info(&format!(
                 "🔥 API Call {} | Context={} | TRUE Unified Streaming | Model: {} | Tools: {} | Provider: {}",
                 self.api_call_count,
                 context_tokens,
                 self.provider.default_model(),
                 tools.as_ref().map(|t| t.len()).unwrap_or(0),
                 self.provider.provider_name()
-            );
+            ));
 
             // Make streaming call
             match self.generate_with_provider_internal(tools, true).await {
@@ -532,14 +534,14 @@ where
             let tools = self.get_tools_for_call();
             
             self.api_call_count += 1;
-            println!(
+            self.logger.info(&format!(
                 "🔥 API Call {} | Iteration {} | Model: {} | Tools: {} | Provider: {}",
                 self.api_call_count,
                 self.current_iteration,
                 self.provider.default_model(),
                 tools.as_ref().map(|t| t.len()).unwrap_or(0),
                 self.provider.provider_name()
-            );
+            ));
 
             match self.generate_with_provider_internal(tools, self.config.streaming_enabled).await {
                 Ok(result) => return Ok(result),
@@ -727,12 +729,12 @@ where
     /// Handle tool calls execution with optional preceding content and reasoning
     /// Returns true if session should continue, false if should stop.
     async fn handle_tool_calls_with_content(&mut self, tool_calls: Vec<umf::ToolCall>, content: Option<String>, reasoning: Option<String>) -> Result<bool> {
-        println!(
+        self.logger.info(&format!(
             "🔧 API Call {} → Executing {} tools: [{}]",
             self.api_call_count,
             tool_calls.len(),
             tool_calls.iter().map(|tc| tc.function.name.as_str()).collect::<Vec<_>>().join(", ")
-        );
+        ));
 
         // Add assistant message with tool calls - use provided content or generate placeholder
         let assistant_content = content.unwrap_or_else(|| self.tool_executor.generate_assistant_content(&tool_calls));
@@ -753,7 +755,7 @@ where
         // Execute tools
         let results = self.tool_executor.execute_tools(tool_calls).await?;
         
-        println!("✅ API Call {} → Tool execution completed", self.api_call_count);
+        self.logger.info(&format!("✅ API Call {} → Tool execution completed", self.api_call_count));
 
         // Add tool messages
         for result in &results {
@@ -787,7 +789,7 @@ where
 
         // Print the response
         if !response_text.trim().is_empty() {
-            println!("\n{}\n", response_text);
+            self.logger.tee_println(&format!("\n{}\n", response_text));
         }
 
         // Add assistant message to conversation

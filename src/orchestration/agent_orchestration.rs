@@ -76,6 +76,10 @@ pub trait AgentContext {
     fn log_completion(&self, reason: &str) -> Result<()>;
     fn log_info(&self, message: &str);
     
+    /// Tee-print: write raw message to both stdout and log file.
+    /// Use for output that should be mirrored exactly to the log file.
+    fn log_tee(&self, message: &str);
+    
     // Error formatting
     async fn format_error(&self, error_type: &str, message: &str, context: &HashMap<String, serde_json::Value>) -> Result<String>;
     
@@ -113,7 +117,7 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
     // Ensure conversation turn exists
     if agent.get_current_turn_id().is_none() {
         let turn_id = agent.start_conversation_turn();
-        println!("🔑 Started conversation turn: {}", turn_id);
+        agent.log_info(&format!("🔑 Started conversation turn: {}", turn_id));
     }
 
     for iteration in agent.current_iteration()..=max_iterations {
@@ -180,7 +184,7 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
         return run_workflow(agent, max_iterations).await;
     }
 
-    println!("🚀 Starting TRUE unified streaming workflow");
+    agent.log_info("🚀 Starting TRUE unified streaming workflow");
 
     loop {
         // Checkpoint
@@ -195,19 +199,19 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
 
         // Log API call
         agent.increment_api_call_count();
-        println!(
+        agent.log_info(&format!(
             "🔥 API Call {} | Context={} | Streaming | Model: {} | Tools: {}",
             agent.api_call_count(),
             agent.count_tokens(),
             agent.default_model(),
             tools.as_ref().map(|t| t.len()).unwrap_or(0)
-        );
+        ));
 
         // Make streaming API call
         let max_tokens = agent.max_tokens();
         match agent.generate_with_provider(tools, max_tokens, true).await {
             Ok(result) => {
-                println!("📡 Streaming API call completed successfully");
+                agent.log_info("📡 Streaming API call completed successfully");
                 
                 // Increment iteration after successful API call
                 agent.set_current_iteration(agent.current_iteration() + 1);
@@ -257,13 +261,13 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
         let streaming_enabled = agent.streaming_enabled();
         
         agent.increment_api_call_count();
-        println!(
+        agent.log_info(&format!(
             "🔥 API Call {} | Iteration {} | Model: {} | Tools: {}",
             agent.api_call_count(),
             agent.current_iteration(),
             agent.default_model(),
             tools.as_ref().map(|t| t.len()).unwrap_or(0)
-        );
+        ));
 
         // Call the agent's generate method
         match agent.generate_with_provider(tools, max_tokens, streaming_enabled).await {
@@ -287,11 +291,11 @@ async fn handle_tool_calls<A: AgentContext>(
     content: Option<String>,
     reasoning: Option<String>,
 ) -> Result<()> {
-    println!(
+    agent.log_info(&format!(
         "🔧 Executing {} tools: [{}]",
         tool_calls.len(),
         tool_calls.iter().map(|tc| tc.function.name.as_str()).collect::<Vec<_>>().join(", ")
-    );
+    ));
 
     // Add assistant message - use provided content or generate placeholder
     let message_content = content.unwrap_or_else(|| agent.generate_assistant_content_for_tools(&tool_calls));
@@ -379,7 +383,7 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
     }
 
     if !response_text.trim().is_empty() {
-        println!("\n{}\n", response_text);
+        agent.log_tee(&format!("\n{}\n", response_text));
     }
 
     // LLM finished naturally - no error, just stop
@@ -399,7 +403,7 @@ async fn stop_session<A: AgentContext>(agent: &mut A, reason: &str) -> Result<St
     }
     
     if let Some(turn_id) = agent.get_current_turn_id() {
-        println!("🔑 Ending conversation turn: {}", turn_id);
+        agent.log_info(&format!("🔑 Ending conversation turn: {}", turn_id));
     }
     agent.end_conversation_turn();
     

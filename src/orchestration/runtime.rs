@@ -154,6 +154,7 @@ pub trait CheckpointCallback: Send + Sync {
 pub struct AgentRuntime {
     config: RuntimeConfig,
     state: Arc<RwLock<RuntimeState>>,
+    logger: Option<crate::observability::Logger>,
 }
 
 impl AgentRuntime {
@@ -167,6 +168,43 @@ impl AgentRuntime {
         Self {
             config,
             state: Arc::new(RwLock::new(RuntimeState::default())),
+            logger: None,
+        }
+    }
+
+    /// Create a new agent runtime with custom configuration and logger
+    pub fn with_config_and_logger(config: RuntimeConfig, logger: crate::observability::Logger) -> Self {
+        Self {
+            config,
+            state: Arc::new(RwLock::new(RuntimeState::default())),
+            logger: Some(logger),
+        }
+    }
+
+    /// Log info: tee to console and log file if logger is available, otherwise just println
+    fn log_info(&self, message: &str) {
+        if let Some(ref logger) = self.logger {
+            logger.info(message);
+        } else {
+            println!("INFO: {}", message);
+        }
+    }
+
+    /// Log warning: tee to console and log file if logger is available, otherwise just eprintln
+    fn log_warn(&self, message: &str) {
+        if let Some(ref logger) = self.logger {
+            logger.tee_eprintln(&format!("Warning: {}", message));
+        } else {
+            eprintln!("Warning: {}", message);
+        }
+    }
+
+    /// Tee-print: write raw output to both stdout and log file
+    fn tee_println(&self, message: &str) {
+        if let Some(ref logger) = self.logger {
+            logger.tee_println(message);
+        } else {
+            println!("{}", message);
         }
     }
 
@@ -223,7 +261,7 @@ impl AgentRuntime {
             if self.should_checkpoint().await {
                 if let Some(ref mut cp) = checkpoint {
                     if let Err(e) = cp.create_checkpoint(iteration).await {
-                        eprintln!("Warning: Failed to create checkpoint at iteration {}: {}", iteration, e);
+                        self.log_warn(&format!("Failed to create checkpoint at iteration {}: {}", iteration, e));
                     }
                 }
             }
@@ -235,8 +273,8 @@ impl AgentRuntime {
             let messages = formatter.to_messages();
             let context_tokens = formatter.count_tokens();
             
-            println!("🔥 Iteration {} | Context={} tokens | Model: {} | Provider: {}", 
-                     iteration, context_tokens, provider.model_name(), provider.provider_name());
+            self.log_info(&format!("🔥 Iteration {} | Context={} tokens | Model: {} | Provider: {}", 
+                     iteration, context_tokens, provider.model_name(), provider.provider_name()));
 
             // Prepare tools
             let available_tools = tools.get_schemas();
@@ -282,7 +320,7 @@ impl AgentRuntime {
                 GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                     // Log tool execution
                     let tool_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
-                    println!("🔧 Iteration {} → Executing {} tools: [{}]", iteration, tool_calls.len(), tool_names.join(", "));
+                    self.log_info(&format!("🔧 Iteration {} → Executing {} tools: [{}]", iteration, tool_calls.len(), tool_names.join(", ")));
 
                     // Add assistant message with tool calls - use provided content or generate placeholder
                     let assistant_content = content.unwrap_or_else(|| format!("Executing {} tools", tool_calls.len()));
@@ -313,7 +351,7 @@ impl AgentRuntime {
                         );
                     }
 
-                    println!("✅ Iteration {} → Tool execution completed", iteration);
+                    self.log_info(&format!("✅ Iteration {} → Tool execution completed", iteration));
                     // Continue loop - LLM will decide when to stop
                 }
                 GenerateResult::Content { text: content, reasoning } => {
@@ -323,7 +361,7 @@ impl AgentRuntime {
                     } else {
                         formatter.add_assistant_message(content.clone(), None);
                     }
-                    println!("✅ Task completed");
+                    self.log_info("✅ Task completed");
                     self.stop(None).await?;
                     return Ok(self.result().await);
                 }
