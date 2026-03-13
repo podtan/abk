@@ -103,6 +103,57 @@ pub async fn run_from_raw_config(
     Ok(())
 }
 
+/// Run a specific task directly, bypassing CLI argument parsing.
+///
+/// This is designed for TUI mode and programmatic callers that already
+/// have the task string and don't need CLI argument parsing.
+///
+/// # Arguments
+/// * `config_toml` - Raw TOML configuration string
+/// * `secrets` - Key-value pairs to inject into environment
+/// * `build_info` - Optional build-time metadata
+/// * `task` - The task description to execute
+pub async fn run_task_from_raw_config(
+    config_toml: &str,
+    secrets: std::collections::HashMap<String, String>,
+    build_info: Option<crate::cli::config::BuildInfo>,
+    task: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Inject secrets into environment (existing env vars take precedence)
+    for (key, value) in &secrets {
+        if std::env::var(key).is_err() {
+            std::env::set_var(key, value);
+        }
+    }
+
+    // Pre-extract agent name and set ABK_AGENT_NAME BEFORE full config parsing.
+    if let Ok(partial) = config_toml.parse::<toml::Value>() {
+        if let Some(name) = partial.get("agent").and_then(|a| a.get("name")).and_then(|n| n.as_str()) {
+            std::env::set_var("ABK_AGENT_NAME", name);
+        }
+    }
+
+    // Parse TOML configuration
+    let config: crate::config::Configuration = toml::from_str(config_toml)
+        .map_err(|e| format!("Failed to parse config TOML: {}", e))?;
+
+    std::env::set_var("ABK_AGENT_NAME", &config.agent.name);
+
+    let context = RawConfigCommandContext::new(config)?;
+
+    let options = crate::cli::commands::run::RunOptions {
+        task: task.to_string(),
+        yolo: false,
+        mode: None,
+        run_mode: None,
+        verbose: false,
+    };
+
+    crate::cli::commands::run::execute_run(&context, options).await?;
+
+    Ok(())
+}
+
 /// Command context that uses pre-parsed configuration (no file reading)
 pub struct RawConfigCommandContext {
     config: crate::config::Configuration,

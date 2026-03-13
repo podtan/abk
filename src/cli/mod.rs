@@ -63,7 +63,7 @@ pub use adapters::{CommandContext, CheckpointAccess, ProviderFactory, ToolRegist
 pub use config::*;
 
 #[cfg(feature = "cli")]
-pub use runner::{run_configured_cli, run_from_raw_config, RawConfigCommandContext};
+pub use runner::{run_configured_cli, run_from_raw_config, run_task_from_raw_config, RawConfigCommandContext};
 
 #[cfg(feature = "cli")]
 pub use utils::*;
