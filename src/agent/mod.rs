@@ -131,9 +131,15 @@ impl Agent {
         let executor =
             CommandExecutor::new(timeout_seconds, Some(Path::new(".")), enable_validation);
 
-        let log_file_path = config_loader.get_string("logging.log_file").map(PathBuf::from);
+        let log_dir_path = config_loader.get_string("logging.log_dir")
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
         let log_level = config_loader.get_string("logging.log_level");
-        let logger = Logger::new(log_file_path.as_deref(), log_level.as_deref())?;
+        let logger = Logger::new(log_dir_path.as_deref(), log_level.as_deref())?;
+
+        // Initialize the global logger so standalone tee_* functions use the same log file
+        let global_logger = Logger::new(log_dir_path.as_deref(), log_level.as_deref())?;
+        crate::observability::init_global_logger(global_logger);
 
         let default_mode_str = config_loader
             .get_string("agent.default_mode")

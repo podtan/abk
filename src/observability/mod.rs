@@ -31,3 +31,6 @@ pub use logger::Logger;
 
 // Re-export standalone tee-write functions for components without Logger reference
 pub use logger::{tee_print, tee_eprint, tee_eprintln};
+
+// Re-export global logger initialization for consolidating log output
+pub use logger::{init_global_logger, current_log_path};

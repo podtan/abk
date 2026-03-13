@@ -5,34 +5,36 @@ use tempfile::tempdir;
 #[test]
 fn test_logger_creation() {
     let temp_dir = tempdir().unwrap();
-    let log_path = temp_dir.path().join("test.log");
+    let log_dir = temp_dir.path().join("logs");
 
-    let logger = Logger::new(Some(&log_path), Some("DEBUG"));
+    let logger = Logger::new(Some(&log_dir), Some("DEBUG"));
     assert!(logger.is_ok());
 
     let logger = logger.unwrap();
-    assert_eq!(logger.log_file(), &log_path);
+    // Log file should be inside the log directory with timestamped name
+    assert!(logger.log_file().starts_with(&log_dir));
     assert_eq!(logger.log_level(), "DEBUG");
 }
 
 #[test]
 fn test_log_file_creation() {
     let temp_dir = tempdir().unwrap();
-    let log_path = temp_dir.path().join("logs").join("test.md");
+    let log_dir = temp_dir.path().join("logs");
 
-    let _logger = Logger::new(Some(&log_path), None).unwrap();
-    assert!(log_path.exists());
+    let logger = Logger::new(Some(&log_dir), None).unwrap();
+    assert!(logger.log_file().exists());
 
-    let content = std::fs::read_to_string(&log_path).unwrap();
-    assert!(content.contains("# Agent Interaction Log"));
+    let content = std::fs::read_to_string(logger.log_file()).unwrap();
+    assert!(content.contains("Agent Interaction Log"));
     assert!(content.contains("Log started:"));
 }
 
 #[test]
 fn test_log_operations() {
     let temp_dir = tempdir().unwrap();
-    let log_path = temp_dir.path().join("test.md");
-    let logger = Logger::new(Some(&log_path), None).unwrap();
+    let log_dir = temp_dir.path().join("logs");
+    let logger = Logger::new(Some(&log_dir), None).unwrap();
+    let log_path = logger.log_file().to_path_buf();
 
     // Test session start
     let mut config = HashMap::new();
@@ -68,8 +70,9 @@ fn test_log_operations() {
 #[test]
 fn test_log_llm_interaction_debug_controls_messages() {
     let temp_dir = tempdir().unwrap();
-    let log_path = temp_dir.path().join("test.md");
-    let logger = Logger::new(Some(&log_path), None).unwrap();
+    let log_dir = temp_dir.path().join("logs");
+    let logger = Logger::new(Some(&log_dir), None).unwrap();
+    let log_path = logger.log_file().to_path_buf();
 
     // Create sample messages
     let mut messages = Vec::new();
@@ -99,7 +102,7 @@ fn test_log_llm_interaction_debug_controls_messages() {
     // Clear the log for next test
     std::fs::write(
         &log_path,
-        "# Agent Interaction Log\n\nLog started: Test\n\n",
+        "Agent Interaction Log\n\nLog started: Test\n\n",
     )
     .unwrap();
 
@@ -122,8 +125,9 @@ fn test_log_llm_interaction_debug_controls_messages() {
 #[test]
 fn test_log_compact_tool_call() {
     let temp_dir = tempdir().unwrap();
-    let log_path = temp_dir.path().join("test.md");
-    let logger = Logger::new(Some(&log_path), None).unwrap();
+    let log_dir = temp_dir.path().join("logs");
+    let logger = Logger::new(Some(&log_dir), None).unwrap();
+    let log_path = logger.log_file().to_path_buf();
 
     let tool_call_json = r#"{"name":"run_command","arguments":{"command":"docker ps"}}"#;
 

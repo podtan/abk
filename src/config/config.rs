@@ -227,7 +227,10 @@ pub struct AgentConfig {
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
-    pub log_file: String,
+    /// Directory for log files. Timestamped log files are created inside.
+    /// If empty, defaults to /tmp/{ABK_AGENT_NAME}/
+    #[serde(default)]
+    pub log_dir: String,
     pub log_level: String,
 }
 
@@ -337,7 +340,7 @@ impl ConfigurationLoader {
             }),
             // Templates removed - now handled by lifecycle WASM plugins
             logging: LoggingConfig {
-                log_file: String::new(), // Empty string - Logger will use its default path
+                log_dir: String::new(),  // Empty string - Logger will use default /tmp/{ABK_AGENT_NAME}/
                 log_level: "INFO".to_string(),
             },
             execution: ExecutionConfig {
@@ -405,7 +408,7 @@ impl ConfigurationLoader {
             "templates.query_template" => None,
             "templates.action_observation_template" => None,
             "templates.format_error_template" => None,
-            "logging.log_file" => Some(self.config.logging.log_file.clone()),
+            "logging.log_dir" => Some(self.config.logging.log_dir.clone()),
             "logging.log_level" => Some(self.config.logging.log_level.clone()),
             "lifecycle.enabled" => Some(
                 self.config
@@ -549,7 +552,7 @@ action_observation_template = "templates/action_observation.md"
 format_error_template = "templates/format_error.md"
 
 [logging]
-log_file = "/tmp/test.md"
+log_dir = ""
 log_level = "INFO"
 
 [execution]
@@ -613,7 +616,7 @@ action_observation_template = "templates/action_observation.md"
 format_error_template = "templates/format_error.md"
 
 [logging]
-log_file = "/tmp/test.md"
+log_dir = ""
 log_level = "INFO"
 
 [execution]
@@ -668,7 +671,7 @@ action_observation_template = "templates/action_observation.md"
 format_error_template = "templates/format_error.md"
 
 [logging]
-log_file = "/tmp/test.md"
+log_dir = ""
 log_level = "INFO"
 
 [execution]
@@ -731,7 +734,7 @@ action_observation_template = "templates/action_observation.md"
 format_error_template = "templates/format_error.md"
 
 [logging]
-log_file = "/tmp/test.md"
+log_dir = ""
 log_level = "INFO"
 
 [execution]

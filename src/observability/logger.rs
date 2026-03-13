@@ -12,12 +12,36 @@ use std::sync::OnceLock;
 /// Session start timestamp - set once when the logger module is first loaded
 static SESSION_START_TIMESTAMP: OnceLock<String> = OnceLock::new();
 
+/// Global logger instance - ensures all logs go to the same file
+static GLOBAL_LOGGER: OnceLock<Logger> = OnceLock::new();
+
 /// Get or initialize the session timestamp
 fn get_session_timestamp() -> &'static str {
     SESSION_START_TIMESTAMP.get_or_init(|| {
         Utc::now().format("%Y%m%d_%H%M%S").to_string()
     })
 }
+
+/// Get or initialize the global logger instance
+fn get_global_logger() -> &'static Logger {
+    GLOBAL_LOGGER.get_or_init(|| {
+        Logger::new(None, None).expect("Failed to create global logger")
+    })
+}
+
+/// Initialize the global logger with a specific Logger instance.
+/// This should be called early (e.g., from agent initialization) so that
+/// standalone tee_* functions write to the same log file as the agent's logger.
+/// If the global logger has already been initialized, this is a no-op.
+pub fn init_global_logger(logger: Logger) {
+    let _ = GLOBAL_LOGGER.set(logger);
+}
+
+/// Get the current log file path from the global logger.
+pub fn current_log_path() -> &'static Path {
+    get_global_logger().log_file()
+}
+
 /// Logger for agent interactions and commands.
 ///
 /// This logger creates markdown-formatted log files for tracking agent sessions,
@@ -32,30 +56,25 @@ impl Logger {
     /// Initialize logger.
     ///
     /// # Arguments
-    /// * `log_file` - Path to log file. If None, creates a timestamped file in temp directory.
+    /// * `log_dir` - Directory for log files. If None, creates timestamped files in /tmp/{ABK_AGENT_NAME}/.
     /// * `log_level` - Logging level (defaults to "INFO").
-    pub fn new(log_file: Option<&Path>, log_level: Option<&str>) -> Result<Self> {
-        let log_file = match log_file {
-            Some(p) => p.to_path_buf(),
-            None => {
-                let agent_name = std::env::var("ABK_AGENT_NAME")
-                    .unwrap_or_else(|_| "agent".to_string());
-                let timestamp = get_session_timestamp();
-                let filename = format!("{}_{}.log", agent_name, timestamp);
-                let log_dir = std::env::temp_dir().join(&agent_name);
-                std::fs::create_dir_all(&log_dir)
-                    .with_context(|| format!("Failed to create log directory: {}", log_dir.display()))?;
-                log_dir.join(filename)
-            }
+    pub fn new(log_dir: Option<&Path>, log_level: Option<&str>) -> Result<Self> {
+        let agent_name = std::env::var("ABK_AGENT_NAME")
+            .unwrap_or_else(|_| "agent".to_string());
+        let timestamp = get_session_timestamp();
+        let filename = format!("{}_{}.log", agent_name, timestamp);
+
+        let log_dir = match log_dir {
+            Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+            _ => std::env::temp_dir().join(&agent_name),
         };
 
-        let log_level = log_level.unwrap_or("INFO").to_string();
+        std::fs::create_dir_all(&log_dir)
+            .with_context(|| format!("Failed to create log directory: {}", log_dir.display()))?;
 
-        // Ensure log directory exists
-        if let Some(parent) = log_file.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create log directory: {}", parent.display()))?;
-        }
+        let log_file = log_dir.join(filename);
+
+        let log_level = log_level.unwrap_or("INFO").to_string();
 
         let logger = Self {
             log_file,
@@ -497,59 +516,32 @@ impl Default for Logger {
     }
 }
 
-/// Global cached log path for standalone functions.
-/// This is initialized once on first access and reused thereafter.
-static CACHED_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-/// Derive the current log file path from ABK_AGENT_NAME env var.
-/// Creates the directory /tmp/{ABK_AGENT_NAME}/ if it doesn't exist.
-/// Uses a cached timestamp so all log entries go to the same file.
-/// Falls back to /tmp/agent/agent_{timestamp}.log if not set.
-fn current_log_path() -> PathBuf {
-    CACHED_LOG_PATH.get_or_init(|| {
-        let agent_name = std::env::var("ABK_AGENT_NAME")
-            .unwrap_or_else(|_| "agent".to_string());
-        let timestamp = get_session_timestamp();
-        let filename = format!("{}_{}.log", agent_name, timestamp);
-        let log_dir = std::env::temp_dir().join(&agent_name);
-        
-        // Create directory if it doesn't exist
-        if let Err(e) = std::fs::create_dir_all(&log_dir) {
-            eprintln!("Warning: Failed to create log directory {}: {}", log_dir.display(), e);
-        }
-        
-        log_dir.join(filename)
-    }).clone()
+fn append_to_global_log(content: &str) {
+    let logger = get_global_logger();
+    let _ = logger.append_to_log(content);
 }
 
-/// Append a message to the current log file (standalone, no Logger needed).
-fn append_to_current_log(content: &str) {
-    let log_path = current_log_path();
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-        let _ = write!(file, "{}", content);
-    }
-}
-
-/// Tee-print to stdout and the log file (standalone, no Logger needed).
+/// Tee-print to stdout and the log file using the global logger.
 /// Use this from components that don't have a Logger reference.
 pub fn tee_print(message: &str) {
     print!("{}", message);
     let _ = std::io::stdout().flush();
-    append_to_current_log(message);
+    append_to_global_log(message);
 }
 
-/// Tee-eprint to stderr and the log file (standalone, no Logger needed).
+/// Tee-eprint to stderr and the log file using the global logger.
 /// Use this from components that don't have a Logger reference.
 pub fn tee_eprint(message: &str) {
     eprint!("{}", message);
     let _ = std::io::stderr().flush();
-    append_to_current_log(message);
+    append_to_global_log(message);
 }
 
-/// Tee-eprintln to stderr and the log file (standalone, no Logger needed).
+/// Tee-eprintln to stderr and the log file using the global logger.
 pub fn tee_eprintln(message: &str) {
     eprintln!("{}", message);
-    append_to_current_log(&format!("{}\n", message));
+    append_to_global_log(&format!("{}\n", message));
 }
 
 #[cfg(test)]

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: Removed `log_file` from `LoggingConfig` — use `log_dir` instead
+- Logger always writes timestamped files to `log_dir` (defaults to `/tmp/{ABK_AGENT_NAME}/`)
+- Standalone `tee_*` functions now use a global `Logger` instance (via `init_global_logger`) instead of a separate `CACHED_LOG_PATH`
+- Added `init_global_logger()` and `current_log_path()` to `abk::observability` for consolidated logging
+
+### Fixed
+- Fixed dual log file issue where agent logger and standalone `tee_*` functions wrote to separate files
+
 ## [0.5.9] - 2026-03-13
 
 ### Added

@@ -164,10 +164,10 @@ pub struct RawConfigCommandContext {
 impl RawConfigCommandContext {
     /// Create a new context from already-parsed configuration
     pub fn new(config: crate::config::Configuration) -> Result<Self, Box<dyn std::error::Error>> {
-        let log_file_path = if config.logging.log_file.is_empty() {
+        let log_dir_path = if config.logging.log_dir.is_empty() {
             None
         } else {
-            Some(std::path::PathBuf::from(&config.logging.log_file))
+            Some(std::path::PathBuf::from(&config.logging.log_dir))
         };
         let log_level = if config.logging.log_level.is_empty() {
             None
@@ -175,9 +175,16 @@ impl RawConfigCommandContext {
             Some(config.logging.log_level.as_str())
         };
         let logger = crate::observability::Logger::new(
-            log_file_path.as_deref(),
+            log_dir_path.as_deref(),
             log_level,
         )?;
+
+        // Initialize the global logger so standalone tee_* functions use the same log file
+        let global_logger = crate::observability::Logger::new(
+            log_dir_path.as_deref(),
+            log_level,
+        )?;
+        crate::observability::init_global_logger(global_logger);
 
         let working_dir = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."));
