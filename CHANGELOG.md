@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-03-13
+
+### Added
+- Added standalone `tee_print`, `tee_eprint`, and `tee_eprintln` functions to `abk::observability` for components without a `Logger` reference.
+- Added `run_task_from_raw_config` to `abk::cli::runner` for programmatic task execution without CLI argument parsing.
+
+### Changed
+- Replaced `eprintln!` in `checkpoint/storage.rs` with `tee_eprintln` to ensure checkpoint status reaches log files.
+- Replaced `eprint!` and `print!` in `provider/wasm/mod.rs` with `tee_eprint` and `tee_print` for streaming reasoning and content redirection.
+
 ## [0.5.8] - 2026-03-13
 
 ### Changed
