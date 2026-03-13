@@ -5,16 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.10] - 2026-03-14
 
 ### Changed
 - **BREAKING**: Removed `log_file` from `LoggingConfig` — use `log_dir` instead
 - Logger always writes timestamped files to `log_dir` (defaults to `/tmp/{ABK_AGENT_NAME}/`)
 - Standalone `tee_*` functions now use a global `Logger` instance (via `init_global_logger`) instead of a separate `CACHED_LOG_PATH`
 - Added `init_global_logger()` and `current_log_path()` to `abk::observability` for consolidated logging
+- Replaced raw `eprint!`/`print!` in extension provider with `tee_eprintln`/`tee_print` for reasoning content logging
 
 ### Fixed
 - Fixed dual log file issue where agent logger and standalone `tee_*` functions wrote to separate files
+- Fixed AI reasoning/thinking content not appearing in log files
 
 ## [0.5.9] - 2026-03-13
 
