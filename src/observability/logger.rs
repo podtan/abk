@@ -7,7 +7,17 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+/// Session start timestamp - set once when the logger module is first loaded
+static SESSION_START_TIMESTAMP: OnceLock<String> = OnceLock::new();
+
+/// Get or initialize the session timestamp
+fn get_session_timestamp() -> &'static str {
+    SESSION_START_TIMESTAMP.get_or_init(|| {
+        Utc::now().format("%Y%m%d_%H%M%S").to_string()
+    })
+}
 /// Logger for agent interactions and commands.
 ///
 /// This logger creates markdown-formatted log files for tracking agent sessions,
@@ -30,8 +40,12 @@ impl Logger {
             None => {
                 let agent_name = std::env::var("ABK_AGENT_NAME")
                     .unwrap_or_else(|_| "agent".to_string());
-                let filename = format!("{}.log", agent_name);
-                std::env::temp_dir().join(filename)
+                let timestamp = get_session_timestamp();
+                let filename = format!("{}_{}.log", agent_name, timestamp);
+                let log_dir = std::env::temp_dir().join(&agent_name);
+                std::fs::create_dir_all(&log_dir)
+                    .with_context(|| format!("Failed to create log directory: {}", log_dir.display()))?;
+                log_dir.join(filename)
             }
         };
 
@@ -483,12 +497,29 @@ impl Default for Logger {
     }
 }
 
+/// Global cached log path for standalone functions.
+/// This is initialized once on first access and reused thereafter.
+static CACHED_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
 /// Derive the current log file path from ABK_AGENT_NAME env var.
-/// Falls back to /tmp/agent.log if not set.
+/// Creates the directory /tmp/{ABK_AGENT_NAME}/ if it doesn't exist.
+/// Uses a cached timestamp so all log entries go to the same file.
+/// Falls back to /tmp/agent/agent_{timestamp}.log if not set.
 fn current_log_path() -> PathBuf {
-    let agent_name = std::env::var("ABK_AGENT_NAME")
-        .unwrap_or_else(|_| "agent".to_string());
-    std::env::temp_dir().join(format!("{}.log", agent_name))
+    CACHED_LOG_PATH.get_or_init(|| {
+        let agent_name = std::env::var("ABK_AGENT_NAME")
+            .unwrap_or_else(|_| "agent".to_string());
+        let timestamp = get_session_timestamp();
+        let filename = format!("{}_{}.log", agent_name, timestamp);
+        let log_dir = std::env::temp_dir().join(&agent_name);
+        
+        // Create directory if it doesn't exist
+        if let Err(e) = std::fs::create_dir_all(&log_dir) {
+            eprintln!("Warning: Failed to create log directory {}: {}", log_dir.display(), e);
+        }
+        
+        log_dir.join(filename)
+    }).clone()
 }
 
 /// Append a message to the current log file (standalone, no Logger needed).
