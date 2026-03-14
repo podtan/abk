@@ -497,7 +497,24 @@ where
                     }
                 }
                 Err(e) => {
-                    // Fallback to non-streaming on streaming errors
+                    let error_msg = format!("{}", e);
+                    let is_retryable = error_msg.contains("finish_reason:")
+                        || error_msg.contains("network_error")
+                        || error_msg.contains("Stream error");
+
+                    if is_retryable && self.current_iteration < max_iterations {
+                        // Retry streaming for transient/network errors
+                        self.logger.log_error(
+                            &format!("Streaming failed (retryable): {} — retrying...", e),
+                            None,
+                        )?;
+                        let wait_time = std::time::Duration::from_secs(2);
+                        tokio::time::sleep(wait_time).await;
+                        self.current_iteration += 1;
+                        continue;
+                    }
+
+                    // Fallback to non-streaming on non-retryable streaming errors
                     self.logger.log_error(&format!("Streaming failed: {}", e), None)?;
                     
                     let fallback_tools = self.get_tools_for_call();

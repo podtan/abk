@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.11] - 2026-03-14
+
+### Fixed
+- Fixed premature session termination on `finish_reason: "network_error"` from LLM SSE streams
+- Extension provider now logs stream errors with `tee_eprintln` (visible in both stderr and log file)
+- Streaming workflow retries on retryable errors (network_error, stream errors) before falling back to non-streaming
+
 ## [0.5.10] - 2026-03-14
 
 ### Changed

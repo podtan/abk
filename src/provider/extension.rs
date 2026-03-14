@@ -486,6 +486,9 @@ impl LlmProvider for ExtensionProvider {
                                             }
                                             "error" => {
                                                 if let Some(err) = delta.error {
+                                                    crate::observability::tee_eprintln(
+                                                        &format!("\n⚠️  Stream error from provider: {}\n", err)
+                                                    );
                                                     let _ = tx.send(Err(anyhow::anyhow!("Stream error: {}", err)));
                                                     return;
                                                 }
