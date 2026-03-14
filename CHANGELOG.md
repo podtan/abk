@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.12] - 2026-03-14
+
+### Fixed
+- Fixed silent streaming failure: `agent_orchestration` now logs actual error before wrapping with "Streaming workflow failed"
+- Added retry logic for retryable streaming errors (finish_reason, network_error, stream errors) in `agent_orchestration`
+- Extended streaming request timeout from 120s to 600s (LLM responses with reasoning can take minutes)
+- CLI now shows full error chain with `{:#}` format for better debugging
+- Added `tee_eprintln` for byte stream errors so they appear in both stderr and log file
+
 ## [0.5.11] - 2026-03-14
 
 ### Fixed

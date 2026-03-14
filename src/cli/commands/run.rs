@@ -151,8 +151,8 @@ pub async fn execute_run<C: CommandContext>(
             Ok(())
         }
         Err(e) => {
-            ctx.log_error(&format!("Task failed: {}", e))?;
-            Err(CliError::ExecutionError(format!("Agent execution failed: {}", e)))
+            ctx.log_error(&format!("Task failed: {:#}", e))?;
+            Err(CliError::ExecutionError(format!("Agent execution failed: {:#}", e)))
         }
     }
 }

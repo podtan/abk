@@ -163,7 +163,10 @@ impl ExtensionProvider {
                 .body(request_body.clone());
 
             if stream {
-                request = request.header("Accept", "text/event-stream");
+                request = request
+                    .header("Accept", "text/event-stream")
+                    // Override client timeout for streaming — LLM responses can take minutes
+                    .timeout(Duration::from_secs(600));
             }
 
             match request.send().await {
@@ -501,6 +504,9 @@ impl LlmProvider for ExtensionProvider {
                         }
                     }
                     Err(e) => {
+                        crate::observability::tee_eprintln(
+                            &format!("\n⚠️  Stream byte error: {}\n", e)
+                        );
                         let _ = tx.send(Err(anyhow::anyhow!("Stream error: {}", e)));
                         return;
                     }

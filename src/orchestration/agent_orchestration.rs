@@ -235,16 +235,19 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 }
             }
             Err(e) => {
-                let err_msg = e.to_string();
+                let err_msg = format!("{:#}", e);
                 if err_msg.contains("Task completed") {
                     return stop_session(agent, &err_msg).await;
                 } else if err_msg.contains("Maximum iterations") {
                     return stop_session(agent, &format!("Maximum iterations ({}) reached", max_iterations)).await;
-                } else if err_msg.contains("API timeout") || err_msg.contains("rate limit") {
-                    agent.log_info("Retrying after transient error...");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                } else if err_msg.contains("API timeout") || err_msg.contains("rate limit")
+                    || err_msg.contains("finish_reason:") || err_msg.contains("network_error")
+                    || err_msg.contains("Stream error") {
+                    agent.log_error(&format!("Streaming failed (retryable): {}", err_msg), None)?;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     continue;
                 }
+                agent.log_error(&format!("Streaming failed: {}", err_msg), None)?;
                 return Err(anyhow::anyhow!(err_msg)).context("Streaming workflow failed");
             }
         }
