@@ -450,7 +450,7 @@ impl LlmProvider for ExtensionProvider {
                                             "reasoning" => {
                                                 if let Some(reasoning) = delta.reasoning {
                                                     // Tee-write reasoning to stderr and log file
-                                                    crate::observability::tee_eprintln(
+                                                    crate::observability::tee_eprint(
                                                         &format!("\x1b[90m{}\x1b[0m", reasoning)
                                                     );
                                                     let _ = tx.send(Ok(StreamChunk::Reasoning(reasoning)));

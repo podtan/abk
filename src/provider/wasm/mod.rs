@@ -720,7 +720,7 @@ impl LlmProvider for WasmProvider {
                                     // Handle reasoning delta (from thinking models like GLM, Qwen)
                                     if let Some(reasoning) = delta.reasoning {
                                         // Tee-write reasoning to stderr and log file
-                                        crate::observability::tee_eprintln(
+                                        crate::observability::tee_eprint(
                                             &format!("\x1b[90m{}\x1b[0m", reasoning)
                                         );
                                         // EMIT this chunk

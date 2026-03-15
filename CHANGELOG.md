@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.13] - 2026-03-15
+
+### Fixed
+- Strip ANSI escape codes from log file output — `tee_print`, `tee_eprint`, `tee_eprintln` now write clean text to log while preserving ANSI colors on terminal
+- Reasoning tokens no longer pollute log files with `\x1b[90m...\x1b[0m` escape sequences
+- Fix reasoning appearing line-by-line: changed `tee_eprintln` to `tee_eprint` for streaming reasoning tokens (no forced newline after each token)
+
 ## [0.5.12] - 2026-03-14
 
 ### Fixed

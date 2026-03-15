@@ -522,26 +522,55 @@ fn append_to_global_log(content: &str) {
     let _ = logger.append_to_log(content);
 }
 
+/// Strip ANSI escape codes from a string.
+/// Removes sequences like \x1b[...m (SGR), \x1b[...H (cursor), etc.
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip the escape sequence
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                // Consume until we hit a letter (the terminator)
+                while let Some(&ch) = chars.peek() {
+                    chars.next();
+                    if ch.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Tee-print to stdout and the log file using the global logger.
 /// Use this from components that don't have a Logger reference.
+/// ANSI escape codes are written to stdout but stripped from the log file.
 pub fn tee_print(message: &str) {
     print!("{}", message);
     let _ = std::io::stdout().flush();
-    append_to_global_log(message);
+    append_to_global_log(&strip_ansi(message));
 }
 
 /// Tee-eprint to stderr and the log file using the global logger.
 /// Use this from components that don't have a Logger reference.
+/// ANSI escape codes are written to stderr but stripped from the log file.
 pub fn tee_eprint(message: &str) {
     eprint!("{}", message);
     let _ = std::io::stderr().flush();
-    append_to_global_log(message);
+    append_to_global_log(&strip_ansi(message));
 }
 
 /// Tee-eprintln to stderr and the log file using the global logger.
+/// ANSI escape codes are written to stderr but stripped from the log file.
 pub fn tee_eprintln(message: &str) {
     eprintln!("{}", message);
-    append_to_global_log(&format!("{}\n", message));
+    let clean = strip_ansi(message);
+    append_to_global_log(&format!("{}\n", clean));
 }
 
 #[cfg(test)]
