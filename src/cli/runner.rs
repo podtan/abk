@@ -304,7 +304,7 @@ impl AbkCheckpointAccess {
             match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config.clone()).await {
                 Ok(m) => return Ok(m),
                 Err(e) => {
-                    eprintln!("Warning: Failed to create configured storage manager: {}", e);
+                    crate::observability::tee_eprintln(&format!("Warning: Failed to create configured storage manager: {}", e));
                 }
             }
         }

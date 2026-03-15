@@ -115,7 +115,7 @@ impl Agent {
         let system_template = config_loader.get_string("lifecycle.system_template");
         
         if std::env::var("RUST_LOG").map(|v| v.to_lowercase().contains("debug")).unwrap_or(false) {
-            eprintln!("[DEBUG] Lifecycle enabled: {}", lifecycle_enabled);
+            crate::observability::tee_eprintln(&format!("[DEBUG] Lifecycle enabled: {}", lifecycle_enabled));
         }
         
         let lifecycle = crate::lifecycle::find_lifecycle_plugin_with_config(lifecycle_enabled, system_template).await
@@ -174,7 +174,7 @@ impl Agent {
                             }
                         }
                         Err(e) => {
-                            eprintln!("Warning: Failed to load MCP tools: {}", e);
+                            crate::observability::tee_eprintln(&format!("Warning: Failed to load MCP tools: {}", e));
                             None
                         }
                     }
@@ -462,7 +462,9 @@ impl Drop for Agent {
     fn drop(&mut self) {
         if self.current_session.is_some() {
             // Note: We can't do async operations in Drop, but we can at least log
-            eprintln!("Warning: Agent dropped with active checkpoint session. Consider calling finalize_checkpoint_session() before dropping.");
+            if !crate::observability::is_tui_mode() {
+                eprintln!("Warning: Agent dropped with active checkpoint session. Consider calling finalize_checkpoint_session() before dropping.");
+            }
         }
     }
 }

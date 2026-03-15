@@ -757,7 +757,7 @@ impl LlmProvider for WasmProvider {
                                                 }
                                             }
                                             Err(e) => {
-                                                eprintln!("Warning: Failed to parse tool call delta JSON: {}", e);
+                                                crate::observability::tee_eprintln(&format!("Warning: Failed to parse tool call delta JSON: {}", e));
                                             }
                                         }
                                     }

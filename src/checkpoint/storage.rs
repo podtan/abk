@@ -573,14 +573,14 @@ impl ProjectStorage {
                     // Save project metadata to remote
                     let project_key = format!("projects/{}/metadata.json", self.project_hash.as_str());
                     if let Err(e) = backend.write_json(&project_key, &self.metadata).await {
-                        eprintln!("[checkpoint] Warning: Failed to write project metadata to remote: {}", e);
+                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to write project metadata to remote: {}", e));
                     }
                     
                     // Save session metadata to remote  
                     let session_key = format!("projects/{}/sessions/{}/metadata.json", 
                         self.project_hash.as_str(), session_id);
                     if let Err(e) = backend.write_json(&session_key, &metadata).await {
-                        eprintln!("[checkpoint] Warning: Failed to write session metadata to remote: {}", e);
+                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to write session metadata to remote: {}", e));
                     }
                 }
             }
@@ -678,7 +678,7 @@ impl ProjectStorage {
         let list_result = match backend.list(list_options).await {
             Ok(result) => result,
             Err(e) => {
-                eprintln!("[checkpoint] Warning: Failed to list sessions from remote: {}", e);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to list sessions from remote: {}", e));
                 return Ok(None);
             }
         };
@@ -1043,7 +1043,7 @@ impl SessionStorage {
                 let project_hash = &self.metadata.project_hash;
                 let session_metadata_key = format!("projects/{}/sessions/{}/metadata.json", project_hash, session_id);
                 if let Err(e) = backend.write_json(&session_metadata_key, &self.metadata).await {
-                    eprintln!("[checkpoint] Warning: Failed to update session metadata in remote: {}", e);
+                    crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to update session metadata in remote: {}", e));
                 }
             }
         }
@@ -1137,7 +1137,7 @@ impl SessionStorage {
             Ok(Some(m)) => m,
             Ok(None) => return Ok(None),
             Err(e) => {
-                eprintln!("[checkpoint] Warning: Failed to read metadata from remote: {}", e);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read metadata from remote: {}", e));
                 return Ok(None);
             }
         };
@@ -1146,11 +1146,11 @@ impl SessionStorage {
         let agent_state: AgentStateSnapshot = match backend.read_json(&format!("{}_agent.json", key_prefix)).await {
             Ok(Some(a)) => a,
             Ok(None) => {
-                eprintln!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}", checkpoint_id);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}", checkpoint_id));
                 return Ok(None);
             }
             Err(e) => {
-                eprintln!("[checkpoint] Warning: Failed to read agent state from remote: {}", e);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read agent state from remote: {}", e));
                 return Ok(None);
             }
         };
@@ -1159,16 +1159,16 @@ impl SessionStorage {
         let conversation_state: ConversationSnapshot = match backend.read_json(&format!("{}_conversation.json", key_prefix)).await {
             Ok(Some(c)) => c,
             Ok(None) => {
-                eprintln!("[checkpoint] Warning: Conversation state missing in remote for checkpoint {}", checkpoint_id);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Conversation state missing in remote for checkpoint {}", checkpoint_id));
                 return Ok(None);
             }
             Err(e) => {
-                eprintln!("[checkpoint] Warning: Failed to read conversation from remote: {}", e);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read conversation from remote: {}", e));
                 return Ok(None);
             }
         };
         
-        eprintln!("[checkpoint] ✅ Loaded checkpoint {} from remote storage", checkpoint_id);
+        crate::observability::tee_eprintln(&format!("[checkpoint] ✅ Loaded checkpoint {} from remote storage", checkpoint_id));
         Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)))
     }
     
@@ -1278,10 +1278,10 @@ impl SessionStorage {
         // Recalculate checkpoint count from actual checkpoints
         let actual_checkpoint_count = self.checkpoints.len() as u32;
         if self.metadata.checkpoint_count != actual_checkpoint_count {
-            eprintln!("Warning: Session metadata checkpoint count mismatch detected");
-            eprintln!(
-                "  Metadata says: {}, Actual: {}",
-                self.metadata.checkpoint_count, actual_checkpoint_count
+            crate::observability::tee_eprintln("Warning: Session metadata checkpoint count mismatch detected");
+            crate::observability::tee_eprintln(
+                &format!("  Metadata says: {}, Actual: {}",
+                self.metadata.checkpoint_count, actual_checkpoint_count)
             );
 
             self.metadata.checkpoint_count = actual_checkpoint_count;

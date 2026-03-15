@@ -52,9 +52,9 @@ impl super::Agent {
         self.is_running = false;
 
         if let Some(turn_id) = &self.current_turn_id {
-            println!(
-                "🔑 Ending conversation turn: {} (Total requests: {})",
-                turn_id, self.turn_request_count
+            crate::observability::tee_println(
+                &format!("🔑 Ending conversation turn: {} (Total requests: {})",
+                turn_id, self.turn_request_count)
             );
         }
         self.end_conversation_turn();

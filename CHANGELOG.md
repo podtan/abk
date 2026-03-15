@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.15] - 2026-03-15
+
+### Fixed
+- Converted all raw `println!`/`eprintln!` calls in agent, checkpoint, and provider modules to use TUI-aware `tee_*` functions — fixes TUI display corruption from direct stdout/stderr writes
+- Added `tee_println` free function and exported `is_tui_mode` for use by other modules
+- Fixed text wrapping and scroll behavior in TUI output (consumer-side)
+
 ## [0.5.14] - 2026-03-15
 
 ### Added

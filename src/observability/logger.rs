@@ -22,7 +22,7 @@ static GLOBAL_LOGGER: OnceLock<Logger> = OnceLock::new();
 static TUI_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Check whether TUI mode is active.
-fn is_tui_mode() -> bool {
+pub fn is_tui_mode() -> bool {
     TUI_MODE.load(Ordering::Relaxed)
 }
 
@@ -563,6 +563,16 @@ fn strip_ansi(s: &str) -> String {
         }
     }
     result
+}
+
+/// Tee-println to stdout and the log file using the global logger.
+/// Use this from components that don't have a Logger reference.
+/// In TUI mode, console output is suppressed.
+pub fn tee_println(message: &str) {
+    if !is_tui_mode() {
+        println!("{}", message);
+    }
+    append_to_global_log(&format!("{}\n", strip_ansi(message)));
 }
 
 /// Tee-print to stdout and the log file using the global logger.

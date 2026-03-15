@@ -287,12 +287,12 @@ impl SessionManager {
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
 
-        println!(
-            "🔧 Configuration: {} | Endpoint: {} | Provider: {} | Model: {}",
+        crate::observability::tee_println(
+            &format!("🔧 Configuration: {} | Endpoint: {} | Provider: {} | Model: {}",
             streaming_status,
             &endpoint,
             context.get_provider_name(),
-            context.get_model_name()
+            context.get_model_name())
         );
 
         context.log_session_start(&context.get_current_mode(), &config_info)?;

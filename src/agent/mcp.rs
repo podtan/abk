@@ -52,9 +52,9 @@ impl McpToolLoader {
         for server in &config.servers {
             // Skip non-HTTP transports for now
             if server.transport != "http" {
-                eprintln!(
-                    "Warning: MCP server '{}' uses unsupported transport '{}', skipping",
-                    server.name, server.transport
+                crate::observability::tee_eprintln(
+                    &format!("Warning: MCP server '{}' uses unsupported transport '{}', skipping",
+                    server.name, server.transport)
                 );
                 continue;
             }
@@ -83,23 +83,23 @@ impl McpToolLoader {
                     match registry.register_mcp_batch(tools, &server.name) {
                         Ok(registered) => {
                             total_tools += registered;
-                            println!(
-                                "✓ Loaded {} tools from MCP server '{}'",
-                                registered, server.name
+                            crate::observability::tee_println(
+                                &format!("✓ Loaded {} tools from MCP server '{}'",
+                                registered, server.name)
                             );
                         }
                         Err(e) => {
-                            eprintln!(
-                                "Warning: Failed to register tools from '{}': {}",
-                                server.name, e
+                            crate::observability::tee_eprintln(
+                                &format!("Warning: Failed to register tools from '{}': {}",
+                                server.name, e)
                             );
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to fetch tools from MCP server '{}': {}",
-                        server.name, e
+                    crate::observability::tee_eprintln(
+                        &format!("Warning: Failed to fetch tools from MCP server '{}': {}",
+                        server.name, e)
                     );
                 }
             }
