@@ -8,12 +8,31 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Session start timestamp - set once when the logger module is first loaded
 static SESSION_START_TIMESTAMP: OnceLock<String> = OnceLock::new();
 
 /// Global logger instance - ensures all logs go to the same file
 static GLOBAL_LOGGER: OnceLock<Logger> = OnceLock::new();
+
+/// TUI mode flag — when true, console output (stdout/stderr) is suppressed
+/// in tee_* functions and Logger methods. Log file writes are unaffected.
+/// This prevents ABK output from corrupting ratatui's alternate screen.
+static TUI_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Check whether TUI mode is active.
+fn is_tui_mode() -> bool {
+    TUI_MODE.load(Ordering::Relaxed)
+}
+
+/// Enable or disable TUI mode.
+/// When enabled, all console output from tee_* functions and Logger methods
+/// is suppressed. Log file output is unaffected — the TUI reads the log file
+/// directly via a tailer.
+pub fn set_tui_mode(enabled: bool) {
+    TUI_MODE.store(enabled, Ordering::Relaxed);
+}
 
 /// Get or initialize the session timestamp
 fn get_session_timestamp() -> &'static str {
@@ -135,7 +154,7 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        println!("INFO: Session started in {} mode", mode);
+        if !is_tui_mode() { println!("INFO: Session started in {} mode", mode); }
         Ok(())
     }
 
@@ -175,7 +194,7 @@ impl Logger {
             });
 
         if trimmed_response.is_empty() && messages_empty {
-            println!("DEBUG: Skipping log entry for empty LLM response");
+            if !is_tui_mode() { println!("DEBUG: Skipping log entry for empty LLM response"); }
             return Ok(());
         }
 
@@ -239,7 +258,7 @@ impl Logger {
         };
 
         self.append_to_log(&content)?;
-        println!("INFO: LLM interaction logged");
+        if !is_tui_mode() { println!("INFO: LLM interaction logged"); }
         Ok(())
     }
 
@@ -252,7 +271,7 @@ impl Logger {
         // Skip logging if response is empty or contains only whitespace
         let trimmed_response = response.trim();
         if trimmed_response.is_empty() {
-            println!("DEBUG: Skipping log entry for empty LLM response");
+            if !is_tui_mode() { println!("DEBUG: Skipping log entry for empty LLM response"); }
             return Ok(());
         }
 
@@ -266,7 +285,7 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        println!("INFO: LLM response logged");
+        if !is_tui_mode() { println!("INFO: LLM response logged"); }
         Ok(())
     }
 
@@ -304,10 +323,7 @@ impl Logger {
         }
 
         self.append_to_log(&content)?;
-        println!(
-            "INFO: Command executed: {} (exit: {})",
-            command, return_code
-        );
+        if !is_tui_mode() { println!("INFO: Command executed: {} (exit: {})", command, return_code); }
         Ok(())
     }
 
@@ -326,7 +342,7 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        println!("INFO: Mode changed from {} to {}", old_mode, new_mode);
+        if !is_tui_mode() { println!("INFO: Mode changed from {} to {}", old_mode, new_mode); }
         Ok(())
     }
 
@@ -355,7 +371,7 @@ impl Logger {
         }
 
         self.append_to_log(&content)?;
-        eprintln!("ERROR: {}", error);
+        if !is_tui_mode() { eprintln!("ERROR: {}", error); }
         Ok(())
     }
 
@@ -372,7 +388,7 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        println!("INFO: Session completed: {}", reason);
+        if !is_tui_mode() { println!("INFO: Session completed: {}", reason); }
         Ok(())
     }
 
@@ -389,10 +405,12 @@ impl Logger {
 
         self.append_to_log(&log_content)?;
 
-        match level {
-            "ERROR" => eprintln!("ERROR: {}: {}", title, content),
-            "WARN" => println!("WARN: {}: {}", title, content),
-            _ => println!("INFO: {}: {}", title, content),
+        if !is_tui_mode() {
+            match level {
+                "ERROR" => eprintln!("ERROR: {}: {}", title, content),
+                "WARN" => println!("WARN: {}: {}", title, content),
+                _ => println!("INFO: {}: {}", title, content),
+            }
         }
 
         Ok(())
@@ -434,8 +452,8 @@ impl Logger {
     /// # Arguments
     /// * `tool_call_json` - Compact JSON string of the tool call wrapper.
     pub fn log_compact_tool_call(&self, tool_call_json: &str) -> Result<()> {
-        // Print to stdout at INFO level (always visible)
-        println!("INFO: Tool request: {}", tool_call_json);
+        // Print to stdout at INFO level (unless TUI mode)
+        if !is_tui_mode() { println!("INFO: Tool request: {}", tool_call_json); }
 
         // Append to log file for persistence
         let now: DateTime<Utc> = Utc::now();
@@ -459,7 +477,7 @@ impl Logger {
             None => format!("Starting workflow iteration {}", iteration),
         };
 
-        println!("INFO: {}", info);
+        if !is_tui_mode() { println!("INFO: {}", info); }
 
         let now: DateTime<Utc> = Utc::now();
         let content = format!(
@@ -476,26 +494,26 @@ impl Logger {
 
     /// Log info message (console + file).
     pub fn info(&self, message: &str) {
-        println!("INFO: {}", message);
+        if !is_tui_mode() { println!("INFO: {}", message); }
         let _ = self.append_to_log(&format!("INFO: {}\n", message));
     }
 
     /// Log error message (console + file).
     pub fn error(&self, message: &str) {
-        eprintln!("ERROR: {}", message);
+        if !is_tui_mode() { eprintln!("ERROR: {}", message); }
         let _ = self.append_to_log(&format!("ERROR: {}\n", message));
     }
 
     /// Tee-print: write to both stdout and log file.
     /// Use this for raw output that should be mirrored exactly.
     pub fn tee_println(&self, message: &str) {
-        println!("{}", message);
+        if !is_tui_mode() { println!("{}", message); }
         let _ = self.append_to_log(&format!("{}\n", message));
     }
 
     /// Tee-eprint: write to both stderr and log file.
     pub fn tee_eprintln(&self, message: &str) {
-        eprintln!("{}", message);
+        if !is_tui_mode() { eprintln!("{}", message); }
         let _ = self.append_to_log(&format!("{}\n", message));
     }
 
@@ -550,25 +568,34 @@ fn strip_ansi(s: &str) -> String {
 /// Tee-print to stdout and the log file using the global logger.
 /// Use this from components that don't have a Logger reference.
 /// ANSI escape codes are written to stdout but stripped from the log file.
+/// In TUI mode, console output is suppressed.
 pub fn tee_print(message: &str) {
-    print!("{}", message);
-    let _ = std::io::stdout().flush();
+    if !is_tui_mode() {
+        print!("{}", message);
+        let _ = std::io::stdout().flush();
+    }
     append_to_global_log(&strip_ansi(message));
 }
 
 /// Tee-eprint to stderr and the log file using the global logger.
 /// Use this from components that don't have a Logger reference.
 /// ANSI escape codes are written to stderr but stripped from the log file.
+/// In TUI mode, console output is suppressed.
 pub fn tee_eprint(message: &str) {
-    eprint!("{}", message);
-    let _ = std::io::stderr().flush();
+    if !is_tui_mode() {
+        eprint!("{}", message);
+        let _ = std::io::stderr().flush();
+    }
     append_to_global_log(&strip_ansi(message));
 }
 
 /// Tee-eprintln to stderr and the log file using the global logger.
 /// ANSI escape codes are written to stderr but stripped from the log file.
+/// In TUI mode, console output is suppressed.
 pub fn tee_eprintln(message: &str) {
-    eprintln!("{}", message);
+    if !is_tui_mode() {
+        eprintln!("{}", message);
+    }
     let clean = strip_ansi(message);
     append_to_global_log(&format!("{}\n", clean));
 }

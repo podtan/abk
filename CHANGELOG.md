@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.14] - 2026-03-15
+
+### Added
+- TUI mode flag (`set_tui_mode`) — when enabled, all console output (stdout/stderr) from `tee_*` functions and `Logger` methods is suppressed; log file output is unaffected
+- Exported `set_tui_mode` from `abk::observability` for use by TUI consumers
+
+### Fixed
+- Fixed TUI rendering corruption caused by process-global `dup2` stdout/stderr redirect — TUI mode suppresses console output at the source instead
+
 ## [0.5.13] - 2026-03-15
 
 ### Fixed
