@@ -32,6 +32,7 @@ pub mod workflow;
 pub mod tools;
 pub mod agent_session;  // Deprecated - use agent_orchestration
 pub mod agent_orchestration;
+pub mod output;  // OutputSink foundation (Workstream A)
 
 // Re-export main types
 pub use runtime::{
@@ -47,6 +48,9 @@ pub use agent_orchestration::{
     run_workflow,
     run_workflow_streaming,
 };
+
+// Re-export output sink types
+pub use output::{OutputEvent, OutputSink, StdoutSink};
 
 // Re-export sophisticated session types (DEPRECATED)
 pub use agent_session::{
