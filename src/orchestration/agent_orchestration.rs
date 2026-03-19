@@ -123,6 +123,9 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
     // Ensure conversation turn exists
     if agent.get_current_turn_id().is_none() {
         let turn_id = agent.start_conversation_turn();
+        agent.output_sink().emit(OutputEvent::Info {
+            message: format!("🔑 Started conversation turn: {}", turn_id),
+        });
         agent.log_info(&format!("🔑 Started conversation turn: {}", turn_id));
     }
 
@@ -190,6 +193,9 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
         return run_workflow(agent, max_iterations).await;
     }
 
+    agent.output_sink().emit(OutputEvent::WorkflowStarted {
+        task_description: agent.initial_task_description().to_string(),
+    });
     agent.log_info("🚀 Starting TRUE unified streaming workflow");
 
     loop {
@@ -205,18 +211,28 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
 
         // Log API call
         agent.increment_api_call_count();
+        let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        agent.output_sink().emit(OutputEvent::ApiCallStarted {
+            call_number: agent.api_call_count(),
+            model: agent.default_model(),
+            tool_count,
+            streaming: true,
+        });
         agent.log_info(&format!(
             "🔥 API Call {} | Context={} | Streaming | Model: {} | Tools: {}",
             agent.api_call_count(),
             agent.count_tokens(),
             agent.default_model(),
-            tools.as_ref().map(|t| t.len()).unwrap_or(0)
+            tool_count
         ));
 
         // Make streaming API call
         let max_tokens = agent.max_tokens();
         match agent.generate_with_provider(tools, max_tokens, true).await {
             Ok(result) => {
+                agent.output_sink().emit(OutputEvent::Info {
+                    message: "📡 Streaming API call completed successfully".to_string(),
+                });
                 agent.log_info("📡 Streaming API call completed successfully");
                 
                 // Increment iteration after successful API call
@@ -249,10 +265,18 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 } else if err_msg.contains("API timeout") || err_msg.contains("rate limit")
                     || err_msg.contains("finish_reason:") || err_msg.contains("network_error")
                     || err_msg.contains("Stream error") {
+                    agent.output_sink().emit(OutputEvent::Error {
+                        message: format!("Streaming failed (retryable): {}", err_msg),
+                        context: None,
+                    });
                     agent.log_error(&format!("Streaming failed (retryable): {}", err_msg), None)?;
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     continue;
                 }
+                agent.output_sink().emit(OutputEvent::Error {
+                    message: format!("Streaming failed: {}", err_msg),
+                    context: None,
+                });
                 agent.log_error(&format!("Streaming failed: {}", err_msg), None)?;
                 return Err(anyhow::anyhow!(err_msg)).context("Streaming workflow failed");
             }
@@ -270,12 +294,19 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
         let streaming_enabled = agent.streaming_enabled();
         
         agent.increment_api_call_count();
+        let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        agent.output_sink().emit(OutputEvent::ApiCallStarted {
+            call_number: agent.api_call_count(),
+            model: agent.default_model(),
+            tool_count,
+            streaming: streaming_enabled,
+        });
         agent.log_info(&format!(
             "🔥 API Call {} | Iteration {} | Model: {} | Tools: {}",
             agent.api_call_count(),
             agent.current_iteration(),
             agent.default_model(),
-            tools.as_ref().map(|t| t.len()).unwrap_or(0)
+            tool_count
         ));
 
         // Call the agent's generate method
@@ -300,10 +331,14 @@ async fn handle_tool_calls<A: AgentContext>(
     content: Option<String>,
     reasoning: Option<String>,
 ) -> Result<()> {
+    let tool_names: Vec<String> = tool_calls.iter().map(|tc| tc.function.name.clone()).collect();
+    agent.output_sink().emit(OutputEvent::ToolsExecuting {
+        tool_names: tool_names.clone(),
+    });
     agent.log_info(&format!(
         "🔧 Executing {} tools: [{}]",
-        tool_calls.len(),
-        tool_calls.iter().map(|tc| tc.function.name.as_str()).collect::<Vec<_>>().join(", ")
+        tool_names.len(),
+        tool_names.join(", ")
     ));
 
     // Add assistant message - use provided content or generate placeholder
@@ -365,6 +400,9 @@ async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
             
             // Render and add to conversation
             if let Ok(content) = agent.render_template(&template, &variables).await {
+                agent.output_sink().emit(OutputEvent::Info {
+                    message: format!("📋 Sending task template for: {}", task_type),
+                });
                 agent.log_info(&format!("📋 Sending task template for: {}", task_type));
                 agent.chat_formatter_mut().add_user_message(content, None);
                 agent.set_template_sent(true);
@@ -412,6 +450,9 @@ async fn stop_session<A: AgentContext>(agent: &mut A, reason: &str) -> Result<St
     }
     
     if let Some(turn_id) = agent.get_current_turn_id() {
+        agent.output_sink().emit(OutputEvent::Info {
+            message: format!("🔑 Ending conversation turn: {}", turn_id),
+        });
         agent.log_info(&format!("🔑 Ending conversation turn: {}", turn_id));
     }
     agent.end_conversation_turn();
