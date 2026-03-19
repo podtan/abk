@@ -111,3 +111,76 @@ impl std::fmt::Display for OutputEvent {
         }
     }
 }
+
+use std::sync::Arc;
+
+/// Trait for receiving structured output events from the orchestration layer.
+///
+/// Implementations can route events to stdout, a TUI channel, a log file,
+/// a WebSocket, or any other destination.
+///
+/// # Thread Safety
+///
+/// The trait requires `Send + Sync` so that a single sink can be shared
+/// across async tasks (e.g. the workflow loop and a TUI event loop).
+pub trait OutputSink: Send + Sync {
+    /// Emit a single structured output event.
+    fn emit(&self, event: OutputEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Concrete sink implementations
+// ---------------------------------------------------------------------------
+
+/// A sink that writes human-readable event text to stdout.
+///
+/// This is the default sink for CLI / non-TUI mode and preserves full
+/// backward compatibility with the previous `println!`-based output.
+#[derive(Debug, Clone, Default)]
+pub struct StdoutSink;
+
+impl StdoutSink {
+    /// Create a new stdout sink.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl OutputSink for StdoutSink {
+    fn emit(&self, event: OutputEvent) {
+        println!("{}", event);
+    }
+}
+
+/// A sink that discards all events silently.
+///
+/// Useful for TUI mode where console output is managed by ratatui and
+/// raw `println!` calls would corrupt the alternate screen buffer.
+#[derive(Debug, Clone, Default)]
+pub struct NoopSink;
+
+impl NoopSink {
+    /// Create a new no-op sink.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl OutputSink for NoopSink {
+    fn emit(&self, _event: OutputEvent) {
+        // intentionally silent
+    }
+}
+
+/// Convenience alias for a shared, clonable sink handle.
+pub type SharedSink = Arc<dyn OutputSink>;
+
+/// Helper to build a shared `StdoutSink`.
+pub fn stdout_sink() -> SharedSink {
+    Arc::new(StdoutSink::new())
+}
+
+/// Helper to build a shared `NoopSink`.
+pub fn noop_sink() -> SharedSink {
+    Arc::new(NoopSink::new())
+}
