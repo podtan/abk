@@ -118,6 +118,7 @@ impl Logger {
         writeln!(file, "Agent Interaction Log")?;
         writeln!(file, "Log started: {}", now.to_rfc3339())?;
         writeln!(file, "---")?;
+        file.flush()?;
 
         Ok(())
     }
@@ -131,6 +132,7 @@ impl Logger {
             .with_context(|| format!("Failed to open log file: {}", self.log_file.display()))?;
 
         write!(file, "{}", content).with_context(|| "Failed to write to log file")?;
+        file.flush()?;
 
         Ok(())
     }
