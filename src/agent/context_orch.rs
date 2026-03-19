@@ -309,11 +309,16 @@ impl AgentContext for super::Agent {
         self.turn_request_count = 0;
     }
     
+    // Output sink for structured events
+    fn output_sink(&self) -> &crate::orchestration::output::SharedSink {
+        &self.output_sink
+    }
+
     // LLM helpers
     fn parse_response(&self, response: &str) -> (Option<String>, Option<String>, bool) {
         self.parse_response(response)
     }
-    
+
     fn extract_tool_calls(&self, response: &str) -> Result<Vec<umf::ToolCall>> {
         self.extract_tool_calls(response)
     }

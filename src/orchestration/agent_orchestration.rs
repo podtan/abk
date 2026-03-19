@@ -9,6 +9,9 @@
 use anyhow::{Context, Result};
 use umf::GenerateResult;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use super::output::{OutputEvent, OutputSink, SharedSink};
 
 /// Tool execution result (re-export from tools module to avoid circular dependency)
 #[derive(Debug, Clone)]
@@ -103,6 +106,9 @@ pub trait AgentContext {
     fn start_conversation_turn(&mut self) -> String;
     fn end_conversation_turn(&mut self);
     
+    // Output sink for structured events (TUI/CLI/log consumers)
+    fn output_sink(&self) -> &SharedSink;
+
     // LLM helpers
     fn parse_response(&self, response: &str) -> (Option<String>, Option<String>, bool);
     fn extract_tool_calls(&self, response: &str) -> Result<Vec<umf::ToolCall>>;

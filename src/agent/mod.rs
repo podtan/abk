@@ -87,6 +87,9 @@ pub struct Agent {
     #[allow(dead_code)]
     initial_additional_context: Option<String>,
 
+    // Output sink for structured events (TUI/CLI consumers)
+    output_sink: crate::orchestration::output::SharedSink,
+
     // Conversation turn management for X-Request-Id (like VS Code Copilot)
     current_turn_id: Option<String>,
     turn_request_count: u32,
@@ -217,6 +220,7 @@ impl Agent {
             initial_additional_context: None,
             current_turn_id: None,
             turn_request_count: 0,
+            output_sink: crate::orchestration::output::stdout_sink(),
         })
     }
 
