@@ -174,10 +174,13 @@ impl RawConfigCommandContext {
         } else {
             Some(config.logging.log_level.as_str())
         };
-        let logger = crate::observability::Logger::new(
-            log_dir_path.as_deref(),
-            log_level,
-        )?;
+        // Note: The global logger is initialized earlier in the call chain:
+        // - In trustee TUI mode: run_tui_mode() in main.rs sets ABK_AGENT_NAME
+        //   and creates the global logger before ABK runs.
+        // - In CLI mode: run_from_raw_config() / run_task_from_raw_config()
+        //   sets ABK_AGENT_NAME from config, then RawConfigCommandContext::new()
+        //   creates the logger below and init_global_logger() is called.
+        // init_global_logger is a no-op if already set (OnceLock semantics).
 
         // Initialize the global logger so standalone tee_* functions use the same log file
         let global_logger = crate::observability::Logger::new(
@@ -185,6 +188,11 @@ impl RawConfigCommandContext {
             log_level,
         )?;
         crate::observability::init_global_logger(global_logger);
+
+        let logger = crate::observability::Logger::new(
+            log_dir_path.as_deref(),
+            log_level,
+        )?;
 
         let working_dir = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."));
