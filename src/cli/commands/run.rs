@@ -76,6 +76,14 @@ pub async fn execute_run<C: CommandContext>(
     // Set the working directory for all tools (fixes issue where tools use wrong directory)
     agent.set_working_directory(current_dir.clone());
 
+    // In TUI mode, swap the output sink to NoopSink to prevent println! from
+    // corrupting the ratatui alternate screen buffer. Output goes to the log
+    // file via the Logger (which already checks is_tui_mode()), and the TUI
+    // tails that log file.
+    if crate::observability::is_tui_mode() {
+        agent.set_output_sink(crate::orchestration::output::noop_sink());
+    }
+
     let resume_tracker = crate::checkpoint::ResumeTracker::new()
         .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
     

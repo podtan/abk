@@ -402,6 +402,15 @@ impl Agent {
             .context("Failed to render format_error template")
     }
 
+    /// Set the output sink used for structured events.
+    ///
+    /// Call this after construction to override the default `StdoutSink`.
+    /// In TUI mode, pass `NoopSink` (or a `TuiSink`) to prevent raw
+    /// `println!` calls from corrupting the alternate screen buffer.
+    pub fn set_output_sink(&mut self, sink: crate::orchestration::output::SharedSink) {
+        self.output_sink = sink;
+    }
+
     /// Get the current mode.
     pub fn current_mode(&self) -> &AgentMode {
         &self.current_mode
