@@ -110,6 +110,17 @@ impl AgentContext for super::Agent {
 
             while let Some(chunk_result) = pinned_stream.next().await {
                 let chunk = chunk_result?;
+                // Emit streaming text chunk to output sink for TUI/CLI consumers
+                match &chunk {
+                    umf::StreamChunk::Text(delta) if !delta.is_empty() => {
+                        self.output_sink().emit(
+                            crate::orchestration::output::OutputEvent::StreamingChunk {
+                                delta: delta.clone(),
+                            },
+                        );
+                    }
+                    _ => {}
+                }
                 if accumulator.process_chunk(chunk) {
                     break;
                 }

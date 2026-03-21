@@ -416,6 +416,12 @@ async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
 /// Handle content response - LLM finished naturally, add message and stop.
 /// Returns Ok(()) - the caller should stop the loop.
 async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String, reasoning: Option<String>) -> Result<()> {
+    // Emit the LLM response so the TUI (or any sink consumer) can display it.
+    agent.output_sink().emit(OutputEvent::LlmResponse {
+        text: response_text.clone(),
+        model: agent.default_model(),
+    });
+
     agent.log_llm_response(&response_text, Some(&agent.default_model()))?;
 
     // Store assistant message in conversation history (for checkpoints and context)
@@ -429,8 +435,9 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
         agent.chat_formatter_mut().add_assistant_message(response_text.clone(), None);
     }
 
+    // Emit to log file for CLI users — only write to file, not stdout (TUI mode suppresses that).
     if !response_text.trim().is_empty() {
-        agent.log_tee(&format!("\n{}\n", response_text));
+        crate::observability::tee_println(&format!("\n{}\n", response_text));
     }
 
     // LLM finished naturally - no error, just stop
