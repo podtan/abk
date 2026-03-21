@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.17] - 2026-03-21
+
+### Fixed
+- Fixed duplicate LLM response output: `handle_content_response()` now accepts a `was_streamed` flag and skips emitting `LlmResponse` event when the text was already streamed chunk-by-chunk via `StreamingChunk` events — eliminates duplicate display in both CLI and TUI
+- Fixed CLI streaming output: `StdoutSink` now uses `print!` (no newline) for `StreamingChunk` events instead of `println!` — streaming text flows naturally instead of each token appearing on its own line
+
+### Added
+- `Logger::append_to_log()` is now public for direct log file writes from orchestration code
+- `get_global_logger_opt()` returns `Option<&Logger>` without auto-initializing a default logger
+
 ## [0.5.16] - 2026-03-21
 
 ### Added
