@@ -1,6 +1,6 @@
 [package]
 name = "abk"
-version = "0.5.15"
+version = "0.5.16"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -68,7 +68,7 @@ wasmparser = { version = "0.201", optional = true }
 tracing = { version = "0.1", optional = true }
 
 # Agent feature dependencies
-cats = { path ="0.1.12", optional = true }
+cats = { version = "0.1.12", optional = true }
 regex = { version = "1.0", optional = true }
 urlencoding = { version = "2.1", optional = true }
 

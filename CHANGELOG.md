@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.16] - 2026-03-21
+
+### Added
+- `StreamingChunk` output events are now emitted to the `OutputSink` during streaming LLM responses — enables real-time streaming display in TUI and other sink consumers
+- `LlmResponse` output events are now emitted in `handle_content_response()` — TUI receives full LLM response text when the model finishes generating
+
+### Changed
+- `handle_content_response()` now writes to log file via `tee_println` instead of `log_tee` to ensure consistent logging behavior
+
 ## [0.5.15] - 2026-03-15
 
 ### Fixed
