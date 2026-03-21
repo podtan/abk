@@ -148,7 +148,17 @@ impl StdoutSink {
 
 impl OutputSink for StdoutSink {
     fn emit(&self, event: OutputEvent) {
-        println!("{}", event);
+        use std::io::Write;
+        match &event {
+            // StreamingChunk deltas must NOT append a newline — each delta is a
+            // small fragment (sometimes a single word or token) that should be
+            // printed inline so the response flows naturally on one line.
+            OutputEvent::StreamingChunk { delta } => {
+                print!("{}", delta);
+                let _ = std::io::stdout().flush();
+            }
+            _ => println!("{}", event),
+        }
     }
 }
 
