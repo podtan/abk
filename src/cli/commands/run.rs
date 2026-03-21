@@ -8,13 +8,16 @@ use crate::orchestration::AgentContext;
 use crate::agent::AgentMode;
 
 /// Options for running an agent
-#[derive(Debug, Clone)]
 pub struct RunOptions {
     pub task: String,
     pub yolo: bool,
     pub mode: Option<String>,
     pub run_mode: Option<String>,
     pub verbose: bool,
+    /// Optional custom output sink (e.g., TuiSink for TUI mode).
+    /// When `Some`, the agent's output sink is set to this value, overriding
+    /// the default NoopSink behavior in TUI mode.
+    pub output_sink: Option<std::sync::Arc<dyn crate::orchestration::output::OutputSink>>,
 }
 
 /// Execute an agent workflow
@@ -22,7 +25,7 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<()> {
-    let RunOptions { task, yolo, mode, run_mode, verbose } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink } = options;
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
@@ -76,11 +79,14 @@ pub async fn execute_run<C: CommandContext>(
     // Set the working directory for all tools (fixes issue where tools use wrong directory)
     agent.set_working_directory(current_dir.clone());
 
-    // In TUI mode, swap the output sink to NoopSink to prevent println! from
-    // corrupting the ratatui alternate screen buffer. Output goes to the log
-    // file via the Logger (which already checks is_tui_mode()), and the TUI
-    // tails that log file.
-    if crate::observability::is_tui_mode() {
+    // Set the output sink for the agent:
+    // - If a custom output_sink was provided (e.g., TuiSink from TUI mode), use it.
+    // - If in TUI mode without a custom sink, use NoopSink to prevent println! from
+    //   corrupting the ratatui alternate screen buffer.
+    // - Otherwise, keep the default StdoutSink.
+    if let Some(sink) = output_sink {
+        agent.set_output_sink(sink);
+    } else if crate::observability::is_tui_mode() {
         agent.set_output_sink(crate::orchestration::output::noop_sink());
     }
 

@@ -113,11 +113,15 @@ pub async fn run_from_raw_config(
 /// * `secrets` - Key-value pairs to inject into environment
 /// * `build_info` - Optional build-time metadata
 /// * `task` - The task description to execute
+/// * `output_sink` - Optional custom output sink (e.g., TuiSink for TUI mode).
+///   When `Some`, the agent's output sink is set to this value, overriding
+///   the default NoopSink behavior in TUI mode.
 pub async fn run_task_from_raw_config(
     config_toml: &str,
     secrets: std::collections::HashMap<String, String>,
     build_info: Option<crate::cli::config::BuildInfo>,
     task: &str,
+    output_sink: Option<crate::orchestration::output::SharedSink>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
@@ -147,6 +151,7 @@ pub async fn run_task_from_raw_config(
         mode: None,
         run_mode: None,
         verbose: false,
+        output_sink,
     };
 
     crate::cli::commands::run::execute_run(&context, options).await?;
@@ -769,6 +774,7 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         mode,
         run_mode: None, // Not configured in CLI, will use defaults
         verbose,
+        output_sink: None,
     };
 
     crate::cli::commands::run::execute_run(ctx, options).await

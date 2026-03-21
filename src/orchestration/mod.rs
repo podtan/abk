@@ -50,7 +50,7 @@ pub use agent_orchestration::{
 };
 
 // Re-export output sink types
-pub use output::{OutputEvent, OutputSink, StdoutSink};
+pub use output::{OutputEvent, OutputSink, StdoutSink, NoopSink, SharedSink};
 
 // Re-export sophisticated session types (DEPRECATED)
 pub use agent_session::{
