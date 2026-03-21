@@ -435,9 +435,13 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
         agent.chat_formatter_mut().add_assistant_message(response_text.clone(), None);
     }
 
-    // Emit to log file for CLI users — only write to file, not stdout (TUI mode suppresses that).
+    // Emit to log file only — NOT to stdout (TuiSink handles display via LlmResponse event).
     if !response_text.trim().is_empty() {
-        crate::observability::tee_println(&format!("\n{}\n", response_text));
+        // Write directly to log file to avoid duplicating output that TuiSink
+        // already emits via the LlmResponse event above.
+        if let Some(logger) = crate::observability::get_global_logger_opt() {
+            let _ = logger.append_to_log(&format!("\n{}\n", response_text));
+        }
     }
 
     // LLM finished naturally - no error, just stop

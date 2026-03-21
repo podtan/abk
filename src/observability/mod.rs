@@ -33,7 +33,7 @@ pub use logger::Logger;
 pub use logger::{tee_print, tee_println, tee_eprint, tee_eprintln};
 
 // Re-export global logger initialization for consolidating log output
-pub use logger::{init_global_logger, current_log_path};
+pub use logger::{init_global_logger, current_log_path, get_global_logger_opt};
 
 // Re-export TUI mode control for suppressing console output in TUI environments
 pub use logger::{set_tui_mode, is_tui_mode};

@@ -56,6 +56,12 @@ pub fn init_global_logger(logger: Logger) {
     let _ = GLOBAL_LOGGER.set(logger);
 }
 
+/// Get a reference to the global logger, returning None if not initialized.
+/// Unlike `get_global_logger()`, this does not create a default logger.
+pub fn get_global_logger_opt() -> Option<&'static Logger> {
+    GLOBAL_LOGGER.get()
+}
+
 /// Get the current log file path from the global logger.
 pub fn current_log_path() -> &'static Path {
     get_global_logger().log_file()
@@ -124,7 +130,7 @@ impl Logger {
     }
 
     /// Append content to log file.
-    fn append_to_log(&self, content: &str) -> Result<()> {
+    pub fn append_to_log(&self, content: &str) -> Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
