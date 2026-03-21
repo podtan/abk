@@ -173,8 +173,10 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
                 handle_tool_calls(agent, tool_calls, content, reasoning).await?;
             }
             GenerateResult::Content { text: response_text, reasoning } => {
-                // LLM finished naturally - stop the loop
-                handle_content_response(agent, response_text, reasoning).await?;
+                // LLM finished naturally - stop the loop.
+                // streaming_enabled: false because we're inside the non-streaming
+                // run_workflow; LlmResponse event IS needed here.
+                handle_content_response(agent, response_text, reasoning, false).await?;
                 return stop_session(agent, "Task completed").await;
             }
         }
@@ -250,8 +252,12 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                         continue;
                     }
                     GenerateResult::Content { text: response_text, reasoning } => {
-                        // LLM finished naturally - stop the loop
-                        handle_content_response(agent, response_text, reasoning).await?;
+                        // LLM finished naturally - stop the loop.
+                        // streaming_enabled: true because we're inside run_workflow_streaming;
+                        // pass true so handle_content_response skips the redundant
+                        // LlmResponse event (the full text was already streamed
+                        // chunk-by-chunk via StreamingChunk events in generate_with_provider).
+                        handle_content_response(agent, response_text, reasoning, true).await?;
                         return stop_session(agent, "Task completed").await;
                     }
                 }
@@ -415,13 +421,19 @@ async fn maybe_send_template<A: AgentContext>(agent: &mut A) -> Result<()> {
 
 /// Handle content response - LLM finished naturally, add message and stop.
 /// Returns Ok(()) - the caller should stop the loop.
-async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String, reasoning: Option<String>) -> Result<()> {
-    // Emit the LLM response so the TUI (or any sink consumer) can display it.
-    agent.output_sink().emit(OutputEvent::LlmResponse {
-        text: response_text.clone(),
-        model: agent.default_model(),
-    });
+async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: String, reasoning: Option<String>, was_streamed: bool) -> Result<()> {
+    // Emit the LLM response so sinks can display it — but ONLY when the response
+    // was NOT already streamed chunk-by-chunk.  In streaming mode the full text
+    // has already been emitted via StreamingChunk events in generate_with_provider(),
+    // so emitting LlmResponse here would print it a second time.
+    if !was_streamed {
+        agent.output_sink().emit(OutputEvent::LlmResponse {
+            text: response_text.clone(),
+            model: agent.default_model(),
+        });
+    }
 
+    // Structured log entry (always written to the log file).
     agent.log_llm_response(&response_text, Some(&agent.default_model()))?;
 
     // Store assistant message in conversation history (for checkpoints and context)
@@ -433,15 +445,6 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
         );
     } else {
         agent.chat_formatter_mut().add_assistant_message(response_text.clone(), None);
-    }
-
-    // Emit to log file only — NOT to stdout (TuiSink handles display via LlmResponse event).
-    if !response_text.trim().is_empty() {
-        // Write directly to log file to avoid duplicating output that TuiSink
-        // already emits via the LlmResponse event above.
-        if let Some(logger) = crate::observability::get_global_logger_opt() {
-            let _ = logger.append_to_log(&format!("\n{}\n", response_text));
-        }
     }
 
     // LLM finished naturally - no error, just stop
