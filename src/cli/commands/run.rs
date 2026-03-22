@@ -4,6 +4,8 @@
 
 use crate::cli::error::{CliError, CliResult};
 use crate::cli::adapters::CommandContext;
+use crate::cli::ResumeInfo;
+use crate::cli::TaskResult;
 use crate::orchestration::AgentContext;
 use crate::agent::AgentMode;
 
@@ -18,14 +20,18 @@ pub struct RunOptions {
     /// When `Some`, the agent's output sink is set to this value, overriding
     /// the default NoopSink behavior in TUI mode.
     pub output_sink: Option<std::sync::Arc<dyn crate::orchestration::output::OutputSink>>,
+    /// Optional resume info for TUI session continuity.
+    /// When `Some`, the agent resumes from the specified checkpoint instead of
+    /// starting a new session. The CLI flow (last_resume.json) is skipped.
+    pub resume_info: Option<ResumeInfo>,
 }
 
 /// Execute an agent workflow
 pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
-) -> CliResult<()> {
-    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink } = options;
+) -> CliResult<TaskResult> {
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info } = options;
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
@@ -90,11 +96,31 @@ pub async fn execute_run<C: CommandContext>(
         agent.set_output_sink(crate::orchestration::output::noop_sink());
     }
 
-    let resume_tracker = crate::checkpoint::ResumeTracker::new()
-        .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
-    
-    let resume_context = resume_tracker.get_resume_context_for_project(&current_dir)
-        .map_err(|e| CliError::CheckpointError(format!("Failed to check resume context: {}", e)))?;
+    // Check for resume context — from TUI parameter OR from last_resume.json
+    let resume_context = if let Some(ref info) = resume_info {
+        // TUI provided resume info directly (no file needed)
+        ctx.log_info(&format!(
+            "TUI resume info: session={}, checkpoint={}",
+            info.session_id, info.checkpoint_id
+        ));
+        Some(crate::checkpoint::resume_tracker::ResumeContext {
+            project_path: current_dir.clone(),
+            session_id: info.session_id.clone(),
+            checkpoint_id: info.checkpoint_id.clone(),
+            restored_at: chrono::Utc::now(),
+            working_directory: current_dir.clone(),
+            task_description: String::new(),
+            workflow_step: "Continue".to_string(),
+            iteration: info.iteration,
+        })
+    } else {
+        // CLI mode: check for last_resume.json
+        let resume_tracker = crate::checkpoint::ResumeTracker::new()
+            .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
+        
+        resume_tracker.get_resume_context_for_project(&current_dir)
+            .map_err(|e| CliError::CheckpointError(format!("Failed to check resume context: {}", e)))?
+    };
 
     let result = if let Some(context) = resume_context {
         // Resume from checkpoint instead of starting new session
@@ -110,9 +136,13 @@ pub async fn execute_run<C: CommandContext>(
         .await
         .map_err(|e| CliError::ExecutionError(format!("Failed to resume from checkpoint: {}", e)))?;
         
-        // Clear the resume context after successful use
-        resume_tracker.clear_resume_context()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to clear resume context: {}", e)))?;
+        // Clear the resume context only if we read from file (not from TUI)
+        if resume_info.is_none() {
+            let resume_tracker = crate::checkpoint::ResumeTracker::new()
+                .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
+            resume_tracker.clear_resume_context()
+                .map_err(|e| CliError::CheckpointError(format!("Failed to clear resume context: {}", e)))?;
+        }
         
         // Add the new task as a user message to the restored conversation
         agent.chat_formatter_mut().add_user_message(task.clone(), None);
@@ -152,6 +182,9 @@ pub async fn execute_run<C: CommandContext>(
         crate::orchestration::run_workflow(&mut agent, max_iterations).await
     };
 
+    // Create final checkpoint and extract resume info for session continuity
+    let final_resume_info = agent.create_final_checkpoint_and_get_resume_info().await;
+
     match workflow_result {
         Ok(completion_reason) => {
             ctx.log_success(&format!("Workflow completed: {}", completion_reason));
@@ -162,11 +195,11 @@ pub async fn execute_run<C: CommandContext>(
                     agent.executor().working_dir().display()
                 ));
             }
-            Ok(())
+            Ok(TaskResult { success: true, error: None, resume_info: final_resume_info })
         }
         Err(e) => {
             ctx.log_error(&format!("Task failed: {:#}", e))?;
-            Err(CliError::ExecutionError(format!("Agent execution failed: {:#}", e)))
+            Ok(TaskResult { success: false, error: Some(format!("{:#}", e)), resume_info: final_resume_info })
         }
     }
 }

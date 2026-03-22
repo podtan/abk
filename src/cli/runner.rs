@@ -5,6 +5,7 @@
 //! CLI definitions in individual agent projects.
 
 use clap::{Arg, ArgMatches, Command};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::cli::config::{ArgType, CliConfig};
@@ -17,6 +18,26 @@ use crate::cli::adapters::checkpoint::{
 };
 use crate::cli::adapters::storage::{StorageAccess, AbkStorageAccess};
 use async_trait::async_trait;
+
+/// Information needed to resume a session on the next task.////// Carries the checkpoint identifiers required to restore a previous
+/// conversation.  Used by the TUI for in-memory session continuity
+/// (no files, no race conditions, works with multiple TUI instances).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResumeInfo {
+    pub session_id: String,
+    pub checkpoint_id: String,
+    pub iteration: u32,
+}
+
+/// Result returned by `run_task_from_raw_config`.
+#[derive(Debug)]
+pub struct TaskResult {
+    pub success: bool,
+    pub error: Option<String>,
+    /// Resume info for session continuity on the next call.
+    /// `None` when checkpointing is disabled or no session was created.
+    pub resume_info: Option<ResumeInfo>,
+}
 
 /// Run CLI with externally-provided configuration
 ///
@@ -116,13 +137,21 @@ pub async fn run_from_raw_config(
 /// * `output_sink` - Optional custom output sink (e.g., TuiSink for TUI mode).
 ///   When `Some`, the agent's output sink is set to this value, overriding
 ///   the default NoopSink behavior in TUI mode.
+/// * `resume_info` - Optional resume info for TUI session continuity.
+///   When `Some`, the agent resumes from the specified checkpoint instead of
+///   starting a new session.
+///
+/// # Returns
+/// A `TaskResult` containing success/failure status and optional `ResumeInfo`
+/// for session continuity on the next call.
 pub async fn run_task_from_raw_config(
     config_toml: &str,
     secrets: std::collections::HashMap<String, String>,
     build_info: Option<crate::cli::config::BuildInfo>,
     task: &str,
     output_sink: Option<crate::orchestration::output::SharedSink>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    resume_info: Option<super::ResumeInfo>,
+) -> Result<super::TaskResult, Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
         if std::env::var(key).is_err() {
@@ -152,11 +181,12 @@ pub async fn run_task_from_raw_config(
         run_mode: None,
         verbose: false,
         output_sink,
+        resume_info,
     };
 
-    crate::cli::commands::run::execute_run(&context, options).await?;
+    let result = crate::cli::commands::run::execute_run(&context, options).await?;
 
-    Ok(())
+    Ok(result)
 }
 
 /// Command context that uses pre-parsed configuration (no file reading)
@@ -775,9 +805,10 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         run_mode: None, // Not configured in CLI, will use defaults
         verbose,
         output_sink: None,
+        resume_info: None, // CLI doesn't use TUI session continuity
     };
 
-    crate::cli::commands::run::execute_run(ctx, options).await
+    crate::cli::commands::run::execute_run(ctx, options).await.map(|_| ())
 }
 
 /// Handle run command when called without subcommand

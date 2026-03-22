@@ -315,6 +315,23 @@ impl Agent {
             .unwrap_or(false)
     }
 
+    /// Create a final checkpoint and return resume info for session continuity.
+    /// Returns None if checkpointing is not enabled or no session exists.
+    pub async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::cli::ResumeInfo> {
+        // Take the session_manager temporarily to avoid borrow conflict:
+        // SessionManager needs &mut self (to save checkpoint) and &Agent (as AgentContext).
+        let mut session_manager = self.session_manager.take()?;
+
+        let result = session_manager
+            .create_final_checkpoint_and_get_resume_info(self)
+            .await;
+
+        // Put it back
+        self.session_manager = Some(session_manager);
+
+        result
+    }
+
     /// Execute tool calls and return structured results for proper OpenAI API tool message handling.
     /// This method returns individual tool results that can be sent as separate tool messages.
 
@@ -468,6 +485,7 @@ impl Agent {
         self.current_turn_id = None;
         self.turn_request_count = 0;
     }
+
 }
 
 /// Drop implementation to ensure proper cleanup

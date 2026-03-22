@@ -823,6 +823,61 @@ impl SessionManager {
     pub fn set_current_iteration(&mut self, iteration: u32) {
         self.current_iteration = iteration;
     }
+
+    /// Create a final checkpoint and return resume info for session continuity.
+    ///
+    /// This is used by the TUI to enable session continuity between commands.
+    /// The returned `ResumeInfo` can be passed back on the next command to resume
+    /// the conversation seamlessly.
+    ///
+    /// Returns `None` if checkpointing is not enabled or no session exists.
+    pub async fn create_final_checkpoint_and_get_resume_info<C: AgentContext>(
+        &mut self,
+        context: &C,
+    ) -> Option<crate::cli::ResumeInfo> {
+        if !self.checkpointing_enabled {
+            return None;
+        }
+
+        let iteration = self.current_iteration;
+        let checkpoint_id = format!("{:03}_final", iteration);
+
+        // Build final checkpoint first (borrows self immutably via &self in build_checkpoint)
+        let checkpoint_result = self.build_checkpoint(context, &checkpoint_id, iteration).await;
+
+        // Now save checkpoint (borrows self.current_session mutably)
+        if let Some(ref mut session_storage) = self.current_session {
+            match checkpoint_result {
+                Ok(checkpoint) => {
+                    if let Err(e) = session_storage.save_checkpoint(&checkpoint).await {
+                        context.log_info(&format!(
+                            "Failed to save final checkpoint: {}",
+                            e
+                        ));
+                    }
+                }
+                Err(e) => {
+                    context.log_info(&format!(
+                        "Failed to build final checkpoint: {}",
+                        e
+                    ));
+                }
+            }
+
+            // Extract resume info from the session
+            let latest_checkpoint_id = session_storage
+                .latest_checkpoint_id()
+                .unwrap_or_else(|| checkpoint_id.clone());
+
+            Some(crate::cli::ResumeInfo {
+                session_id: session_storage.session_id().to_string(),
+                checkpoint_id: latest_checkpoint_id,
+                iteration,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

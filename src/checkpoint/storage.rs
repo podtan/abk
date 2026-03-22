@@ -1386,6 +1386,18 @@ impl SessionStorage {
         self.synchronize_metadata().await?;
         Ok(&self.metadata)
     }
+
+    /// Get the session ID
+    pub fn session_id(&self) -> &str {
+        &self.metadata.session_id
+    }
+
+    /// Get the latest checkpoint ID (most recent by creation time)
+    pub fn latest_checkpoint_id(&self) -> Option<String> {
+        self.checkpoints.values()
+            .max_by_key(|cp| cp.created_at)
+            .map(|cp| cp.checkpoint_id.clone())
+    }
 }
 
 /// Project metadata
