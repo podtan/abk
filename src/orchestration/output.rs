@@ -45,6 +45,11 @@ pub enum OutputEvent {
         delta: String,
     },
 
+    /// A reasoning/thinking chunk has arrived (displayed dimmed)
+    ReasoningChunk {
+        delta: String,
+    },
+
     /// Tools are being executed
     ToolsExecuting {
         tool_names: Vec<String>,
@@ -90,6 +95,9 @@ impl std::fmt::Display for OutputEvent {
             }
             Self::StreamingChunk { delta } => {
                 write!(f, "{}", delta)
+            }
+            Self::ReasoningChunk { delta } => {
+                write!(f, "\x1b[90m{}\x1b[0m", delta)
             }
             Self::ToolsExecuting { tool_names } => {
                 write!(f, "🔧 Executing {} tools: [{}]", tool_names.len(), tool_names.join(", "))
@@ -156,6 +164,10 @@ impl OutputSink for StdoutSink {
             OutputEvent::StreamingChunk { delta } => {
                 print!("{}", delta);
                 let _ = std::io::stdout().flush();
+            }
+            OutputEvent::ReasoningChunk { delta } => {
+                eprint!("\x1b[90m{}\x1b[0m", delta);
+                let _ = std::io::stderr().flush();
             }
             _ => println!("{}", event),
         }

@@ -105,14 +105,34 @@ impl AgentContext for super::Agent {
             use futures_util::StreamExt;
             let mut pinned_stream = Box::pin(stream);
             let mut accumulator = umf::StreamingAccumulator::new();
+            let mut saw_reasoning = false;
+            let mut saw_content = false;
 
             while let Some(chunk_result) = pinned_stream.next().await {
                 let chunk = chunk_result?;
-                // Emit streaming text chunk to output sink for TUI/CLI consumers
+                // Emit streaming chunks to output sink for TUI/CLI consumers.
+                // Track reasoning→content transitions to insert line breaks.
                 match &chunk {
                     umf::StreamChunk::Text(delta) if !delta.is_empty() => {
+                        if saw_reasoning && !saw_content {
+                            // Transition from reasoning to content — insert a newline.
+                            self.output_sink().emit(
+                                crate::orchestration::output::OutputEvent::StreamingChunk {
+                                    delta: "\n".to_string(),
+                                },
+                            );
+                        }
+                        saw_content = true;
                         self.output_sink().emit(
                             crate::orchestration::output::OutputEvent::StreamingChunk {
+                                delta: delta.clone(),
+                            },
+                        );
+                    }
+                    umf::StreamChunk::Reasoning(delta) if !delta.is_empty() => {
+                        saw_reasoning = true;
+                        self.output_sink().emit(
+                            crate::orchestration::output::OutputEvent::ReasoningChunk {
                                 delta: delta.clone(),
                             },
                         );

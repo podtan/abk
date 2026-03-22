@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.18] - 2026-03-22
+
+### Added
+- `OutputEvent::ReasoningChunk` variant for streaming reasoning/thinking tokens from models (GLM, Qwen, etc.)
+- Reasoning-to-content transition detection in streaming loop — emits a newline separator when reasoning ends and content begins
+
+### Changed
+- `StdoutSink` prints reasoning chunks to stderr in dim grey (`\x1b[90m`) to visually distinguish them from content
+- Streaming loop in `context_orch.rs` now emits `ReasoningChunk` events alongside `StreamingChunk` events
+
 ## [0.5.17] - 2026-03-21
 
 ### Fixed
