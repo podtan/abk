@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.19] - 2026-03-22
+
+### Added
+- `ResumeInfo` and `TaskResult` types in `abk::cli` for in-memory session continuity
+- `SessionStorage::session_id()` and `SessionStorage::latest_checkpoint_id()` accessor methods
+- `SessionManager::create_final_checkpoint_and_get_resume_info()` — creates a final checkpoint and returns `ResumeInfo` for session resumption
+- `Agent::create_final_checkpoint_and_get_resume_info()` — public API for creating final checkpoint and extracting resume info
+- `RunOptions::resume_info` field — allows passing `ResumeInfo` to `execute_run()` for session continuity
+- `run_task_from_raw_config()` now accepts optional `ResumeInfo` parameter and returns `TaskResult` instead of `()`
+
 ## [0.5.18] - 2026-03-22
 
 ### Added
