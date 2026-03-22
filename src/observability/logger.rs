@@ -162,7 +162,7 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { println!("INFO: Session started in {} mode", mode); }
+        // No println — session start is announced via OutputEvent::WorkflowStarted
         Ok(())
     }
 
@@ -202,7 +202,6 @@ impl Logger {
             });
 
         if trimmed_response.is_empty() && messages_empty {
-            if !is_tui_mode() { println!("DEBUG: Skipping log entry for empty LLM response"); }
             return Ok(());
         }
 
@@ -266,7 +265,6 @@ impl Logger {
         };
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { println!("INFO: LLM interaction logged"); }
         Ok(())
     }
 
@@ -279,7 +277,6 @@ impl Logger {
         // Skip logging if response is empty or contains only whitespace
         let trimmed_response = response.trim();
         if trimmed_response.is_empty() {
-            if !is_tui_mode() { println!("DEBUG: Skipping log entry for empty LLM response"); }
             return Ok(());
         }
 
@@ -293,7 +290,8 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { println!("INFO: LLM response logged"); }
+        // No println here — the response is already displayed via OutputSink
+        // (StreamingChunk events during streaming, or LlmResponse event otherwise).
         Ok(())
     }
 
@@ -331,7 +329,6 @@ impl Logger {
         }
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { println!("INFO: Command executed: {} (exit: {})", command, return_code); }
         Ok(())
     }
 
@@ -350,7 +347,6 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { println!("INFO: Mode changed from {} to {}", old_mode, new_mode); }
         Ok(())
     }
 
@@ -379,7 +375,6 @@ impl Logger {
         }
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { eprintln!("ERROR: {}", error); }
         Ok(())
     }
 
@@ -396,7 +391,6 @@ impl Logger {
         );
 
         self.append_to_log(&content)?;
-        if !is_tui_mode() { println!("INFO: Session completed: {}", reason); }
         Ok(())
     }
 
@@ -412,15 +406,6 @@ impl Logger {
         let log_content = format!("### {} - {}\n\n{}\n\n", title, now.to_rfc3339(), content);
 
         self.append_to_log(&log_content)?;
-
-        if !is_tui_mode() {
-            match level {
-                "ERROR" => eprintln!("ERROR: {}: {}", title, content),
-                "WARN" => println!("WARN: {}: {}", title, content),
-                _ => println!("INFO: {}: {}", title, content),
-            }
-        }
-
         Ok(())
     }
 
@@ -460,9 +445,6 @@ impl Logger {
     /// # Arguments
     /// * `tool_call_json` - Compact JSON string of the tool call wrapper.
     pub fn log_compact_tool_call(&self, tool_call_json: &str) -> Result<()> {
-        // Print to stdout at INFO level (unless TUI mode)
-        if !is_tui_mode() { println!("INFO: Tool request: {}", tool_call_json); }
-
         // Append to log file for persistence
         let now: DateTime<Utc> = Utc::now();
         let content = format!(
@@ -485,8 +467,6 @@ impl Logger {
             None => format!("Starting workflow iteration {}", iteration),
         };
 
-        if !is_tui_mode() { println!("INFO: {}", info); }
-
         let now: DateTime<Utc> = Utc::now();
         let content = format!(
             "## Starting workflow iteration {} : {}\n\n**Timestamp:** {}\n**Context:** {}\n\n",
@@ -502,13 +482,11 @@ impl Logger {
 
     /// Log info message (console + file).
     pub fn info(&self, message: &str) {
-        if !is_tui_mode() { println!("INFO: {}", message); }
         let _ = self.append_to_log(&format!("INFO: {}\n", message));
     }
 
     /// Log error message (console + file).
     pub fn error(&self, message: &str) {
-        if !is_tui_mode() { eprintln!("ERROR: {}", message); }
         let _ = self.append_to_log(&format!("ERROR: {}\n", message));
     }
 
@@ -543,14 +521,14 @@ impl Default for Logger {
 }
 
 
-fn append_to_global_log(content: &str) {
+pub fn append_to_global_log(content: &str) {
     let logger = get_global_logger();
     let _ = logger.append_to_log(content);
 }
 
 /// Strip ANSI escape codes from a string.
 /// Removes sequences like \x1b[...m (SGR), \x1b[...H (cursor), etc.
-fn strip_ansi(s: &str) -> String {
+pub fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {

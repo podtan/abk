@@ -804,11 +804,6 @@ where
     async fn handle_content_response(&mut self, response_text: String, reasoning: Option<String>) -> Result<bool> {
         self.logger.log_llm_response(&response_text, Some(&self.provider.default_model()))?;
 
-        // Print the response
-        if !response_text.trim().is_empty() {
-            self.logger.tee_println(&format!("\n{}\n", response_text));
-        }
-
         // Add assistant message to conversation
         if let Some(reasoning_content) = reasoning {
             self.chat_formatter.add_assistant_message_with_reasoning(

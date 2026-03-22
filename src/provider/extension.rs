@@ -449,17 +449,17 @@ impl LlmProvider for ExtensionProvider {
                                         match delta.delta_type.as_str() {
                                             "reasoning" => {
                                                 if let Some(reasoning) = delta.reasoning {
-                                                    // Tee-write reasoning to stderr and log file
-                                                    crate::observability::tee_eprint(
-                                                        &format!("\x1b[90m{}\x1b[0m", reasoning)
+                                                    // Log reasoning to file only; display is handled by OutputSink
+                                                    crate::observability::append_to_global_log(
+                                                        &crate::observability::strip_ansi(&reasoning)
                                                     );
                                                     let _ = tx.send(Ok(StreamChunk::Reasoning(reasoning)));
                                                 }
                                             }
                                             "content" => {
                                                 if let Some(content) = delta.content {
-                                                    // Tee-write content to stdout and log file
-                                                    crate::observability::tee_print(&content);
+                                                    // Log content to file only; display is handled by OutputSink
+                                                    crate::observability::append_to_global_log(&content);
                                                     let _ = tx.send(Ok(StreamChunk::Text(content)));
                                                 }
                                             }

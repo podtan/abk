@@ -423,6 +423,13 @@ impl ConfigurationLoader {
                 .lifecycle
                 .as_ref()
                 .and_then(|l| l.system_template.clone()),
+            "llm.endpoint" => Some(
+                self.config
+                    .llm
+                    .as_ref()
+                    .map(|c| c.endpoint.clone())
+                    .unwrap_or_else(|| "chat/completions".to_string()),
+            ),
             _ => None,
         }
     }
@@ -459,6 +466,13 @@ impl ConfigurationLoader {
                     .as_ref()
                     .map(|l| l.enabled)
                     .unwrap_or(false),
+            ),
+            "llm.enable_streaming" => Some(
+                self.config
+                    .llm
+                    .as_ref()
+                    .map(|c| c.enable_streaming)
+                    .unwrap_or(true),
             ),
             _ => None,
         }

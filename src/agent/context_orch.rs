@@ -100,8 +100,6 @@ impl AgentContext for super::Agent {
 
         // Call provider based on streaming mode
         let response = if streaming_enabled {
-            crate::observability::tee_println("🚀 Using provider streaming with umf::StreamingAccumulator");
-            
             let stream = self.provider.generate_stream(messages, &config).await?;
             
             use futures_util::StreamExt;
