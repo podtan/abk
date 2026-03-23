@@ -365,6 +365,15 @@ async fn handle_tool_calls<A: AgentContext>(
     // Execute tools
     let results = agent.execute_tool_calls_structured(tool_calls).await?;
 
+    // Emit per-tool completion events (ToolCompleted variant exists but was never wired)
+    for result in &results {
+        agent.output_sink().emit(OutputEvent::ToolCompleted {
+            tool_name: result.tool_name.clone(),
+            success: result.success,
+            content: result.content.clone(),
+        });
+    }
+
     // Add tool messages
     for result in &results {
         agent.chat_formatter_mut().add_tool_message(
