@@ -71,11 +71,9 @@ impl super::Agent {
                 );
 
                 // Extract description from MCP tool arguments
-                let description = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                let description: Option<String> = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
                     .ok()
-                    .and_then(|args| args.get("description"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .and_then(|v| v.get("description").and_then(|d| d.as_str()).map(String::from));
 
                 return Ok(ToolExecutionResult {
                     tool_call_id: tc.id.clone(),
@@ -123,11 +121,9 @@ impl super::Agent {
         }
 
         // Extract description from tool call arguments
-        let description = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+        let description: Option<String> = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
             .ok()
-            .and_then(|args| args.get("description"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .and_then(|v| v.get("description").and_then(|d| d.as_str()).map(String::from));
 
         Ok(ToolExecutionResult {
             tool_call_id: cr.tool_call_id,
