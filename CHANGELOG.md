@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.20] - 2026-03-23
+
+### Added
+- `context_tokens` field to `OutputEvent::ApiCallStarted` — CLI and TUI now display context size in API call info lines (e.g., `Context=43036`)
+- `OutputEvent::ToolCompleted` is now emitted by the orchestration layer in `handle_tool_calls()` — was previously defined but never wired up
+- `description: Option<String>` field to `OutputEvent::ToolCompleted` — carries tool description (e.g., bash command description) for TUI display
+- `description: Option<String>` field to `ToolExecutionResult` in orchestration, agent, and tools modules — description extracted from tool call arguments
+
+### Changed
+- `Display` impl for `ApiCallStarted` now shows `Context={}` in the format string
+- `Display` impl for `ToolCompleted` now shows description when present (`🔧 bash — Build the project`)
+
 ## [0.5.19] - 2026-03-22
 
 ### Added
