@@ -88,6 +88,8 @@ pub struct ToolExecutionResult {
     pub tool_name: String,
     pub content: String,
     pub success: bool,
+    /// Optional description (e.g., from bash "description" param)
+    pub description: Option<String>,
 }
 
 /// Configuration for agent session

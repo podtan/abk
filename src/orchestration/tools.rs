@@ -14,6 +14,8 @@ pub struct ToolExecutionResult {
     pub content: String,
     /// Whether tool execution succeeded
     pub success: bool,
+    /// Optional description (e.g., from bash "description" param)
+    pub description: Option<String>,
 }
 
 /// Tool invocation request

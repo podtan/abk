@@ -20,6 +20,8 @@ pub struct ToolExecutionResult {
     pub tool_name: String,
     pub content: String,
     pub success: bool,
+    /// Optional description (e.g., from bash "description" param)
+    pub description: Option<String>,
 }
 
 /// Agent context trait - minimal interface needed for orchestration
@@ -371,6 +373,7 @@ async fn handle_tool_calls<A: AgentContext>(
             tool_name: result.tool_name.clone(),
             success: result.success,
             content: result.content.clone(),
+            description: result.description.clone(),
         });
     }
 

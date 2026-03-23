@@ -61,6 +61,8 @@ pub enum OutputEvent {
         tool_name: String,
         success: bool,
         content: String,
+        /// Optional description (e.g., from bash "description" param)
+        description: Option<String>,
     },
 
     /// An error occurred
@@ -103,9 +105,12 @@ impl std::fmt::Display for OutputEvent {
             Self::ToolsExecuting { tool_names } => {
                 write!(f, "🔧 Executing {} tools: [{}]", tool_names.len(), tool_names.join(", "))
             }
-            Self::ToolCompleted { tool_name, success, content } => {
+            Self::ToolCompleted { tool_name, success, content, description } => {
                 let status = if *success { "Result" } else { "Error" };
-                write!(f, "Tool: {}\n{}: {}", tool_name, status, content)
+                match description {
+                    Some(desc) => write!(f, "🔧 {} — {} | {}: {}", tool_name, desc, status, content),
+                    None => write!(f, "Tool: {}\n{}: {}", tool_name, status, content),
+                }
             }
             Self::Error { message, context } => {
                 if let Some(ctx) = context {

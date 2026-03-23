@@ -70,11 +70,19 @@ impl super::Agent {
                     success,
                 );
 
+                // Extract description from MCP tool arguments
+                let description = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                    .ok()
+                    .and_then(|args| args.get("description"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
                 return Ok(ToolExecutionResult {
                     tool_call_id: tc.id.clone(),
                     tool_name: tc.function.name.clone(),
                     content,
                     success,
+                    description,
                 });
             }
         }
@@ -114,11 +122,19 @@ impl super::Agent {
             }
         }
 
+        // Extract description from tool call arguments
+        let description = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+            .ok()
+            .and_then(|args| args.get("description"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         Ok(ToolExecutionResult {
             tool_call_id: cr.tool_call_id,
             tool_name: cr.tool_name,
             content: cr.content,
             success: cr.success,
+            description,
         })
     }
 

@@ -199,6 +199,7 @@ impl AgentContext for super::Agent {
             tool_name: r.tool_name,
             content: r.content,
             success: r.success,
+            description: r.description,
         }).collect())
     }
     
