@@ -219,6 +219,7 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
             model: agent.default_model(),
             tool_count,
             streaming: true,
+            context_tokens: agent.count_tokens(),
         });
         agent.log_info(&format!(
             "🔥 API Call {} | Context={} | Streaming | Model: {} | Tools: {}",
@@ -306,6 +307,7 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
             model: agent.default_model(),
             tool_count,
             streaming: streaming_enabled,
+            context_tokens: agent.count_tokens(),
         });
         agent.log_info(&format!(
             "🔥 API Call {} | Iteration {} | Model: {} | Tools: {}",
