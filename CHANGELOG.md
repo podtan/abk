@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.23] - 2026-03-24
+
+### Fixed
+- `SessionManager::create_final_checkpoint_and_get_resume_info()` now reads the iteration counter from the `AgentContext` (`context.get_current_iteration()`) instead of from the stale `SessionManager.current_iteration` field. This fixes TUI session continuity where follow-up tasks would overwrite checkpoint data from iteration 1 instead of continuing from the correct iteration number.
+
 ## [0.5.22] - 2026-03-24
 
 ### Changed

@@ -839,7 +839,7 @@ impl SessionManager {
             return None;
         }
 
-        let iteration = self.current_iteration;
+        let iteration = context.get_current_iteration();
         let checkpoint_id = format!("{:03}_final", iteration);
 
         // Build final checkpoint first (borrows self immutably via &self in build_checkpoint)
