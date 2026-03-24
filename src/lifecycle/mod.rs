@@ -177,13 +177,13 @@ You have access to tools. Use them when needed to accomplish tasks.
 2. Execute the necessary actions using available tools
 3. Provide clear, helpful responses
 
-When you have completed the task, use the `submit` tool to indicate completion."#;
+When you have completed the task, respond with your final result."#;
 
 const SIMPLE_TASK_TEMPLATE: &str = r#"Task: {task_description}
 
 {task_context}
 
-Complete this task using available tools. When done, call the submit tool."#;
+Complete this task using available tools. When done, provide your final result."#;
 
 impl Lifecycle for SimpleLifecycle {
     fn load_template(&self, name: &str) -> Pin<Box<dyn Future<Output = Result<String>> + Send + '_>> {
