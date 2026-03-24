@@ -783,7 +783,7 @@ impl CheckpointRestoration {
             .await?;
 
         // Try to get session storage - this should exist if checkpoint exists
-        let mut session_storage = project_storage.create_session(session_id).await?;
+        let session_storage = project_storage.create_session(session_id).await?;
 
         // Use SessionStorage::load_checkpoint which handles both V1 and V2 formats
         let checkpoint = session_storage.load_checkpoint(checkpoint_id).await?;

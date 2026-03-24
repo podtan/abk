@@ -4,7 +4,7 @@
 //! extension system instead of the old WASM plugin system.
 
 use crate::config::EnvironmentLoader;
-use crate::extension::{ExtensionManager, ProviderExtensionInstance};
+use crate::extension::ExtensionManager;
 use crate::provider::traits::{GenerateResponse, LlmProvider, StreamingResponse, ToolInvocation};
 use crate::provider::types::{GenerateConfig, InternalMessage};
 use anyhow::{Context, Result};

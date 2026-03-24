@@ -1,3 +1,6 @@
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoken\"))"] }
+
 [package]
 name = "abk"
 version = "0.5.22"
@@ -29,6 +32,8 @@ all = ["config", "observability", "cli", "checkpoint", "provider", "orchestratio
 
 # Storage backend features (optional)
 storage-documentdb = ["checkpoint", "mongodb", "futures-util"]
+    # Token counting (optional)
+    tiktoken = ["tiktoken-rs"]
 
 [dependencies]
 # Config feature dependencies
@@ -71,6 +76,9 @@ tracing = { version = "0.1", optional = true }
 cats = { version = "0.1.13", optional = true }
 regex = { version = "1.0", optional = true }
 urlencoding = { version = "2.1", optional = true }
+
+# Token counting dependencies (optional)
+tiktoken-rs = { version = "0.6", optional = true }
 
 # Storage backend dependencies (optional)
 mongodb = { version = "3.1", optional = true }

@@ -5,7 +5,6 @@
 
 use crate::agent::Agent;
 use crate::checkpoint::models::{ChatMessage, SystemInfo, WorkflowStep};
-use crate::checkpoint::AgentContext;
 use anyhow::Result;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use super::{ToolDescriptor, ToolSourceProvider, ToolResult};
+use super::{ToolDescriptor, ToolSourceProvider};
 use crate::registry::provider::ToolResult as ProviderResult;
 
 /// A tool source that wraps the native cats tool registry.

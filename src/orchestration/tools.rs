@@ -1,6 +1,5 @@
 //! Tool invocation coordination
 
-use anyhow::Result;
 use std::collections::HashMap;
 
 /// Tool execution result

@@ -400,8 +400,7 @@ impl Logger {
     /// * `title` - Log entry title.
     /// * `content` - Log content.
     /// * `level` - Log level.
-    pub fn log_custom(&self, title: &str, content: &str, level: Option<&str>) -> Result<()> {
-        let level = level.unwrap_or("INFO");
+    pub fn log_custom(&self, title: &str, content: &str, _level: Option<&str>) -> Result<()> {
         let now: DateTime<Utc> = Utc::now();
         let log_content = format!("### {} - {}\n\n{}\n\n", title, now.to_rfc3339(), content);
 
@@ -462,7 +461,7 @@ impl Logger {
     /// * `iteration` - Iteration number.
     /// * `context_info` - Optional context information (e.g., token count).
     pub fn log_workflow_iteration(&self, iteration: u32, context_info: Option<&str>) -> Result<()> {
-        let info = match context_info {
+        let _info = match context_info {
             Some(ctx) => format!("Starting workflow iteration {} : {}", iteration, ctx),
             None => format!("Starting workflow iteration {}", iteration),
         };

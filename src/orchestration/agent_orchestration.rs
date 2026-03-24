@@ -9,9 +9,8 @@
 use anyhow::{Context, Result};
 use umf::GenerateResult;
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use super::output::{OutputEvent, OutputSink, SharedSink};
+use super::output::{OutputEvent, SharedSink};
 
 /// Tool execution result (re-export from tools module to avoid circular dependency)
 #[derive(Debug, Clone)]

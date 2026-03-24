@@ -26,6 +26,7 @@ dependencies = [
  "shellexpand 3.1.1",
  "tempfile",
  "thiserror 1.0.69",
+ "tiktoken-rs 0.6.0",
  "tokio",
  "tokio-test",
  "toml 0.8.23",
@@ -1094,6 +1095,17 @@ checksum = "7493d4c459da9f84325ad297371a6b2b8a162800873a22e3b6b6512e61d18c05"
 dependencies = [
  "bit-set",
  "regex",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -3074,9 +3086,25 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bstr",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "lazy_static",
  "parking_lot",
+ "rustc-hash 1.1.0",
+]
+
+[[package]]
+name = "tiktoken-rs"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44075987ee2486402f0808505dd65692163d243a337fc54363d49afac41087f6"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "bstr",
+ "fancy-regex 0.13.0",
+ "lazy_static",
+ "parking_lot",
+ "regex",
  "rustc-hash 1.1.0",
 ]
 
@@ -3405,7 +3433,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tiktoken-rs",
+ "tiktoken-rs 0.5.9",
  "tracing",
 ]
 

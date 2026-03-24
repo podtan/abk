@@ -1175,8 +1175,7 @@ impl SessionStorage {
     /// Build a Checkpoint with default values for optional fields
     fn build_checkpoint(metadata: CheckpointMetadata, agent_state: AgentStateSnapshot, conversation_state: ConversationSnapshot) -> Checkpoint {
         use super::models::{
-            ExecutionContext, FilePermissions, ProcessInfo, ResourceUsage, SystemInfo,
-            ToolState,
+            ExecutionContext, ProcessInfo, ResourceUsage, SystemInfo,
         };
 
         Checkpoint {

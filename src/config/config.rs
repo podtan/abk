@@ -1,9 +1,7 @@
 //! TOML configuration parsing and management.
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -266,7 +264,9 @@ pub struct ModeConfig {
 pub struct ConfigurationLoader {
     pub config_path: PathBuf,
     pub config: Configuration,
+    #[allow(dead_code)]
     template_base: Option<PathBuf>,
+    #[allow(dead_code)]
     _log_base: Option<PathBuf>,
 }
 

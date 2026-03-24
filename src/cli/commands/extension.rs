@@ -57,7 +57,7 @@ pub async fn list<C: CommandContext>(ctx: &C) -> CliResult<()> {
 }
 
 /// Install an extension from a directory
-pub async fn install<C: CommandContext>(ctx: &C, source_path: &str, extension_id: Option<&str>) -> CliResult<()> {
+pub async fn install<C: CommandContext>(ctx: &C, source_path: &str, _extension_id: Option<&str>) -> CliResult<()> {
     let source = std::path::PathBuf::from(source_path);
     
     if !source.exists() {

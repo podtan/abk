@@ -2,7 +2,7 @@
 //!
 //! Provides cache management commands via StorageAccess adapter
 
-use crate::cli::adapters::{CommandContext, StorageAccess, StorageStats};
+use crate::cli::adapters::{CommandContext, StorageAccess};
 use crate::cli::error::CliResult;
 
 /// Cache command options

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Mutex;
 
-use crate::extension::{LifecycleExtensionInstance, ExtensionManager};
+use crate::extension::LifecycleExtensionInstance;
 
 macro_rules! debug {
     ($($arg:tt)*) => {

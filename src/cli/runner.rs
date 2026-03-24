@@ -16,7 +16,7 @@ use crate::cli::adapters::checkpoint::{
     CheckpointMetadata, CheckpointData, CheckpointDiff, RestoredCheckpoint, AgentResult,
     ResumeContext,
 };
-use crate::cli::adapters::storage::{StorageAccess, AbkStorageAccess};
+use crate::cli::adapters::storage::AbkStorageAccess;
 use async_trait::async_trait;
 
 /// Information needed to resume a session on the next task.////// Carries the checkpoint identifiers required to restore a previous
@@ -147,7 +147,7 @@ pub async fn run_from_raw_config(
 pub async fn run_task_from_raw_config(
     config_toml: &str,
     secrets: std::collections::HashMap<String, String>,
-    build_info: Option<crate::cli::config::BuildInfo>,
+    mut build_info: Option<crate::cli::config::BuildInfo>,
     task: &str,
     output_sink: Option<crate::orchestration::output::SharedSink>,
     resume_info: Option<super::ResumeInfo>,
@@ -158,6 +158,8 @@ pub async fn run_task_from_raw_config(
             std::env::set_var(key, value);
         }
     }
+    
+    let _ = build_info; // build_info is attached to cli_config below
 
     // Pre-extract agent name and set ABK_AGENT_NAME BEFORE full config parsing.
     if let Ok(partial) = config_toml.parse::<toml::Value>() {

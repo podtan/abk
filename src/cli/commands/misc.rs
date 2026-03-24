@@ -61,8 +61,7 @@ pub fn count_tokens<C: CommandContext>(_ctx: &C, file: &PathBuf) -> CliResult<()
     // Use tiktoken_rs if available, otherwise fallback to character count
     #[cfg(feature = "tiktoken")]
     {
-        use tiktoken_rs::cl100k_base;
-        let bpe = cl100k_base()
+        let bpe = tiktoken_rs::cl100k_base()
             .map_err(|e| CliError::ExecutionError(format!("Failed to load tokenizer: {}", e)))?;
         let tokens = bpe.encode_with_special_tokens(&content);
         println!("Tokens: {}", tokens.len());

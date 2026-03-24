@@ -6,7 +6,7 @@
 #[cfg(feature = "registry-mcp")]
 use crate::config::McpConfig;
 #[cfg(feature = "registry-mcp")]
-use crate::registry::{McpClient, McpServerConfig as RegistryServerConfig, McpToolCallResult, ToolRegistry};
+use crate::registry::{McpClient, McpServerConfig as RegistryServerConfig, ToolRegistry};
 #[cfg(feature = "registry-mcp")]
 use anyhow::Result;
 #[cfg(feature = "registry-mcp")]
