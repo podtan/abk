@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.24] - 2026-04-04
+
+### Added
+- `RunOptions.on_checkpoint`: optional channel to send incremental `ResumeInfo` after each checkpoint, enabling TUI session continuity when ESC cancels mid-workflow
+
+### Changed
+- `run_task_from_raw_config()` accepts new `resume_info_tx` parameter for incremental resume info forwarding
+
 ## [0.5.23] - 2026-03-24
 
 ### Fixed

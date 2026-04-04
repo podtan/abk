@@ -24,6 +24,9 @@ pub struct RunOptions {
     /// When `Some`, the agent resumes from the specified checkpoint instead of
     /// starting a new session. The CLI flow (last_resume.json) is skipped.
     pub resume_info: Option<ResumeInfo>,
+    /// Optional channel to send incremental resume_info after each checkpoint.
+    /// Used by TUI to preserve session context when ESC cancels mid-workflow.
+    pub on_checkpoint: Option<tokio::sync::mpsc::UnboundedSender<Option<ResumeInfo>>>,
 }
 
 /// Execute an agent workflow
@@ -31,7 +34,7 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<TaskResult> {
-    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint } = options;
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
@@ -154,15 +157,26 @@ pub async fn execute_run<C: CommandContext>(
             } else {
                 ctx.log_info("Created new checkpoint with updated conversation including new task");
             }
+            // Send incremental resume info to caller (for ESC-cancel preservation)
+            if let Some(tx) = &on_checkpoint {
+                let _ = tx.send(agent.create_final_checkpoint_and_get_resume_info().await);
+            }
         }
         
         resume_result
     } else {
         // Start new session
         ctx.log_info(&format!("Starting new session: {}", task));
-        agent.start_session(&task, None)
+        let result = agent.start_session(&task, None)
             .await
-            .map_err(|e| CliError::ExecutionError(format!("Failed to start session: {}", e)))?
+            .map_err(|e| CliError::ExecutionError(format!("Failed to start session: {}", e)))?;
+
+        // Send incremental resume info so TUI can resume if ESC cancels
+        if let Some(tx) = &on_checkpoint {
+            let _ = tx.send(agent.create_final_checkpoint_and_get_resume_info().await);
+        }
+
+        result
     };
 
     if verbose {
@@ -184,6 +198,11 @@ pub async fn execute_run<C: CommandContext>(
 
     // Create final checkpoint and extract resume info for session continuity
     let final_resume_info = agent.create_final_checkpoint_and_get_resume_info().await;
+
+    // Also send via channel so TUI has it even if TaskResult return is lost (e.g. ESC)
+    if let Some(tx) = &on_checkpoint {
+        let _ = tx.send(final_resume_info.clone());
+    }
 
     match workflow_result {
         Ok(completion_reason) => {

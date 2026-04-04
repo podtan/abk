@@ -151,6 +151,7 @@ pub async fn run_task_from_raw_config(
     task: &str,
     output_sink: Option<crate::orchestration::output::SharedSink>,
     resume_info: Option<super::ResumeInfo>,
+    resume_info_tx: Option<tokio::sync::mpsc::UnboundedSender<Option<super::ResumeInfo>>>,
 ) -> Result<super::TaskResult, Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
@@ -184,6 +185,7 @@ pub async fn run_task_from_raw_config(
         verbose: false,
         output_sink,
         resume_info,
+        on_checkpoint: resume_info_tx,
     };
 
     let result = crate::cli::commands::run::execute_run(&context, options).await?;
@@ -808,6 +810,7 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         verbose,
         output_sink: None,
         resume_info: None, // CLI doesn't use TUI session continuity
+        on_checkpoint: None,
     };
 
     crate::cli::commands::run::execute_run(ctx, options).await.map(|_| ())
