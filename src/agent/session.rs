@@ -80,7 +80,7 @@ impl super::Agent {
     /// - Classification and template loading
     /// - Completion detection
     pub async fn run_workflow(&mut self, max_iterations: u32) -> Result<String> {
-        crate::orchestration::run_workflow(self, max_iterations).await
+        crate::orchestration::run_workflow(self, max_iterations, None).await
     }
 
     /// Run workflow using streaming approach.
@@ -91,7 +91,7 @@ impl super::Agent {
     /// - Classification and template loading
     /// - Completion detection via submit or markers
     pub async fn run_workflow_streaming(&mut self, max_iterations: u32) -> Result<String> {
-        crate::orchestration::run_workflow_streaming(self, max_iterations).await
+        crate::orchestration::run_workflow_streaming(self, max_iterations, None).await
     }
 
     /// Finalize the current checkpoint session when workflow completes or is interrupted.

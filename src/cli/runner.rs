@@ -141,6 +141,10 @@ pub async fn run_from_raw_config(
 ///   When `Some`, the agent resumes from the specified checkpoint instead of
 ///   starting a new session.
 ///
+/// * `cancel_token` - Optional cancellation token. When provided, the workflow
+///   checks this token at each iteration loop and before each API call, returning
+///   early with a `TaskResult` (success=false, error="Cancelled") if cancelled.
+///
 /// # Returns
 /// A `TaskResult` containing success/failure status and optional `ResumeInfo`
 /// for session continuity on the next call.
@@ -152,6 +156,7 @@ pub async fn run_task_from_raw_config(
     output_sink: Option<crate::orchestration::output::SharedSink>,
     resume_info: Option<super::ResumeInfo>,
     resume_info_tx: Option<tokio::sync::mpsc::UnboundedSender<Option<super::ResumeInfo>>>,
+    cancel_token: Option<tokio_util::sync::CancellationToken>,
 ) -> Result<super::TaskResult, Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
@@ -186,6 +191,7 @@ pub async fn run_task_from_raw_config(
         output_sink,
         resume_info,
         on_checkpoint: resume_info_tx,
+        cancel_token,
     };
 
     let result = crate::cli::commands::run::execute_run(&context, options).await?;
@@ -810,6 +816,7 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         verbose,
         output_sink: None,
         resume_info: None, // CLI doesn't use TUI session continuity
+    cancel_token: None, // CLI doesn't support cancellation
         on_checkpoint: None,
     };
 

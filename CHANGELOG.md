@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.25] - 2026-04-07
+
+### Added
+- `CancellationToken` support in orchestration workflow loops (`run_workflow`, `run_workflow_streaming`) for cooperative cancellation. When the token is cancelled, the workflow stops cleanly via `stop_session()` with proper checkpoint finalization.
+- `cancel_token` field on `RunOptions` to propagate cancellation tokens from callers through to the workflow loop.
+- `cancel_token` parameter on `run_task_from_raw_config()` enabling TUI/pass-through callers to abort workflows mid-execution.
+- `tokio-util` dependency (optional, gated behind `orchestration` feature) for `CancellationToken`.
+
+## [0.5.25] - 2026-04-07
+
+### Added
+- `CancellationToken` support in workflow orchestration — `run_workflow()` and `run_workflow_streaming()` accept `cancel_token: Option<CancellationToken>` and check cancellation at the top of each loop iteration, enabling cooperative cancellation of long-running workflows
+- `RunOptions.cancel_token` field — allows callers to pass a cancellation token through to the workflow loop
+- `run_task_from_raw_config()` accepts new `cancel_token` parameter for workflow cancellation support
+- `tokio-util` optional dependency, gated behind the `orchestration` feature
+
+### Changed
+- `run_workflow()` and `run_workflow_streaming()` signatures now include `cancel_token: Option<CancellationToken>` parameter (backward compatible — pass `None` for existing callers)
+
 ## [0.5.24] - 2026-04-04
 
 ### Added

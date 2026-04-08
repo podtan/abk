@@ -8,6 +8,7 @@ use crate::cli::ResumeInfo;
 use crate::cli::TaskResult;
 use crate::orchestration::AgentContext;
 use crate::agent::AgentMode;
+use tokio_util::sync::CancellationToken;
 
 /// Options for running an agent
 pub struct RunOptions {
@@ -27,6 +28,9 @@ pub struct RunOptions {
     /// Optional channel to send incremental resume_info after each checkpoint.
     /// Used by TUI to preserve session context when ESC cancels mid-workflow.
     pub on_checkpoint: Option<tokio::sync::mpsc::UnboundedSender<Option<ResumeInfo>>>,
+    /// Optional cancellation token for cooperative workflow cancellation (e.g., ESC in TUI).
+    /// When cancelled, the workflow loop checks this at each iteration and returns early.
+    pub cancel_token: Option<CancellationToken>,
 }
 
 /// Execute an agent workflow
@@ -34,7 +38,7 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<TaskResult> {
-    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token } = options;
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
@@ -190,10 +194,10 @@ pub async fn execute_run<C: CommandContext>(
 
     let workflow_result = if streaming_enabled {
         ctx.log_info("🚀 Using streaming workflow");
-        crate::orchestration::run_workflow_streaming(&mut agent, max_iterations).await
+        crate::orchestration::run_workflow_streaming(&mut agent, max_iterations, cancel_token.clone()).await
     } else {
         ctx.log_info("📞 Using traditional iterative workflow");
-        crate::orchestration::run_workflow(&mut agent, max_iterations).await
+        crate::orchestration::run_workflow(&mut agent, max_iterations, cancel_token.clone()).await
     };
 
     // Create final checkpoint and extract resume info for session continuity

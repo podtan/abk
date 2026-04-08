@@ -7,6 +7,7 @@
 //! architectural changes on the consuming agent.
 
 use anyhow::{Context, Result};
+use tokio_util::sync::CancellationToken;
 use umf::GenerateResult;
 use std::collections::HashMap;
 
@@ -116,7 +117,7 @@ pub trait AgentContext {
 }
 
 /// Run non-streaming workflow - reusable for any agent
-pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -> Result<String> {
+pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, cancel_token: Option<CancellationToken>) -> Result<String> {
     if !agent.is_running() {
         return Ok("Agent session not started. Call start_session() first.".to_string());
     }
@@ -131,6 +132,12 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
     }
 
     for iteration in agent.current_iteration()..=max_iterations {
+        // Check cancellation at the top of each iteration
+        if let Some(ref token) = cancel_token {
+            if token.is_cancelled() {
+                return stop_session(agent, "Cancelled by user").await;
+            }
+        }
         agent.set_current_iteration(iteration);
 
         // Log iteration
@@ -187,13 +194,13 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32) -
 }
 
 /// Run streaming workflow
-pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iterations: u32) -> Result<String> {
+pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iterations: u32, cancel_token: Option<CancellationToken>) -> Result<String> {
     if !agent.is_running() {
         return Ok("Agent session not started. Call start_session() first.".to_string());
     }
 
     if !agent.streaming_enabled() {
-        return run_workflow(agent, max_iterations).await;
+        return run_workflow(agent, max_iterations, cancel_token).await;
     }
 
     agent.output_sink().emit(OutputEvent::WorkflowStarted {
@@ -202,6 +209,13 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
     agent.log_info("🚀 Starting TRUE unified streaming workflow");
 
     loop {
+        // Check cancellation at the top of each loop iteration
+        if let Some(ref token) = cancel_token {
+            if token.is_cancelled() {
+                return stop_session(agent, "Cancelled by user").await;
+            }
+        }
+
         // Checkpoint
         if agent.should_checkpoint() {
             if let Err(e) = agent.create_workflow_checkpoint(agent.current_iteration()).await {
