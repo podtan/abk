@@ -187,6 +187,17 @@ pub async fn execute_run<C: CommandContext>(
         ctx.log_info(&result);
     }
 
+    // Bridge CancellationToken → cats cancel_signal: when ESC is pressed in the TUI,
+    // the monitor task propagates the signal so running bash commands are killed.
+    if let Some(ref token) = cancel_token {
+        let signal = agent.tool_cancel_signal();
+        let child_token = token.clone();
+        tokio::spawn(async move {
+            let _ = child_token.cancelled().await;
+            signal.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+    }
+
     // Run the workflow - use streaming approach if enabled
     ctx.log_info("Starting workflow execution...");
     let streaming_enabled = agent.is_streaming_enabled();

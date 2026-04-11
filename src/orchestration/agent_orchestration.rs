@@ -178,7 +178,7 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
         match response {
             GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                 // Execute tools and continue loop
-                handle_tool_calls(agent, tool_calls, content, reasoning).await?;
+                handle_tool_calls(agent, tool_calls, content, reasoning, cancel_token.as_ref()).await?;
             }
             GenerateResult::Content { text: response_text, reasoning } => {
                 // LLM finished naturally - stop the loop.
@@ -264,7 +264,7 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 match result {
                     GenerateResult::ToolCalls { calls: tool_calls, content, reasoning } => {
                         // Execute tools and continue loop
-                        handle_tool_calls(agent, tool_calls, content, reasoning).await?;
+                        handle_tool_calls(agent, tool_calls, content, reasoning, cancel_token.as_ref()).await?;
                         continue;
                     }
                     GenerateResult::Content { text: response_text, reasoning } => {
@@ -353,6 +353,7 @@ async fn handle_tool_calls<A: AgentContext>(
     tool_calls: Vec<umf::ToolCall>,
     content: Option<String>,
     reasoning: Option<String>,
+    cancel_token: Option<&CancellationToken>,
 ) -> Result<()> {
     let tool_names: Vec<String> = tool_calls.iter().map(|tc| tc.function.name.clone()).collect();
     agent.output_sink().emit(OutputEvent::ToolsExecuting {
@@ -379,6 +380,15 @@ async fn handle_tool_calls<A: AgentContext>(
 
     // Execute tools
     let results = agent.execute_tool_calls_structured(tool_calls).await?;
+
+    // After tools finish, check if we were cancelled during execution.
+    // This allows ESC pressed during a long bash command to take effect
+    // immediately after the tool returns (instead of waiting for the next iteration).
+    if let Some(token) = cancel_token {
+        if token.is_cancelled() {
+            return Err(anyhow::anyhow!("Cancelled by user"));
+        }
+    }
 
     // Emit per-tool completion events (ToolCompleted variant exists but was never wired)
     for result in &results {

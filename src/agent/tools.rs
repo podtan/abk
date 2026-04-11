@@ -1,6 +1,8 @@
 //! Tool execution - delegates to cats crate or MCP servers
 
 use crate::agent::types::ToolExecutionResult;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use umf::ToolCall;
 use anyhow::Result;
 
@@ -139,5 +141,27 @@ impl super::Agent {
             cats::ToolCallInfo::new(&tc.function.name, &tc.function.arguments)
         ).collect();
         cats::generate_assistant_content(&infos)
+    }
+
+    /// Request cancellation of the currently running tool (e.g., bash command).
+    /// Sets the cancel signal in the tool registry's shared `ToolState`.
+    /// Request cancellation of the currently running tool (e.g., bash command).
+    /// Sets the cancel signal in the tool registry's shared `ToolState`.
+    pub fn cancel_tool_execution(&self) {
+        let state = self.tool_registry.get_state();
+        if let Ok(guard) = state.lock() {
+            guard.request_cancel();
+        };
+    }
+
+    /// Return a clone of the `Arc<AtomicBool>` cancel signal from the tool
+    /// registry's `ToolState`.  The caller can `.store(true, Relaxed)` on it
+    /// to kill a running bash child process without holding the Mutex.
+    pub fn tool_cancel_signal(&self) -> Arc<AtomicBool> {
+        let state = self.tool_registry.get_state();
+        state
+            .lock()
+            .map(|g| g.cancel_signal())
+            .unwrap_or_else(|_| Arc::new(AtomicBool::new(false)))
     }
 }
