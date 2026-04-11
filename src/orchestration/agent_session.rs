@@ -368,6 +368,7 @@ where
             // Log iteration with context
             let context_tokens = self.chat_formatter.count_tokens();
             let context_info = Some(format!("Context = {}", context_tokens));
+            let _ = context_info; // used by log_workflow_iteration above, suppress warning
             self.logger.log_workflow_iteration(iteration, context_info.as_deref())?;
 
             // Create checkpoint if enabled
@@ -465,12 +466,19 @@ where
             // Log API call
             self.api_call_count += 1;
             let context_tokens = self.chat_formatter.count_tokens();
+            let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
+            let tool_tokens = tools.as_ref()
+                .map(|t| super::agent_orchestration::count_tool_tokens(t))
+                .unwrap_or(0);
+            let total_tokens = context_tokens + tool_tokens;
             self.logger.info(&format!(
-                "🔥 API Call {} | Context={} | TRUE Unified Streaming | Model: {} | Tools: {} | Provider: {}",
+                "🔥 API Call {} | Ctx={}  (Msg={}, Tool={})  | TRUE Unified Streaming | Model: {} | Tools: {} | Provider: {}",
                 self.api_call_count,
+                total_tokens,
                 context_tokens,
+                tool_tokens,
                 self.provider.default_model(),
-                tools.as_ref().map(|t| t.len()).unwrap_or(0),
+                tool_count,
                 self.provider.provider_name()
             ));
 

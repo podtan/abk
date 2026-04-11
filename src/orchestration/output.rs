@@ -33,6 +33,8 @@ pub enum OutputEvent {
         tool_count: usize,
         streaming: bool,
         context_tokens: usize,
+        /// Token count of tool definitions sent to the API
+        tool_tokens: usize,
     },
 
     /// Received a full LLM response (non-streaming or accumulated)
@@ -89,9 +91,10 @@ impl std::fmt::Display for OutputEvent {
             Self::WorkflowCompleted { reason, iterations } => {
                 write!(f, "✅ Workflow completed after {} iterations: {}", iterations, reason)
             }
-            Self::ApiCallStarted { call_number, model, tool_count, streaming, context_tokens } => {
+            Self::ApiCallStarted { call_number, model, tool_count, streaming, context_tokens, tool_tokens } => {
                 let mode = if *streaming { "Streaming" } else { "Non-streaming" };
-                write!(f, "🔥 API Call {} | Context={} | {} | Model: {} | Tools: {}", call_number, context_tokens, mode, model, tool_count)
+                let total = context_tokens + tool_tokens;
+                write!(f, "🔥 API Call {} | Ctx={} [Msg={},Tool={}] | {} | Model: {} | Tools: {}", call_number, total, context_tokens, tool_tokens, mode, model, tool_count)
             }
             Self::LlmResponse { text, model } => {
                 write!(f, "📡 LLM Response ({}):\n{}", model, text)

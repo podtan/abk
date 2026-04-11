@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use async_trait::async_trait;
 
 #[cfg(feature = "orchestration")]
-use umf::GenerateResult;
+use umf::{count_tokens_for_text, GenerateResult};
 
 /// Workflow execution status
 #[derive(Debug, Clone, PartialEq)]
@@ -272,17 +272,20 @@ impl AgentRuntime {
             // Get current messages
             let messages = formatter.to_messages();
             let context_tokens = formatter.count_tokens();
-            
-            self.log_info(&format!("🔥 Iteration {} | Context={} tokens | Model: {} | Provider: {}", 
-                     iteration, context_tokens, provider.model_name(), provider.provider_name()));
-
             // Prepare tools
             let available_tools = tools.get_schemas();
+            let tool_tokens = available_tools.iter()
+                .map(|t| count_tokens_for_text(&serde_json::to_string(t).unwrap_or_default()))
+                .sum::<usize>();
+            let total_tokens = context_tokens + tool_tokens;
             let tools_option = if !available_tools.is_empty() {
                 Some(available_tools)
             } else {
                 None
             };
+
+            self.log_info(&format!("🔥 Iteration {} | Ctx={} (Msg={},Tool={}) tokens | Model: {} | Provider: {}", 
+                     iteration, total_tokens, context_tokens, tool_tokens, provider.model_name(), provider.provider_name()));
 
             // Generate response with retry logic
             let max_retries = 3;

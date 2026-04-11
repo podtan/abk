@@ -12,6 +12,7 @@ use umf::GenerateResult;
 use std::collections::HashMap;
 
 use super::output::{OutputEvent, SharedSink};
+use umf::chatml::count_tokens_for_text;
 
 /// Tool execution result (re-export from tools module to avoid circular dependency)
 #[derive(Debug, Clone)]
@@ -229,17 +230,22 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
         // Log API call
         agent.increment_api_call_count();
         let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        let tool_tokens = tools.as_ref().map(|t| count_tool_tokens(t)).unwrap_or(0);
+        let msg_tokens = agent.count_tokens();
         agent.output_sink().emit(OutputEvent::ApiCallStarted {
             call_number: agent.api_call_count(),
             model: agent.default_model(),
             tool_count,
             streaming: true,
-            context_tokens: agent.count_tokens(),
+            context_tokens: msg_tokens,
+            tool_tokens,
         });
         agent.log_info(&format!(
-            "🔥 API Call {} | Context={} | Streaming | Model: {} | Tools: {}",
+            "🔥 API Call {} | Ctx={}(Msg={},Tool={}) | Streaming | Model: {} | Tools: {}",
             agent.api_call_count(),
-            agent.count_tokens(),
+            msg_tokens + tool_tokens,
+            msg_tokens,
+            tool_tokens,
             agent.default_model(),
             tool_count
         ));
@@ -317,16 +323,22 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
         
         agent.increment_api_call_count();
         let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        let tool_tokens = tools.as_ref().map(|t| count_tool_tokens(t)).unwrap_or(0);
+        let msg_tokens = agent.count_tokens();
         agent.output_sink().emit(OutputEvent::ApiCallStarted {
             call_number: agent.api_call_count(),
             model: agent.default_model(),
             tool_count,
             streaming: streaming_enabled,
-            context_tokens: agent.count_tokens(),
+            context_tokens: msg_tokens,
+            tool_tokens,
         });
         agent.log_info(&format!(
-            "🔥 API Call {} | Iteration {} | Model: {} | Tools: {}",
+            "🔥 API Call {} | Ctx={}(Msg={},Tool={}) | Iteration {} | Model: {} | Tools: {}",
             agent.api_call_count(),
+            msg_tokens + tool_tokens,
+            msg_tokens,
+            tool_tokens,
             agent.current_iteration(),
             agent.default_model(),
             tool_count
@@ -512,6 +524,12 @@ async fn stop_session<A: AgentContext>(agent: &mut A, reason: &str) -> Result<St
     agent.log_completion(reason)?;
     
     Ok(format!("Session completed: {}", reason))
+}
+
+/// Count tokens consumed by tool definitions sent to the API.
+pub(crate) fn count_tool_tokens(tools: &[umf::Tool]) -> usize {
+    let json = serde_json::to_string(tools).unwrap_or_default();
+    count_tokens_for_text(&json)
 }
 
 /// Get tools for current call (exclude classify_task if done)
