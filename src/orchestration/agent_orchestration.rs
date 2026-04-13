@@ -112,6 +112,16 @@ pub trait AgentContext {
     // Output sink for structured events (TUI/CLI/log consumers)
     fn output_sink(&self) -> &SharedSink;
 
+    // Optional channel to send incremental resume_info after each checkpoint.
+    // Used by TUI to preserve session context when ESC cancels mid-workflow.
+    // Returns a cloned sender to avoid borrow conflicts with &mut self methods.
+    fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>;
+
+    /// Create a final checkpoint and return resume info for session continuity.
+    /// Called by the orchestration layer to send incremental resume_info after
+    /// each workflow iteration's checkpoint (for TUI ESC-cancel preservation).
+    async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::cli::ResumeInfo>;
+
     // LLM helpers
     fn parse_response(&self, response: &str) -> (Option<String>, Option<String>, bool);
     fn extract_tool_calls(&self, response: &str) -> Result<Vec<umf::ToolCall>>;
@@ -150,6 +160,9 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
             if let Err(e) = agent.create_workflow_checkpoint(iteration).await {
                 agent.log_error(&format!("Failed to create checkpoint: {}", e), None)?;
             }
+            // Send incremental resume_info so TUI can preserve context on ESC cancel.
+            // No-op when no channel is registered (non-TUI mode).
+            send_checkpoint_resume_info(agent).await;
         }
 
         // Limit history
@@ -222,6 +235,9 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
             if let Err(e) = agent.create_workflow_checkpoint(agent.current_iteration()).await {
                 agent.log_error(&format!("Checkpoint failed: {}", e), None)?;
             }
+            // Send incremental resume_info so TUI can preserve context on ESC cancel.
+            // No-op when no channel is registered (non-TUI mode).
+            send_checkpoint_resume_info(agent).await;
         }
 
         // Get tools
@@ -524,6 +540,19 @@ async fn stop_session<A: AgentContext>(agent: &mut A, reason: &str) -> Result<St
     agent.log_completion(reason)?;
     
     Ok(format!("Session completed: {}", reason))
+}
+
+/// Send incremental resume_info via the checkpoint channel (if registered).
+/// No-op when no channel is set (non-TUI mode).
+async fn send_checkpoint_resume_info<A: AgentContext>(agent: &mut A) {
+    let tx = match agent.take_on_checkpoint_sender() {
+        Some(tx) => tx,
+        None => return,
+    };
+    // Put the sender back after the mutable borrow below completes.
+    // We only need it for the send, so we temporarily own it.
+    let resume_info = agent.create_final_checkpoint_and_get_resume_info().await;
+    let _ = tx.send(resume_info);
 }
 
 /// Count tokens consumed by tool definitions sent to the API.

@@ -344,6 +344,17 @@ impl AgentContext for super::Agent {
         &self.output_sink
     }
 
+    // Checkpoint channel for incremental resume_info (take-and-put-back pattern)
+    fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>> {
+        self.on_checkpoint.take()
+    }
+
+    /// Create a final checkpoint and return resume info for session continuity.
+    /// Delegates to Agent's method which handles SessionManager take/put pattern.
+    async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::cli::ResumeInfo> {
+        self.create_final_checkpoint_and_get_resume_info().await
+    }
+
     // LLM helpers
     fn parse_response(&self, response: &str) -> (Option<String>, Option<String>, bool) {
         self.parse_response(response)

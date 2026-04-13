@@ -103,6 +103,12 @@ pub async fn execute_run<C: CommandContext>(
         agent.set_output_sink(crate::orchestration::output::noop_sink());
     }
 
+    // Wire up incremental checkpoint channel so the workflow can send resume_info
+    // after each iteration's checkpoint.  Non-TUI callers pass None → no-ops.
+    if let Some(ref tx) = on_checkpoint {
+        agent.set_on_checkpoint_sender(Some(tx.clone()));
+    }
+
     // Check for resume context — from TUI parameter OR from last_resume.json
     let resume_context = if let Some(ref info) = resume_info {
         // TUI provided resume info directly (no file needed)

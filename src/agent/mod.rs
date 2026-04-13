@@ -90,6 +90,11 @@ pub struct Agent {
     // Output sink for structured events (TUI/CLI consumers)
     output_sink: crate::orchestration::output::SharedSink,
 
+    // Optional channel to send incremental resume_info after each checkpoint.
+    // Used by TUI to preserve session context when ESC cancels mid-workflow.
+    // When None (non-TUI mode), sends are no-ops.
+    on_checkpoint: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+
     // Conversation turn management for X-Request-Id (like VS Code Copilot)
     current_turn_id: Option<String>,
     turn_request_count: u32,
@@ -221,6 +226,7 @@ impl Agent {
             current_turn_id: None,
             turn_request_count: 0,
             output_sink: crate::orchestration::output::stdout_sink(),
+            on_checkpoint: None,
         })
     }
 
@@ -426,6 +432,29 @@ impl Agent {
     /// `println!` calls from corrupting the alternate screen buffer.
     pub fn set_output_sink(&mut self, sink: crate::orchestration::output::SharedSink) {
         self.output_sink = sink;
+    }
+
+    /// Set the optional channel to send incremental resume_info after each checkpoint.
+    ///
+    /// When `Some`, the orchestration layer sends `Option<ResumeInfo>` through this
+    /// channel every time a workflow checkpoint is created. This enables the TUI to
+    /// preserve full session context when ESC cancels mid-workflow (including during
+    /// long-running tool execution).
+    ///
+    /// When `None` (non-TUI mode), all sends are no-ops — zero overhead on the CLI path.
+    pub fn set_on_checkpoint_sender(
+        &mut self,
+        sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+    ) {
+        self.on_checkpoint = sender;
+    }
+
+    /// Restore the checkpoint sender after a take (for reuse across workflow iterations).
+    pub fn restore_on_checkpoint_sender(
+        &mut self,
+        sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+    ) {
+        self.on_checkpoint = sender;
     }
 
     /// Get the current mode.
