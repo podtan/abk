@@ -117,6 +117,9 @@ pub trait AgentContext {
     // Returns a cloned sender to avoid borrow conflicts with &mut self methods.
     fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>;
 
+    /// Restore the checkpoint sender after a take (for reuse across workflow iterations).
+    fn restore_on_checkpoint_sender(&mut self, sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>);
+
     /// Create a final checkpoint and return resume info for session continuity.
     /// Called by the orchestration layer to send incremental resume_info after
     /// each workflow iteration's checkpoint (for TUI ESC-cancel preservation).
@@ -549,10 +552,10 @@ async fn send_checkpoint_resume_info<A: AgentContext>(agent: &mut A) {
         Some(tx) => tx,
         None => return,
     };
-    // Put the sender back after the mutable borrow below completes.
-    // We only need it for the send, so we temporarily own it.
     let resume_info = agent.create_final_checkpoint_and_get_resume_info().await;
     let _ = tx.send(resume_info);
+    // Restore the sender so subsequent iterations can also send resume_info.
+    agent.restore_on_checkpoint_sender(Some(tx));
 }
 
 /// Count tokens consumed by tool definitions sent to the API.
