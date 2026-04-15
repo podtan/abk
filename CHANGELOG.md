@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.26] - 2026-04-08
+
+### Added
+- `on_checkpoint` channel sender is now restored after each send so it survives across multiple workflow iterations
+- Incremental `resume_info` is sent after each workflow iteration for real-time session continuity
+- `tool_tokens` breakdown in context size reporting for better visibility into tool usage costs
+
+### Fixed
+- `on_checkpoint` sender is no longer consumed after the first iteration — checkpoint updates now persist across the full workflow lifecycle
+- `create_final_checkpoint_and_get_resume_info` now reads iteration from `AgentContext` instead of stale `SessionManager` field
+- Removed stale `submit` tool reference from simple lifecycle system message
+
+### Changed
+- `CancellationToken` is now bridged to `cats` `cancel_signal` for instant ESC kill in TUI
+- CancellationToken is propagated through the workflow for cooperative cancellation
+- Updated `umf` dependency to 0.2.5 (published crate)
+- Updated `cats` dependency to 0.1.15 (published crate)
+- Fixed all compiler warnings across the codebase
+
 ## [0.5.25] - 2026-04-07
 
 ### Added
