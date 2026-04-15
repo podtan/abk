@@ -103,10 +103,18 @@ impl ExtensionProvider {
             .and_then(|s| s.parse().ok())
             .unwrap_or(120);
 
+        // pool_idle_timeout must be >= streaming timeout (600s) to prevent the
+        // connection pool from reclaiming idle connections during slow LLM
+        // streaming responses.  Configurable via LLM_POOL_IDLE_SECONDS env var.
+        let pool_idle_secs = std::env::var("LLM_POOL_IDLE_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(600);
+
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(30))
-            .pool_idle_timeout(Duration::from_secs(60))
+            .pool_idle_timeout(Duration::from_secs(pool_idle_secs))
             .build()
             .context("Failed to create HTTP client")?;
 

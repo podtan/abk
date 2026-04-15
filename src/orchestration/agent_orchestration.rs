@@ -225,6 +225,9 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
     });
     agent.log_info("🚀 Starting TRUE unified streaming workflow");
 
+    let mut stream_retry_count: u32 = 0;
+    let max_stream_retries: u32 = 3; // Same as default max_retries
+
     loop {
         // Check cancellation at the top of each loop iteration
         if let Some(ref token) = cancel_token {
@@ -273,6 +276,7 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
         let max_tokens = agent.max_tokens();
         match agent.generate_with_provider(tools, max_tokens, true).await {
             Ok(result) => {
+                stream_retry_count = 0; // Reset on success
                 agent.output_sink().emit(OutputEvent::Info {
                     message: "📡 Streaming API call completed successfully".to_string(),
                 });
@@ -312,12 +316,28 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                 } else if err_msg.contains("API timeout") || err_msg.contains("rate limit")
                     || err_msg.contains("finish_reason:") || err_msg.contains("network_error")
                     || err_msg.contains("Stream error") {
+                    stream_retry_count += 1;
+                    if stream_retry_count > max_stream_retries {
+                        agent.log_error(&format!(
+                            "Streaming failed after {} retries: {}",
+                            max_stream_retries, err_msg
+                        ), None)?;
+                        return Err(anyhow::anyhow!(
+                            "Streaming failed after {} retries: {}",
+                            max_stream_retries, err_msg
+                        )).context("Streaming workflow failed");
+                    }
+                    // Exponential backoff: 2s, 4s, 8s
+                    let backoff = std::time::Duration::from_secs(2u64.pow(stream_retry_count - 1));
                     agent.output_sink().emit(OutputEvent::Error {
-                        message: format!("Streaming failed (retryable): {}", err_msg),
+                        message: format!("Streaming failed (retryable, attempt {}/{}): {}", stream_retry_count, max_stream_retries, err_msg),
                         context: None,
                     });
-                    agent.log_error(&format!("Streaming failed (retryable): {}", err_msg), None)?;
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    agent.log_error(&format!(
+                        "Streaming failed (retryable, attempt {}/{}): {}",
+                        stream_retry_count, max_stream_retries, err_msg
+                    ), None)?;
+                    tokio::time::sleep(backoff).await;
                     continue;
                 }
                 agent.output_sink().emit(OutputEvent::Error {

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.27] - 2026-04-15
+
+### Fixed
+- Fixed infinite streaming retry loop that sent duplicate LLM requests every ~62 seconds when the provider was slow — `run_workflow_streaming()` now caps retries at 3 with exponential backoff (2s, 4s, 8s) instead of retrying forever with a fixed 2s delay
+- Fixed `pool_idle_timeout` (60s) killing slow streaming connections mid-response — increased to 600s to match the per-request streaming timeout, eliminating the connection-pool reclaim that triggered the retry cascade
+
+### Changed
+- `pool_idle_timeout` is now configurable via `LLM_POOL_IDLE_SECONDS` env var (defaults to 600s)
+
 ## [0.5.26] - 2026-04-08
 
 ### Added
