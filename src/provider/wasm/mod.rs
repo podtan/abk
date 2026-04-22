@@ -471,11 +471,11 @@ impl LlmProvider for WasmProvider {
                     }
                 })
                 .collect();
-            Ok(GenerateResponse::ToolCalls(invocations))
+            Ok(GenerateResponse::ToolCalls { calls: invocations, reasoning: result.reasoning })
         } else if let Some(content) = result.content {
             Ok(GenerateResponse::Content {
                 text: content,
-                reasoning: None, // Non-streaming doesn't have reasoning
+                reasoning: result.reasoning,
             })
         } else {
             anyhow::bail!("Empty response from WASM parse-response")
@@ -544,7 +544,14 @@ impl LlmProvider for WasmProvider {
                             let _ = tx.send(Ok(StreamChunk::Text(chunk_str)));
                         }
                     }
-                    GenerateResponse::ToolCalls(calls) => {
+                    GenerateResponse::ToolCalls { calls, reasoning } => {
+                        // Send reasoning first if present
+                        if let Some(reasoning_text) = reasoning {
+                            for chunk in reasoning_text.chars().collect::<Vec<_>>().chunks(10) {
+                                let chunk_str: String = chunk.iter().collect();
+                                let _ = tx.send(Ok(StreamChunk::Reasoning(chunk_str)));
+                            }
+                        }
                         // Send tool calls as deltas
                         for (index, call) in calls.into_iter().enumerate() {
                             // Send tool call start (with id and name)

@@ -27,7 +27,12 @@ pub enum GenerateResponse {
         reasoning: Option<String>,
     },
     /// Tool calls that need to be executed
-    ToolCalls(Vec<ToolInvocation>),
+    ToolCalls {
+        /// The tool call invocations
+        calls: Vec<ToolInvocation>,
+        /// Reasoning/thinking content (for thinking models like GLM, DeepSeek)
+        reasoning: Option<String>,
+    },
 }
 
 /// A tool invocation from the LLM
@@ -70,7 +75,10 @@ pub type StreamingResponse = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Se
 ///                 println!("Reasoning: {}", r);
 ///             }
 ///         }
-///         GenerateResponse::ToolCalls(calls) => println!("Tool calls: {:?}", calls),
+        ///     GenerateResponse::ToolCalls { calls, reasoning } => {
+        ///         println!("Tool calls: {:?}", calls);
+        ///         if let Some(r) = reasoning { println!("Reasoning: {}", r); }
+        ///     }
 ///     }
 ///     Ok(())
 /// }

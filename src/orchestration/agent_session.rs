@@ -658,9 +658,9 @@ where
 
         match response {
             GenerateResponse::Content { text, reasoning } => Ok(GenerateResult::Content { text, reasoning }),
-            GenerateResponse::ToolCalls(invocations) => {
+            GenerateResponse::ToolCalls { calls: invocations, reasoning } => {
                 let tool_calls = ToolAdapter::invocations_to_tool_calls(&invocations)?;
-                Ok(GenerateResult::ToolCalls { calls: tool_calls, content: None, reasoning: None })
+                Ok(GenerateResult::ToolCalls { calls: tool_calls, content: None, reasoning })
             }
         }
     }
@@ -707,7 +707,10 @@ where
                     provider_metadata: std::collections::HashMap::new(),
                 });
             }
-            Ok(crate::provider::GenerateResponse::ToolCalls(invocations))
+            Ok(crate::provider::GenerateResponse::ToolCalls {
+                calls: invocations,
+                reasoning: if accumulated.reasoning.is_empty() { None } else { Some(accumulated.reasoning) },
+            })
         } else {
             Ok(crate::provider::GenerateResponse::Content {
                 text: accumulated.text,

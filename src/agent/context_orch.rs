@@ -169,7 +169,7 @@ impl AgentContext for super::Agent {
             
             match provider_response {
                 GenerateResponse::Content { text, reasoning } => umf::GenerateResult::Content { text, reasoning },
-                GenerateResponse::ToolCalls(invocations) => {
+                GenerateResponse::ToolCalls { calls: invocations, reasoning } => {
                     let tool_calls = invocations
                         .into_iter()
                         .map(|inv| umf::ToolCall {
@@ -181,7 +181,7 @@ impl AgentContext for super::Agent {
                             },
                         })
                         .collect();
-                    umf::GenerateResult::ToolCalls { calls: tool_calls, content: None, reasoning: None }
+                    umf::GenerateResult::ToolCalls { calls: tool_calls, content: None, reasoning }
                 }
             }
         };

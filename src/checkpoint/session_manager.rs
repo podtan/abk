@@ -542,16 +542,12 @@ impl SessionManager {
                     context.add_user_message(msg.content.clone(), msg.name.clone());
                 }
                 "assistant" => {
-                    // Check if this assistant message has tool_calls
-                    if let Some(ref tool_calls) = msg.tool_calls {
-                        context.add_assistant_message_with_tool_calls(
-                            msg.content.clone(),
-                            tool_calls.clone(),
-                            msg.name.clone(),
-                        );
-                    } else {
-                        context.add_assistant_message(msg.content.clone(), msg.name.clone());
-                    }
+                    context.add_assistant_message_with_reasoning(
+                        msg.content.clone(),
+                        msg.reasoning.clone(),
+                        msg.tool_calls.clone(),
+                        msg.name.clone(),
+                    );
                 }
                 "tool" => {
                     // Use the tool_call_id from the message, or fallback to a generic one

@@ -302,11 +302,11 @@ impl LlmProvider for ExtensionProvider {
                     provider_metadata: std::collections::HashMap::new(),
                 })
                 .collect();
-            Ok(GenerateResponse::ToolCalls(invocations))
+            Ok(GenerateResponse::ToolCalls { calls: invocations, reasoning: assistant_msg.reasoning })
         } else {
             Ok(GenerateResponse::Content {
                 text: assistant_msg.content.unwrap_or_default(),
-                reasoning: None, // Non-streaming doesn't have reasoning
+                reasoning: assistant_msg.reasoning,
             })
         }
     }
@@ -354,7 +354,14 @@ impl LlmProvider for ExtensionProvider {
                             let _ = tx.send(Ok(StreamChunk::Text(chunk_str)));
                         }
                     }
-                    GenerateResponse::ToolCalls(calls) => {
+                    GenerateResponse::ToolCalls { calls, reasoning } => {
+                        // Send reasoning first if present
+                        if let Some(reasoning_text) = reasoning {
+                            for chunk in reasoning_text.chars().collect::<Vec<_>>().chunks(10) {
+                                let chunk_str: String = chunk.iter().collect();
+                                let _ = tx.send(Ok(StreamChunk::Reasoning(chunk_str)));
+                            }
+                        }
                         for (index, call) in calls.into_iter().enumerate() {
                             let _ = tx.send(Ok(StreamChunk::ToolCallDelta {
                                 index,
