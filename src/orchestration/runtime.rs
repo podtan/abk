@@ -120,10 +120,13 @@ pub trait OrchestrationFormatter: Send + Sync {
     /// Get messages in OpenAI format
     fn to_messages(&self) -> Vec<serde_json::Value>;
     
-    /// Add assistant message with optional tool calls
-    fn add_assistant_message(&mut self, content: String, tool_calls: Option<Vec<umf::ToolCall>>);
-    
-    /// Add assistant message with reasoning content
+    /// Add assistant message (text-only, no tool calls)
+    fn add_assistant_message(&mut self, content: String);
+
+    /// Add assistant message with tool calls
+    fn add_assistant_message_with_tool_calls(&mut self, content: String, tool_calls: Vec<umf::ToolCall>);
+
+    /// Add assistant message with reasoning content and optional tool calls
     fn add_assistant_message_with_reasoning(&mut self, content: String, reasoning: String, tool_calls: Option<Vec<umf::ToolCall>>);
     
     /// Add tool result message
@@ -331,7 +334,7 @@ impl AgentRuntime {
                     if let Some(reasoning_content) = reasoning {
                         formatter.add_assistant_message_with_reasoning(assistant_content, reasoning_content, Some(tool_calls.clone()));
                     } else {
-                        formatter.add_assistant_message(assistant_content, Some(tool_calls.clone()));
+                        formatter.add_assistant_message_with_tool_calls(assistant_content, tool_calls.clone());
                     }
 
                     // Execute tools
@@ -362,7 +365,7 @@ impl AgentRuntime {
                     if let Some(reasoning_content) = reasoning {
                         formatter.add_assistant_message_with_reasoning(content.clone(), reasoning_content, None);
                     } else {
-                        formatter.add_assistant_message(content.clone(), None);
+                        formatter.add_assistant_message(content.clone());
                     }
                     self.log_info("✅ Task completed");
                     self.stop(None).await?;

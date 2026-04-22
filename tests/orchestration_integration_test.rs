@@ -34,7 +34,7 @@ impl OrchestrationProvider for MockProvider {
     ) -> Result<GenerateResult> {
         let mut responses = self.responses.lock().unwrap();
         if responses.is_empty() {
-            Ok(GenerateResult::Content("TASK_COMPLETE".to_string()))
+            Ok(GenerateResult::Content { text: "TASK_COMPLETE".to_string(), reasoning: None })
         } else {
             Ok(responses.remove(0))
         }
@@ -75,6 +75,7 @@ impl OrchestrationTools for MockTools {
             tool_name: tool_name.to_string(),
             content: format!("Executed {}", tool_name),
             success: true,
+            description: None,
         };
         
         self.results.lock().unwrap().push(result.clone());
@@ -120,12 +121,17 @@ impl OrchestrationFormatter for MockFormatter {
             .collect()
     }
 
-    fn add_assistant_message(&mut self, content: String, _tool_calls: Option<Vec<ToolCall>>) {
+    fn add_assistant_message(&mut self, content: String) {
         self.messages.lock().unwrap().push(format!("assistant: {}", content));
-    }
+ }
 
     fn add_assistant_message_with_reasoning(&mut self, content: String, reasoning: String, _tool_calls: Option<Vec<ToolCall>>) {
         self.messages.lock().unwrap().push(format!("assistant: {} [reasoning: {}]", content, reasoning));
+    }
+
+    fn add_assistant_message_with_tool_calls(&mut self, content: String, tool_calls: Vec<ToolCall>) {
+        let names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
+        self.messages.lock().unwrap().push(format!("assistant: {} [tool_calls: {}]", content, names.join(", ")));
     }
 
     fn add_tool_message(&mut self, content: String, _tool_call_id: String, tool_name: String) {
@@ -183,8 +189,8 @@ async fn test_orchestration_with_tool_calls() -> Result<()> {
     };
 
     let provider = MockProvider::new(vec![
-        GenerateResult::ToolCalls { calls: vec![tool_call.clone()], content: None },
-        GenerateResult::Content("TASK_COMPLETE".to_string()),
+        GenerateResult::ToolCalls { calls: vec![tool_call.clone()], content: None, reasoning: None },
+        GenerateResult::Content { text: "TASK_COMPLETE".to_string(), reasoning: None },
     ]);
 
     let tools = MockTools::new();
@@ -226,9 +232,9 @@ async fn test_orchestration_with_tool_calls() -> Result<()> {
 async fn test_orchestration_max_iterations() -> Result<()> {
     // Provider that always returns content (never completes)
     let provider = MockProvider::new(vec![
-        GenerateResult::Content("Still working...".to_string()),
-        GenerateResult::Content("Still working...".to_string()),
-        GenerateResult::Content("Still working...".to_string()),
+        GenerateResult::Content { text: "Still working...".to_string(), reasoning: None },
+        GenerateResult::Content { text: "Still working...".to_string(), reasoning: None },
+        GenerateResult::Content { text: "Still working...".to_string(), reasoning: None },
     ]);
 
     let tools = MockTools::new();
@@ -270,7 +276,7 @@ async fn test_orchestration_submit_completion() -> Result<()> {
     };
 
     let provider = MockProvider::new(vec![
-        GenerateResult::ToolCalls { calls: vec![submit_call], content: None },
+        GenerateResult::ToolCalls { calls: vec![submit_call], content: None, reasoning: None },
     ]);
 
     let tools = MockTools::new();

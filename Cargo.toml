@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.5.28"
+version = "0.5.29"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -93,6 +93,10 @@ serde_json = "1.0"
 anyhow = "1.0"
 async-trait = "0.1"
 umf = { version = "0.2.6", features = ["streaming", "internal", "mcp"] }
+
+[[test]]
+name = "orchestration_integration_test"
+required-features = ["orchestration"]
 
 
 [workspace]

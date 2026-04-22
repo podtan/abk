@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.29] - 2026-04-22
+
+### Fixed
+- Fixed tool calls silently dropped in `AgentRuntime` orchestration loop when LLM returns tool calls without reasoning content — the `else` branch now calls `add_assistant_message_with_tool_calls()` instead of `add_assistant_message()` which was passing tool calls as an ignored parameter
+- Fixed `OrchestrationFormatter` trait: added dedicated `add_assistant_message_with_tool_calls(content, tool_calls)` method and simplified `add_assistant_message` to text-only (removed misleading `tool_calls: Option<Vec<ToolCall>>` parameter that implementations silently ignored)
+
 ## [0.5.28] - 2026-04-22
 
 ### Fixed
