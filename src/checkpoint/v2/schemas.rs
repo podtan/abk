@@ -196,7 +196,7 @@ impl AgentStateV2 {
             current_mode: "confirm".to_string(),
             current_iteration: 0,
             current_step: WorkflowStepV2::Analyze,
-            max_iterations: 100,
+            max_iterations: 2000,
             task_description: task_description.into(),
             working_directory,
             session_start_time: now,

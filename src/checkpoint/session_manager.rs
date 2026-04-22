@@ -705,7 +705,7 @@ impl SessionManager {
             current_mode: context.get_current_mode(),
             current_iteration: iteration,
             current_step: context.get_current_step(),
-            max_iterations: 100, // TODO: get from config
+            max_iterations: 2000, // TODO: get from config
             task_description: context.get_task_description(),
             configuration: context.get_checkpoint_config(),
             working_directory: context.get_working_directory().to_path_buf(),
