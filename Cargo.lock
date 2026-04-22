@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "abk"
-version = "0.5.27"
+version = "0.5.28"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3426,9 +3426,9 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "umf"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f67a6b269c7492b85860b5ca68ccf5627d402dd09569775e70d8bed6496e3a3"
+checksum = "01e44a2b3e3943f2b458fb58e6564be0a588584ac43f9450e1d43d777c1988a6"
 dependencies = [
  "futures-util",
  "serde",

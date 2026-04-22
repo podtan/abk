@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.28] - 2026-04-22
+
+### Fixed
+- `GenerateResponse::ToolCalls` now carries `reasoning` field — reasoning/thinking content is preserved across all response paths (tool calls, streaming, and checkpoint restore) instead of being silently dropped
+- Increased `max_iterations` from 100 to 2000 to support longer-running workflows
+
+### Changed
+- `GenerateResponse::ToolCalls` changed from tuple variant to struct variant `{ calls, reasoning }` — all provider implementations (extension, WASM, orchestration) updated accordingly
+- WIT interface (`provider.wit`, `extension/provider.wit`) now includes `reasoning: option<string>` field on the assistant message resource
+- Checkpoint restore now uses `add_assistant_message_with_reasoning()` instead of branching on `tool_calls` presence, ensuring reasoning content survives session resumption
+- Updated `umf` dependency to 0.2.6
+
 ## [0.5.27] - 2026-04-15
 
 ### Fixed
