@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.31] - 2026-04-27
+
+### Fixed
+- Fixed `ProjectHash` instability: replaced `DefaultHasher` (not stable across compiler versions) with SHA-256 and removed git remote URL + project marker files from the hash inputs — only the canonical project path is now hashed, so the same directory always produces the same hash regardless of git state or which files exist in it
+
 ## [0.5.29] - 2026-04-26
 
 ### Changed

@@ -10,12 +10,12 @@ use std::path::PathBuf;
 pub struct ProjectHash(pub String);
 
 impl ProjectHash {
-    /// Create a new project hash from project path, git remote, and markers
+    /// Create a new project hash from the canonical project path using SHA-256.
+    /// Only the path is hashed — git remotes and project markers are excluded
+    /// because they can change, causing the same project to get a different hash.
     pub fn new(project_path: &std::path::Path) -> super::CheckpointResult<Self> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use sha2::{Digest, Sha256};
 
-        // Canonicalize the project path to ensure consistency
         let canonical_path = project_path.canonicalize().map_err(|e| {
             super::CheckpointError::storage(format!(
                 "Failed to canonicalize project path {}: {}",
@@ -24,23 +24,11 @@ impl ProjectHash {
             ))
         })?;
 
-        let mut hasher = DefaultHasher::new();
-
-        // Hash the canonical path
-        canonical_path.hash(&mut hasher);
-
-        // Try to get git remote if available
-        if let Ok(git_remote) = get_git_remote(&canonical_path) {
-            git_remote.hash(&mut hasher);
-        }
-
-        // Hash project markers (Cargo.toml, package.json, etc.)
-        for marker in find_project_markers(&canonical_path) {
-            marker.hash(&mut hasher);
-        }
-
-        let hash = hasher.finish();
-        Ok(ProjectHash(format!("{:016x}", hash)))
+        let mut hasher = Sha256::new();
+        hasher.update(canonical_path.to_string_lossy().as_bytes());
+        let result = hasher.finalize();
+        // Take the first 8 bytes → 16 hex chars, matching the existing directory format
+        Ok(ProjectHash(format!("{:016x}", u64::from_be_bytes(result[..8].try_into().unwrap()))))
     }
 
     /// Get the hash string

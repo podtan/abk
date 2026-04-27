@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.5.30"
+version = "0.5.31"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
