@@ -32,7 +32,8 @@ fn format_provider_error(
     if let Some(body) = response_body {
         // Truncate long bodies
         let truncated = if body.len() > 500 {
-            format!("{}... (truncated)", &body[..500])
+            let b = body.char_indices().map(|(i, _)| i).take_while(|&i| i < 500).last().unwrap_or(0);
+            format!("{}... (truncated)", &body[..b])
         } else {
             body
         };

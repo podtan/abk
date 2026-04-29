@@ -130,7 +130,9 @@ pub fn truncate_with_ellipsis(text: &str, max_length: usize) -> String {
     if text.len() <= max_length {
         text.to_string()
     } else {
-        format!("{}...", &text[..max_length.saturating_sub(3)])
+        let end = max_length.saturating_sub(3);
+        let b = text.char_indices().map(|(i, _)| i).take_while(|&i| i < end).last().unwrap_or(0);
+        format!("{}...", &text[..b])
     }
 }
 

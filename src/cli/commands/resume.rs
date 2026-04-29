@@ -467,6 +467,8 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let end = max_len.saturating_sub(3);
+        let b = s.char_indices().map(|(i, _)| i).take_while(|&i| i < end).last().unwrap_or(0);
+        format!("{}...", &s[..b])
     }
 }

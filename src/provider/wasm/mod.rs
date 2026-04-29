@@ -694,7 +694,8 @@ impl LlmProvider for WasmProvider {
                 match chunk_result {
                     Ok(bytes) => {
                         let text = String::from_utf8_lossy(&bytes).to_string();
-                        debug!("WASM STREAM DEBUG Received {} bytes: {:?}", text.len(), &text[..text.len().min(200)]);
+                        let preview_end = text.char_indices().map(|(i, _)| i).take_while(|&i| i < 200).last().unwrap_or(0);
+                        debug!("WASM STREAM DEBUG Received {} bytes: {:?}", text.len(), &text[..preview_end]);
                         
                         // Acquire buffer lock and append new data
                         let mut buffer = line_buffer.lock().await;
