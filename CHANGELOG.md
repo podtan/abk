@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.33] - 2026-04-29
+
+### Fixed
+- **cli/utils: panic on multibyte char at truncation boundary** — `truncate_with_ellipsis` used
+  byte-based slicing. Now uses `char_indices()` to find a valid char boundary.
+- **cli/commands/resume: panic on multibyte char at truncation boundary** — local
+  `truncate_with_ellipsis` had the same byte-slicing bug. Fixed with `char_indices()`.
+- **extension/bindings: panic on multibyte char in response body truncation** — `&body[..500]`
+  could split a multibyte char. Fixed with `char_indices()`.
+- **provider/wasm: panic on multibyte char in debug log truncation** — `&text[..text.len().min(200)]`
+  could split a multibyte char. Fixed with `char_indices()`.
+
+### Changed
+- Updated `cats` dependency to 0.1.18
+
+## [0.5.33] - 2026-04-29
+
+### Fixed
+- **cli/utils: panic on multibyte char at truncation boundary** — `truncate_with_ellipsis` used
+  byte-based slicing. Now uses `char_indices()` to find a valid char boundary.
+- **cli/commands/resume: panic on multibyte char at truncation boundary** — local
+  `truncate_with_ellipsis` had the same byte-slicing bug. Fixed with `char_indices()`.
+- **extension/bindings: panic on multibyte char in response body truncation** — `&body[..500]`
+  could split a multibyte char. Fixed with `char_indices()`.
+- **provider/wasm: panic on multibyte char in debug log truncation** — `&text[..text.len().min(200)]`
+  could split a multibyte char. Fixed with `char_indices()`.
+
+### Changed
+- Updated `cats` dependency to 0.1.18
+
 ## [0.5.32] - 2026-04-29
 
 ### Changed
