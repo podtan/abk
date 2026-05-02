@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.5.34"
+version = "0.5.35"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -74,7 +74,7 @@ wasmparser = { version = "0.201", optional = true }
 tracing = { version = "0.1", optional = true }
 
 # Agent feature dependencies
-cats = { version = "0.1.20", optional = true }
+cats = { version = "0.1.21", optional = true }
 regex = { version = "1.0", optional = true }
 urlencoding = { version = "2.1", optional = true }
 

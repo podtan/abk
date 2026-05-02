@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.35] - 2026-05-02
+
+### Changed
+- **deps: bump cats to 0.1.21** — `edit` multiple-matches error now shows match
+  count, line numbers, and surrounding context so the LLM can fix its `oldString`
+  in one shot; also warns against bash `>>` fallback that creates duplicates.
+
 ## [0.5.34] - 2026-04-29
 
 ### Changed
