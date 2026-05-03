@@ -56,6 +56,9 @@ pub enum OutputEvent {
     /// Tools are being executed
     ToolsExecuting {
         tool_names: Vec<String>,
+        /// Per-tool hint: file path for read/edit/write/multiedit, truncated command for bash.
+        /// None for tools that have no meaningful short hint.
+        hints: Vec<Option<String>>,
     },
 
     /// A single tool execution has completed
@@ -105,7 +108,7 @@ impl std::fmt::Display for OutputEvent {
             Self::ReasoningChunk { delta } => {
                 write!(f, "\x1b[90m{}\x1b[0m", delta)
             }
-            Self::ToolsExecuting { tool_names } => {
+            Self::ToolsExecuting { tool_names, .. } => {
                 write!(f, "🔧 Executing {} tools: [{}]", tool_names.len(), tool_names.join(", "))
             }
             Self::ToolCompleted { tool_name, success, content, description } => {

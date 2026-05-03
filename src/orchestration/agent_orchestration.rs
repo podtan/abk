@@ -407,8 +407,10 @@ async fn handle_tool_calls<A: AgentContext>(
     cancel_token: Option<&CancellationToken>,
 ) -> Result<()> {
     let tool_names: Vec<String> = tool_calls.iter().map(|tc| tc.function.name.clone()).collect();
+    let hints: Vec<Option<String>> = tool_calls.iter().map(|tc| extract_hint(&tc.function.name, &tc.function.arguments)).collect();
     agent.output_sink().emit(OutputEvent::ToolsExecuting {
         tool_names: tool_names.clone(),
+        hints,
     });
     agent.log_info(&format!(
         "🔧 Executing {} tools: [{}]",
@@ -604,4 +606,40 @@ fn get_tools_for_call<A: AgentContext>(agent: &A) -> Option<Vec<umf::Tool>> {
     }
 
     Some(tools)
+}
+
+/// Extract a short display hint from a tool call's JSON arguments.
+///
+/// - `read` / `edit` / `write` / `multiedit` → basename of `file_path`
+/// - `bash` → `description` if present, else the command truncated to 60 chars
+/// - everything else → `None`
+fn extract_hint(name: &str, args_json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(args_json).ok()?;
+    match name {
+        "read" | "edit" | "write" | "multiedit" => {
+            let raw = v.get("file_path")
+                .or_else(|| v.get("filePath"))
+                .and_then(|p| p.as_str())?;
+            // Return just the last two path components to keep it short
+            let parts: Vec<&str> = raw.trim_end_matches('/').rsplitn(3, '/').collect();
+            Some(match parts.len() {
+                1 => parts[0].to_string(),
+                2 => format!("{}/{}", parts[1], parts[0]),
+                _ => format!("…/{}/{}", parts[1], parts[0]),
+            })
+        }
+        "bash" => {
+            if let Some(desc) = v.get("description").and_then(|d| d.as_str()) {
+                return Some(desc.to_string());
+            }
+            let cmd = v.get("command").and_then(|c| c.as_str())?;
+            const MAX: usize = 60;
+            if cmd.len() > MAX {
+                Some(format!("{}…", &cmd[..MAX]))
+            } else {
+                Some(cmd.to_string())
+            }
+        }
+        _ => None,
+    }
 }
