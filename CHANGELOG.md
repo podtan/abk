@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.39] - 2026-05-04
+
+### Fixed
+- **checkpoint: eliminate all `_final_` duplicate checkpoint files** —
+  `create_final_checkpoint_and_get_resume_info` no longer writes any checkpoint
+  file. It now exclusively returns `ResumeInfo` built from the latest existing
+  checkpoint written by the workflow loop. This completely eliminates
+  `_final_` files; all checkpoint writes happen only via `create_checkpoint`
+  (one `_analyze_` file per iteration).
+
+## [0.5.38] - 2026-05-04
+
+### Fixed
+- **checkpoint: eliminate duplicate `_analyze_` / `_final_` file pairs** —
+  `create_final_checkpoint_and_get_resume_info` now checks whether a checkpoint
+  for the current iteration already exists before writing. If an `_analyze_` (or
+  any) file for that iteration was saved moments earlier by the workflow loop, the
+  `_final_` write is skipped and resume info is built from the existing file.
+  This halves checkpoint disk usage per session and fixes the symptom where the
+  visible iteration number was roughly double the actual LLM call count.
+  The `_final_` checkpoint is still written when no prior checkpoint exists for
+  the iteration (e.g. TUI ESC before the first auto-checkpoint fires), preserving
+  session-continuity for ESC-cancel resume.
+- **orchestration: remove dead `final_iteration + 1` variable in `stop_session`**
+  — the `+1` was passed to `create_workflow_checkpoint` but that function ignores
+  its iteration parameter (reads from context directly). Removed the unused
+  variable; behaviour is unchanged.
+
+## [0.5.37] - 2026-05-03
+
+### Changed
+- **orchestration: add `list` to `extract_hint`** — `list` tool uses `path` arg
+  (not `file_path`); now shows the directory path in spinner hints alongside
+  read/edit/write/multiedit.
+
 ## [0.5.36] - 2026-05-03
 
 ### Changed

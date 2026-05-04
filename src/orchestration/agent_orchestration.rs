@@ -545,10 +545,11 @@ async fn handle_content_response<A: AgentContext>(agent: &mut A, response_text: 
 async fn stop_session<A: AgentContext>(agent: &mut A, reason: &str) -> Result<String> {
     agent.set_running(false);
     
-    // Save final checkpoint with all messages including last assistant response
+    // Save final checkpoint with all messages including last assistant response.
+    // Note: create_workflow_checkpoint ignores the passed iteration parameter and
+    // reads current_iteration from context directly.
     if agent.should_checkpoint() {
-        let final_iteration = agent.current_iteration() + 1;
-        if let Err(e) = agent.create_workflow_checkpoint(final_iteration).await {
+        if let Err(e) = agent.create_workflow_checkpoint(0).await {
             agent.log_error(&format!("Failed to create final checkpoint: {}", e), None)?;
         }
     }
@@ -616,9 +617,10 @@ fn get_tools_for_call<A: AgentContext>(agent: &A) -> Option<Vec<umf::Tool>> {
 fn extract_hint(name: &str, args_json: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(args_json).ok()?;
     match name {
-        "read" | "edit" | "write" | "multiedit" => {
+        "read" | "edit" | "write" | "multiedit" | "list" => {
             let raw = v.get("file_path")
                 .or_else(|| v.get("filePath"))
+                .or_else(|| v.get("path"))
                 .and_then(|p| p.as_str())?;
             // Return just the last two path components to keep it short
             let parts: Vec<&str> = raw.trim_end_matches('/').rsplitn(3, '/').collect();
