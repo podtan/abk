@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.41] - 2026-05-18
+
+### Fixed
+- **resume: fix `is_current_project` using exact directory match** — previously
+  `current_dir.starts_with(project_path)` caused parent-folder projects to
+  appear under "Current Project" when running `trustee resume` from a
+  subdirectory (e.g. `/Projects/BPI` sessions leaking into `/Projects/BPI/Branch`).
+  Now uses exact path equality so only the actual working directory matches.
+
+### Changed
+- **resume: cap "Other Projects" display to 3 most recent** — when there are
+  many sessions across multiple projects, only the 3 most recently accessed
+  "Other Projects" sessions are shown. A trailing line reports how many more
+  exist and hints at `--list` for the full view.
+
+## [0.5.40] - 2026-05-06
+
+### Changed
+- **deps: bump cats to 0.1.22** — glob tool now uses `ignore` crate for
+  gitignore/wildmatch pattern compatibility (`**/dir/**` no longer errors).
+
 ## [0.5.39] - 2026-05-04
 
 ### Fixed

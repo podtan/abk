@@ -151,8 +151,7 @@ where
     for project_metadata in projects {
         let sessions = checkpoint_access.list_sessions(&project_metadata.project_path).await?;
 
-        let is_current_project = current_dir.starts_with(&project_metadata.project_path)
-            || project_metadata.project_path == *current_dir;
+        let is_current_project = project_metadata.project_path == *current_dir;
 
         for session_meta in sessions {
             // Only include sessions with checkpoints
@@ -207,12 +206,19 @@ fn display_resume_candidates<C: CommandContext + ?Sized>(
         ctx.log_info("");
     }
 
-    // Display other project sessions
+    // Display other project sessions — cap at 3 most recent to keep output clean
     if !other_project_sessions.is_empty() {
         ctx.log_info("📁 Other Projects");
         let start_index = current_project_sessions.len();
-        for (i, session) in other_project_sessions.iter().enumerate() {
+        const MAX_OTHER: usize = 3;
+        for (i, session) in other_project_sessions.iter().take(MAX_OTHER).enumerate() {
             display_session_info(ctx, start_index + i + 1, session);
+        }
+        if other_project_sessions.len() > MAX_OTHER {
+            ctx.log_info(&format!(
+                "  ... and {} more in other projects (run with --list to see all)",
+                other_project_sessions.len() - MAX_OTHER
+            ));
         }
     }
 
