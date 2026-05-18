@@ -52,7 +52,7 @@ where
             return Ok(());
         }
 
-        display_resume_candidates(ctx, &sessions_info);
+        display_resume_candidates(ctx, &sessions_info, opts.list);
 
         if opts.session_id.is_none() && !opts.interactive {
             return Ok(());
@@ -154,7 +154,8 @@ where
         let is_current_project = project_metadata.project_path == *current_dir;
 
         for session_meta in sessions {
-            // Only include sessions with checkpoints
+            // Only list sessions that have at least one checkpoint
+            // (checkpoint_count may be stale — storage layer heals it, so accept any >0)
             if session_meta.checkpoint_count > 0 {
                 sessions_info.push(ResumeSessionInfo {
                     session_id: session_meta.session_id,
@@ -182,7 +183,13 @@ where
 fn display_resume_candidates<C: CommandContext + ?Sized>(
     ctx: &C,
     sessions_info: &[ResumeSessionInfo],
+    show_all: bool,
 ) -> CliResult<()> {
+    // Default caps: 7 for current project, 3 for other projects.
+    // --list bypasses both caps and shows everything.
+    const MAX_CURRENT: usize = 7;
+    const MAX_OTHER: usize = 3;
+
     ctx.log_info("📋 Available Sessions for Resume");
     ctx.log_info("");
 
@@ -200,21 +207,36 @@ fn display_resume_candidates<C: CommandContext + ?Sized>(
     // Display current project sessions first
     if !current_project_sessions.is_empty() {
         ctx.log_info("🎯 Current Project");
-        for (i, session) in current_project_sessions.iter().enumerate() {
+        let shown = if show_all { current_project_sessions.len() } else { MAX_CURRENT.min(current_project_sessions.len()) };
+        for (i, session) in current_project_sessions.iter().take(shown).enumerate() {
             display_session_info(ctx, i + 1, session);
+        }
+        if !show_all && current_project_sessions.len() > MAX_CURRENT {
+            ctx.log_info(&format!(
+                "  ... and {} more (run with --list to see all)",
+                current_project_sessions.len() - MAX_CURRENT
+            ));
         }
         ctx.log_info("");
     }
 
-    // Display other project sessions — cap at 3 most recent to keep output clean
+    // Display other project sessions — cap at MAX_OTHER most recent to keep output clean
     if !other_project_sessions.is_empty() {
         ctx.log_info("📁 Other Projects");
-        let start_index = current_project_sessions.len();
-        const MAX_OTHER: usize = 3;
-        for (i, session) in other_project_sessions.iter().take(MAX_OTHER).enumerate() {
-            display_session_info(ctx, start_index + i + 1, session);
+        let start_index = current_project_sessions.len().min(
+            if show_all { usize::MAX } else { MAX_CURRENT }
+        );
+        // Index displayed beside each item is sequential from where current-project left off
+        let display_offset = if show_all || current_project_sessions.len() <= MAX_CURRENT {
+            current_project_sessions.len()
+        } else {
+            MAX_CURRENT
+        };
+        let shown_other = if show_all { other_project_sessions.len() } else { MAX_OTHER.min(other_project_sessions.len()) };
+        for (i, session) in other_project_sessions.iter().take(shown_other).enumerate() {
+            display_session_info(ctx, display_offset + i + 1, session);
         }
-        if other_project_sessions.len() > MAX_OTHER {
+        if !show_all && other_project_sessions.len() > MAX_OTHER {
             ctx.log_info(&format!(
                 "  ... and {} more in other projects (run with --list to see all)",
                 other_project_sessions.len() - MAX_OTHER

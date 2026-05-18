@@ -769,7 +769,21 @@ impl ProjectStorage {
                 let metadata_path = entry.path().join(SESSION_METADATA_FILENAME);
                 if metadata_path.exists() {
                     match load_json::<SessionMetadata>(&metadata_path).await {
-                        Ok(metadata) => sessions.push(metadata),
+                        Ok(mut metadata) => {
+                            // Heal stale checkpoint_count: session_metadata.json is written
+                            // at session creation (count=0) and may not be updated if the
+                            // process crashed. Cross-check with checkpoints.json index.
+                            if metadata.checkpoint_count == 0 {
+                                if let Ok(index) = load_checkpoint_index(&entry.path()).await {
+                                    if !index.is_empty() {
+                                        metadata.checkpoint_count = index.len() as u32;
+                                        // Persist the healed count so future reads are fast.
+                                        let _ = AtomicOps::write_json(&metadata_path, &metadata);
+                                    }
+                                }
+                            }
+                            sessions.push(metadata);
+                        }
                         Err(_) => continue, // Skip corrupted sessions
                     }
                 }

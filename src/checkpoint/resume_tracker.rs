@@ -95,10 +95,10 @@ impl ResumeTracker {
             return Ok(None);
         }
 
-        // Check if the context is still fresh (within 1 hour)
+        // Check if the context is still fresh (within 7 days)
         let now = Utc::now();
         let age = now.signed_duration_since(context.restored_at);
-        if age > Duration::hours(1) {
+        if age > Duration::days(7) {
             // Context is too old, clean it up
             self.clear_resume_context()?;
             return Ok(None);

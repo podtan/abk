@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.42] - 2026-05-18
+
+### Fixed
+- **resume: `--list` now shows all sessions** — plain `resume` caps current-project
+  sessions to 7 and other-project sessions to 3. `resume --list` bypasses both
+  caps and shows every session, so it is now meaningfully different from plain
+  `resume`.
+- **resume: cap current-project display to 7** — previously unlimited; with many
+  long-running sessions (50+) the entire screen was consumed. Now capped at 7
+  by default with a "N more (--list to see all)" trailer line.
+- **resume: fix sessions with stale `checkpoint_count: 0` disappearing** —
+  `session_metadata.json` is written at session creation with `checkpoint_count: 0`
+  and isn't always updated on crash. `load_sessions_from_disk` now cross-checks
+  `checkpoints.json` when the stored count is 0, heals the value, and persists
+  the fix so subsequent reads are instant.
+- **resume: extend `last_resume.json` expiry from 1 h to 7 days** — the 1-hour
+  timeout on the resume context caused `trustee resume -i` to be silently
+  discarded when the user ran the next task more than an hour later, starting a
+  brand-new session unexpectedly.
+
 ## [0.5.41] - 2026-05-18
 
 ### Fixed
