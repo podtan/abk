@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use umf::McpTool;
 
+#[cfg(feature = "registry-mcp-token")]
+use pep::token_provider::{TokenProvider, TokenProviderEnum, StaticTokenProvider};
+
 /// MCP Server configuration
 #[derive(Debug, Clone)]
 pub struct McpServerConfig {
@@ -15,23 +18,42 @@ pub struct McpServerConfig {
     pub name: String,
     /// Server base URL (e.g., "http://127.0.0.1:8000/pdt")
     pub url: String,
-    /// Optional authentication token
-    pub auth_token: Option<String>,
+    /// Authentication token (static, resolved at creation time).
+    /// When `registry-mcp-token` feature is enabled, use `with_token_provider()`
+    /// for dynamic token management.
+    auth_token: Option<String>,
+    /// Dynamic token provider (only available with `registry-mcp-token` feature).
+    #[cfg(feature = "registry-mcp-token")]
+    token_provider: Option<TokenProviderEnum>,
 }
 
 impl McpServerConfig {
-    /// Create a new MCP server configuration.
+    /// Create a new MCP server configuration (no auth).
     pub fn new(name: impl Into<String>, url: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             url: url.into(),
             auth_token: None,
+            #[cfg(feature = "registry-mcp-token")]
+            token_provider: None,
         }
     }
 
-    /// Set an authentication token.
+    /// Set a static authentication token.
     pub fn with_auth(mut self, token: impl Into<String>) -> Self {
         self.auth_token = Some(token.into());
+        #[cfg(feature = "registry-mcp-token")]
+        {
+            self.token_provider = None; // static token takes priority when set
+        }
+        self
+    }
+
+    /// Set a dynamic token provider (requires `registry-mcp-token` feature).
+    #[cfg(feature = "registry-mcp-token")]
+    pub fn with_token_provider(mut self, provider: TokenProviderEnum) -> Self {
+        self.token_provider = Some(provider);
+        self.auth_token = None; // dynamic provider takes priority
         self
     }
 }
@@ -117,27 +139,70 @@ impl McpClient {
         }
     }
 
+    /// Resolve the current auth token: prefers dynamic provider, falls back to static.
+    #[cfg(feature = "registry-mcp-token")]
+    async fn resolve_auth_token(&self, config: &McpServerConfig) -> RegistryResult<Option<String>> {
+        // Dynamic provider takes priority
+        if let Some(ref provider) = config.token_provider {
+            let token = provider.get_token().await.map_err(|e| {
+                RegistryError::McpServerError {
+                    server: config.name.clone(),
+                    message: format!("Token provider error: {}", e),
+                }
+            })?;
+            return Ok(Some(token));
+        }
+        // Fall back to static token
+        Ok(config.auth_token.clone())
+    }
+
+    /// Resolve the current auth token (static only, no PEP feature).
+    #[cfg(not(feature = "registry-mcp-token"))]
+    fn resolve_auth_token_sync(&self, config: &McpServerConfig) -> Option<String> {
+        config.auth_token.clone()
+    }
+
+    /// Apply authentication to an HTTP request builder.
+    ///
+    /// Note: reqwest::RequestBuilder::header() takes `self` by value,
+    /// so we must clone and replace via the mutable reference.
+    #[cfg(feature = "registry-mcp-token")]
+    async fn apply_auth(
+        &self,
+        http_request: &mut reqwest::RequestBuilder,
+        config: &McpServerConfig,
+    ) {
+        match self.resolve_auth_token(config).await {
+            Ok(Some(token)) => {
+                if let Some(cloned) = http_request.try_clone() {
+                    *http_request = cloned.header("Authorization", format!("Bearer {}", token));
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("Warning: Failed to resolve auth token for '{}': {}", config.name, e);
+            }
+        }
+    }
+
+    /// Apply authentication to an HTTP request builder (static only).
+    #[cfg(not(feature = "registry-mcp-token"))]
+    fn apply_auth_static(
+        &self,
+        http_request: &mut reqwest::RequestBuilder,
+        config: &McpServerConfig,
+    ) {
+        if let Some(ref token) = config.auth_token {
+            if let Some(cloned) = http_request.try_clone() {
+                *http_request = cloned.header("Authorization", format!("Bearer {}", token));
+            }
+        }
+    }
+
     /// Fetch tools from an MCP server.
-    ///
-    /// This sends a `tools/list` JSON-RPC request to the server's
-    /// message endpoint and parses the response.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The MCP server configuration
-    ///
-    /// # Returns
-    ///
-    /// A list of `McpTool` objects from the server.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the server is unreachable or returns invalid data.
     pub async fn fetch_tools(&self, config: &McpServerConfig) -> RegistryResult<Vec<McpTool>> {
-        // Construct the message endpoint URL
         let message_url = format!("{}/message", config.url.trim_end_matches('/'));
 
-        // Build the JSON-RPC request
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: 1,
@@ -145,15 +210,14 @@ impl McpClient {
             params: Some(json!({})),
         };
 
-        // Build HTTP request
         let mut http_request = self.http_client.post(&message_url).json(&request);
 
-        // Add authentication if configured
-        if let Some(ref token) = config.auth_token {
-            http_request = http_request.header("Authorization", format!("Bearer {}", token));
-        }
+        #[cfg(feature = "registry-mcp-token")]
+        self.apply_auth(&mut http_request, config).await;
 
-        // Send request
+        #[cfg(not(feature = "registry-mcp-token"))]
+        self.apply_auth_static(&mut http_request, config);
+
         let response = http_request
             .send()
             .await
@@ -162,7 +226,6 @@ impl McpClient {
                 message: format!("HTTP request failed: {}", e),
             })?;
 
-        // Check HTTP status
         if !response.status().is_success() {
             return Err(RegistryError::McpServerError {
                 server: config.name.clone(),
@@ -170,7 +233,6 @@ impl McpClient {
             });
         }
 
-        // Parse JSON-RPC response
         let rpc_response: JsonRpcResponse =
             response
                 .json()
@@ -180,7 +242,6 @@ impl McpClient {
                     message: format!("Failed to parse JSON response: {}", e),
                 })?;
 
-        // Check for RPC error
         if let Some(error) = rpc_response.error {
             return Err(RegistryError::McpServerError {
                 server: config.name.clone(),
@@ -188,7 +249,6 @@ impl McpClient {
             });
         }
 
-        // Parse result
         let result = rpc_response
             .result
             .ok_or_else(|| RegistryError::McpServerError {
@@ -202,14 +262,12 @@ impl McpClient {
                 message: format!("Failed to parse tools list: {}", e),
             })?;
 
-        // Convert to McpTool
         let tools = tools_result
             .tools
             .into_iter()
             .map(|t| {
                 let mut tool = McpTool::from_schema(t.name, t.description, t.input_schema);
 
-                // Add annotations if present
                 if let Some(annotations) = t.annotations {
                     if let Some(title) = annotations.title {
                         tool = tool.with_title(title);
@@ -236,21 +294,9 @@ impl McpClient {
     }
 
     /// Initialize connection with an MCP server.
-    ///
-    /// This sends the `initialize` and `initialized` messages to
-    /// establish a proper MCP session (required by some servers).
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The MCP server configuration
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if initialization fails.
     pub async fn initialize(&self, config: &McpServerConfig) -> RegistryResult<()> {
         let message_url = format!("{}/message", config.url.trim_end_matches('/'));
 
-        // Send initialize request
         let init_request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: 1,
@@ -267,9 +313,11 @@ impl McpClient {
 
         let mut http_request = self.http_client.post(&message_url).json(&init_request);
 
-        if let Some(ref token) = config.auth_token {
-            http_request = http_request.header("Authorization", format!("Bearer {}", token));
-        }
+        #[cfg(feature = "registry-mcp-token")]
+        self.apply_auth(&mut http_request, config).await;
+
+        #[cfg(not(feature = "registry-mcp-token"))]
+        self.apply_auth_static(&mut http_request, config);
 
         let response = http_request
             .send()
@@ -299,9 +347,11 @@ impl McpClient {
             .post(&message_url)
             .json(&initialized_request);
 
-        if let Some(ref token) = config.auth_token {
-            http_request = http_request.header("Authorization", format!("Bearer {}", token));
-        }
+        #[cfg(feature = "registry-mcp-token")]
+        self.apply_auth(&mut http_request, config).await;
+
+        #[cfg(not(feature = "registry-mcp-token"))]
+        self.apply_auth_static(&mut http_request, config);
 
         let _ = http_request
             .send()
@@ -315,16 +365,11 @@ impl McpClient {
     }
 
     /// Fetch tools with automatic initialization.
-    ///
-    /// This is a convenience method that initializes the connection
-    /// before fetching tools.
     pub async fn fetch_tools_with_init(
         &self,
         config: &McpServerConfig,
     ) -> RegistryResult<Vec<McpTool>> {
-        // Initialize first (some servers require this)
         if let Err(e) = self.initialize(config).await {
-            // Log but don't fail - some servers work without initialize
             eprintln!("Warning: MCP initialize failed (continuing): {}", e);
         }
 
@@ -332,18 +377,6 @@ impl McpClient {
     }
 
     /// Call a tool on an MCP server.
-    ///
-    /// This sends a `tools/call` JSON-RPC request to execute a tool.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The MCP server configuration
-    /// * `tool_name` - The name of the tool to call
-    /// * `arguments` - The arguments as a JSON value
-    ///
-    /// # Returns
-    ///
-    /// The tool result as a JSON value.
     pub async fn call_tool(
         &self,
         config: &McpServerConfig,
@@ -364,9 +397,11 @@ impl McpClient {
 
         let mut http_request = self.http_client.post(&message_url).json(&request);
 
-        if let Some(ref token) = config.auth_token {
-            http_request = http_request.header("Authorization", format!("Bearer {}", token));
-        }
+        #[cfg(feature = "registry-mcp-token")]
+        self.apply_auth(&mut http_request, config).await;
+
+        #[cfg(not(feature = "registry-mcp-token"))]
+        self.apply_auth_static(&mut http_request, config);
 
         let response = http_request
             .send()
@@ -406,7 +441,6 @@ impl McpClient {
                 message: "No result in tool call response".to_string(),
             })?;
 
-        // Parse the MCP tool result format
         let is_error = result
             .get("isError")
             .and_then(|v| v.as_bool())
@@ -417,7 +451,6 @@ impl McpClient {
             .cloned()
             .unwrap_or_else(|| json!([]));
 
-        // Extract text content from the content array
         let text_content = if let Some(arr) = content.as_array() {
             arr.iter()
                 .filter_map(|item| {
@@ -488,7 +521,6 @@ mod tests {
     #[test]
     fn test_mcp_client_creation() {
         let client = McpClient::new();
-        // Just verify creation doesn't panic
         let _ = client;
     }
 

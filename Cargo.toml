@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.5.42"
+version = "0.5.43"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -28,6 +28,7 @@ extension = ["serde", "serde_json", "toml", "anyhow", "thiserror", "tokio", "was
 # Registry features for multi-source tool aggregation
 registry = ["serde", "serde_json", "thiserror", "umf"]
 registry-mcp = ["registry", "reqwest", "tokio", "anyhow"]
+registry-mcp-token = ["registry-mcp", "dep:pep"]
 all = ["config", "observability", "cli", "checkpoint", "provider", "orchestration", "agent", "extension", "registry", "registry-mcp"]
 
 # Storage backend features (optional)
@@ -83,6 +84,8 @@ tiktoken-rs = { version = "0.6", optional = true }
 
 # Storage backend dependencies (optional)
 mongodb = { version = "3.1", optional = true }
+
+pep = { version = "0.3.1", features = ["token-provider"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

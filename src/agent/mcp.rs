@@ -4,7 +4,7 @@
 //! and convert them to OpenAI function schemas for LLM consumption.
 
 #[cfg(feature = "registry-mcp")]
-use crate::config::McpConfig;
+use crate::config::{McpConfig, McpCredentialConfig};
 #[cfg(feature = "registry-mcp")]
 use crate::registry::{McpClient, McpServerConfig as RegistryServerConfig, ToolRegistry};
 #[cfg(feature = "registry-mcp")]
@@ -59,14 +59,14 @@ impl McpToolLoader {
                 continue;
             }
 
-            // Convert config to registry client config
-            let mut client_config = RegistryServerConfig::new(&server.name, &server.url);
-
-            // Add auth token if configured (with env var substitution)
-            if let Some(ref token) = server.auth_token {
-                let resolved_token = resolve_env_var(token);
-                client_config = client_config.with_auth(resolved_token);
-            }
+            // Build registry config from server config + credentials
+            let client_config = build_registry_config(
+                &server.name,
+                &server.url,
+                server.auth_token.as_deref(),
+                server.credentials.as_deref(),
+                &config.credentials,
+            ).await;
 
             // Store the server config for later tool calls
             server_configs.insert(server.name.clone(), client_config.clone());
@@ -200,6 +200,109 @@ pub struct McpToolExecutionResult {
     pub success: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Credential resolution
+// ---------------------------------------------------------------------------
+
+/// Build a `RegistryServerConfig` from server config fields and the credentials registry.
+///
+/// Priority:
+/// 1. `credentials` reference (if found in registry):
+///    - `service-account`: **eagerly exchanges** service token → access token via
+///      RFC 8693, then stores the result as a static `auth_token` (uses the proven
+///      old code path).
+///    - `static`: resolves env vars and stores as `auth_token`.
+/// 2. `auth_token` → static token
+/// 3. neither → no auth
+#[cfg(feature = "registry-mcp")]
+async fn build_registry_config(
+    name: &str,
+    url: &str,
+    auth_token: Option<&str>,
+    credentials_ref: Option<&str>,
+    credentials_map: &HashMap<String, McpCredentialConfig>,
+) -> RegistryServerConfig {
+    let mut config = RegistryServerConfig::new(name, url);
+
+    // Check for named credential reference first
+    if let Some(cred_name) = credentials_ref {
+        if let Some(cred) = credentials_map.get(cred_name) {
+            match cred {
+                McpCredentialConfig::Static { token } => {
+                    let resolved = resolve_env_var(token);
+                    config = config.with_auth(resolved);
+                }
+                McpCredentialConfig::ServiceAccount {
+                    service_token,
+                    issuer_url,
+                    client_id,
+                    client_secret,
+                    audience,
+                    scope,
+                } => {
+                    let svc_token = resolve_env_var(service_token);
+                    let issuer = resolve_env_var(issuer_url);
+                    let cid = resolve_env_var(client_id);
+                    let cs = client_secret.as_ref().map(|s| resolve_env_var(s));
+                    let aud = resolve_env_var(audience);
+                    let scp = scope.as_ref().map(|s| resolve_env_var(s));
+
+                    #[cfg(feature = "registry-mcp-token")]
+                    {
+                        use pep::token_provider::{ServiceAccountConfig, ServiceAccountTokenProvider, TokenProvider};
+                        let provider = ServiceAccountTokenProvider::new(ServiceAccountConfig {
+                            service_token: svc_token,
+                            issuer_url: issuer,
+                            client_id: cid,
+                            client_secret: cs,
+                            audience: aud,
+                            scope: scp,
+                        });
+
+                        crate::observability::tee_eprintln(
+                            &format!("[MCP] Exchanging service token for '{}' (audience={})...", name, &config.name)
+                        );
+
+                        match provider.get_token().await {
+                            Ok(access_token) => {
+                                crate::observability::tee_eprintln(
+                                    &format!("[MCP] ✓ Token exchange successful for '{}'", name)
+                                );
+                                config = config.with_auth(access_token);
+                            }
+                            Err(e) => {
+                                crate::observability::tee_eprintln(
+                                    &format!("[MCP] Warning: Token exchange failed for '{}': {}. Continuing without auth.", name, e)
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "registry-mcp-token"))]
+                    {
+                        let _ = (svc_token, issuer, cid, cs, aud, scp);
+                        crate::observability::tee_eprintln(
+                            &format!("Warning: Server '{}' uses service-account credentials but registry-mcp-token feature is disabled. Compile with --features registry-mcp-token", name)
+                        );
+                    }
+                }
+            }
+            return config;
+        } else {
+            crate::observability::tee_eprintln(
+                &format!("Warning: Server '{}' references credential '{}' but it was not found in [mcp.credentials]", name, cred_name)
+            );
+        }
+    }
+
+    // Fall back to static auth_token
+    if let Some(token) = auth_token {
+        let resolved = resolve_env_var(token);
+        config = config.with_auth(resolved);
+    }
+
+    config
+}
+
 /// Resolve environment variable references in a string.
 ///
 /// Supports patterns like `${VAR_NAME}` and replaces them with
@@ -220,7 +323,6 @@ mod tests {
 
     #[test]
     fn test_resolve_env_var() {
-        // Set a test env var
         std::env::set_var("TEST_MCP_VAR", "test_value");
 
         assert_eq!(resolve_env_var("${TEST_MCP_VAR}"), "test_value");
@@ -235,9 +337,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_loader_disabled() {
+        use crate::config::McpConfig;
         let config = McpConfig {
             enabled: false,
             timeout_seconds: 30,
+            credentials: HashMap::new(),
             servers: vec![],
         };
 

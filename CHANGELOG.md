@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.43] - 2026-05-21
+
+### Added
+- **MCP credentials system** — named credential definitions in `[mcp.credentials]` shared across servers.
+  - `static` credential: plain token string with `${ENV_VAR}` substitution.
+  - `service-account` credential: long-lived API token → RFC 8693 token exchange for short-lived OIDC access tokens (requires `registry-mcp-token` feature).
+- **`McpCredentialConfig` enum** in config module with `Static` and `ServiceAccount` variants.
+- **`credentials` field on `McpServerConfig`** — references a named credential (takes priority over `auth_token`).
+- **Eager token exchange in `build_registry_config()`** — service-account tokens are exchanged at startup and stored as static `auth_token`, reusing the proven auth path.
+- **`registry-mcp-token` feature** — gates PEP `token-provider` dependency for RFC 8693 support.
+
+### Changed
+- **PEP dependency upgraded to 0.3.1** (from path reference to crates.io).
+
 ## [0.5.42] - 2026-05-18
 
 ### Fixed

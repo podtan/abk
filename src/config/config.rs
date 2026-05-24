@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -88,6 +89,9 @@ pub struct McpConfig {
     /// Timeout for MCP server requests (seconds)
     #[serde(default = "default_mcp_timeout")]
     pub timeout_seconds: u64,
+    /// Named credential definitions (shared across servers)
+    #[serde(default)]
+    pub credentials: HashMap<String, McpCredentialConfig>,
     /// List of MCP servers to connect to
     #[serde(default)]
     pub servers: Vec<McpServerConfig>,
@@ -102,6 +106,7 @@ impl Default for McpConfig {
         Self {
             enabled: false,
             timeout_seconds: 30,
+            credentials: HashMap::new(),
             servers: vec![],
         }
     }
@@ -117,11 +122,57 @@ pub struct McpServerConfig {
     /// Transport type: "http" (SSE) or "stdio"
     #[serde(default = "default_transport")]
     pub transport: String,
-    /// Optional authentication token (supports env var substitution)
+    /// Optional static authentication token (supports env var substitution).
+    /// Use `credentials` for dynamic token management.
     pub auth_token: Option<String>,
+    /// Reference to a named credential in `mcp.credentials`.
+    /// Takes priority over `auth_token` when both are present.
+    pub credentials: Option<String>,
     /// Auto-initialize connection (send initialize/initialized messages)
     #[serde(default = "default_auto_init")]
     pub auto_init: bool,
+}
+
+/// Named credential configuration for MCP server authentication.
+///
+/// Supports two modes:
+/// - `static`: A plain token string (same as `auth_token`, but reusable)
+/// - `service-account`: Long-lived API token → RFC 8693 exchange for short-lived OIDC access tokens
+///
+/// # Example (TOML)
+///
+/// ```toml
+/// [mcp.credentials.kanidm_pdt]
+/// type = "service-account"
+/// service_token = "${PDT_SVC_TOKEN}"
+/// issuer_url = "https://idm.tanbal.ir/oauth2/openid/pdt-api"
+/// client_id = "pdt-api"
+/// audience = "pdt-api"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum McpCredentialConfig {
+    /// Static token string (resolved once at startup).
+    Static {
+        /// The token value (supports `${ENV_VAR}` substitution).
+        token: String,
+    },
+    /// Service account with automatic RFC 8693 token exchange.
+    ServiceAccount {
+        /// Long-lived Kanidm service account API token (never expires).
+        /// Supports `${ENV_VAR}` substitution.
+        service_token: String,
+        /// OIDC issuer URL (e.g. `https://idm.tanbal.ir/oauth2/openid/pdt-api`).
+        issuer_url: String,
+        /// OAuth2 client ID (e.g. `pdt-api`).
+        client_id: String,
+        /// OAuth2 client secret (optional, for confidential clients).
+        client_secret: Option<String>,
+        /// Target audience for the exchanged token (e.g. `pdt-api`).
+        audience: String,
+        /// Scopes to request during exchange (optional, default: `openid profile email`).
+        scope: Option<String>,
+    },
 }
 
 fn default_transport() -> String {
