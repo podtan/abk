@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.44] - 2026-06-12
+
+### Changed
+- **`uname` dependency made Unix-only** — replaced unconditional `uname = "0.1"` with a
+  `[target.'cfg(unix)'.dependencies]` platform-specific entry so the crate compiles
+  on Windows and macOS without the Unix-only `libc::utsname` binding.
+- **`get_system_info()` now uses `std::env::consts` on non-Unix** — the `#[cfg(unix)]`
+  branch still calls `uname` for rich OS version info; the `#[cfg(not(unix))]` branch
+  uses `std::env::consts::{OS, ARCH}` and the existing `hostname` crate.
+- **Windows memory detection** — `get_total_memory()` now uses
+  `windows::Win32::System::SystemInformation::GlobalMemoryStatusEx` on Windows
+  instead of returning 0.
+
 ## [0.5.43] - 2026-05-21
 
 ### Added

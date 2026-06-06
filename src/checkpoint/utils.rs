@@ -63,48 +63,18 @@ pub fn get_filtered_env_vars() -> HashMap<String, String> {
 /// println!("Running on: {} {}", info.os_name, info.architecture);
 /// ```
 pub fn get_system_info() -> SystemInfo {
-    #[cfg(unix)]
-    {
-        use uname::uname;
-        
-        let (os_name, os_version, architecture, hostname) = if let Ok(info) = uname() {
-            (info.sysname, info.release, info.machine, info.nodename)
-        } else {
-            (
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-            )
-        };
-
-        SystemInfo {
-            os_name,
-            os_version,
-            architecture,
-            hostname,
-            cpu_count: std::thread::available_parallelism()
-                .map(|p| p.get() as u32)
-                .unwrap_or(1),
-            total_memory: get_total_memory(),
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        SystemInfo {
-            os_name: std::env::consts::OS.to_string(),
-            os_version: "unknown".to_string(),
-            architecture: std::env::consts::ARCH.to_string(),
-            hostname: hostname::get()
-                .ok()
-                .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "unknown".to_string()),
-            cpu_count: std::thread::available_parallelism()
-                .map(|p| p.get() as u32)
-                .unwrap_or(1),
-            total_memory: get_total_memory(),
-        }
+    SystemInfo {
+        os_name: std::env::consts::OS.to_string(),
+        os_version: std::env::consts::ARCH.to_string(),
+        architecture: std::env::consts::ARCH.to_string(),
+        hostname: hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| "unknown".to_string()),
+        cpu_count: std::thread::available_parallelism()
+            .map(|p| p.get() as u32)
+            .unwrap_or(1),
+        total_memory: get_total_memory(),
     }
 }
 
@@ -148,8 +118,23 @@ fn get_total_memory() -> u64 {
 
     #[cfg(target_os = "windows")]
     {
-        // Windows memory retrieval would go here
-        // For now, return 0
+        use std::process::Command;
+        // Use wmic to get total physical memory (returns bytes)
+        if let Ok(output) = Command::new("wmic")
+            .args([" ComputerSystem get TotalPhysicalMemory"])
+            .output()
+        {
+            if let Ok(mem_str) = String::from_utf8(output.stdout) {
+                for line in mem_str.lines().skip(1) {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        if let Ok(mem) = trimmed.parse::<u64>() {
+                            return mem;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     0 // Fallback

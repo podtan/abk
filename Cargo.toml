@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.5.43"
+version = "0.5.44"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -19,7 +19,7 @@ default = []
 config = ["serde", "serde_json", "toml", "anyhow", "chrono", "dotenv"]
 observability = ["anyhow", "chrono", "serde_json"]
 cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "async-trait", "serde", "serde_json", "thiserror", "config", "checkpoint", "dirs", "shellexpand"]
-checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "uname", "hostname", "async-trait", "regex", "urlencoding"]
+checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "hostname", "async-trait", "regex", "urlencoding"]
 provider = ["serde", "serde_json", "anyhow", "async-trait", "wasmtime", "wasmtime-wasi", "reqwest", "futures-util", "umf", "tokio", "config"]
 orchestration = ["anyhow", "tokio", "tokio-util", "serde_json", "async-trait", "umf", "uuid", "futures-util", "provider"]
 agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "wasmtime", "wasmtime-wasi", "config", "observability", "checkpoint", "provider", "orchestration", "executor", "extension"]
@@ -60,7 +60,7 @@ tokio-util = { version = "0.7", optional = true }
 sha2 = { version = "0.10", optional = true }
 uuid = { version = "1.0", features = ["v4"], optional = true }
 umf = { version = "0.2.6", features = ["streaming", "internal", "mcp"], optional = true }
-uname = { version = "0.1", optional = true }
+
 hostname = { version = "0.4", optional = true }
 
 # Provider feature dependencies
@@ -86,6 +86,10 @@ tiktoken-rs = { version = "0.6", optional = true }
 mongodb = { version = "3.1", optional = true }
 
 pep = { version = "0.3.1", features = ["token-provider"], optional = true }
+
+# Unix-only dependencies (uname uses libc which doesn't support Windows)
+[target.'cfg(unix)'.dependencies]
+uname = { version = "0.1", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
