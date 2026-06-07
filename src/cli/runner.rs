@@ -921,14 +921,26 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
     }
 
     // Copy binary to ~/.{agent_name}/bin/
-    let binary_source = PathBuf::from(&install_config.binary_source_path);
-    let binary_dest = bin_dir.join(&install_config.binary_name);
+    // On Windows the binary has a .exe suffix; try both with and without.
+    let mut binary_source = PathBuf::from(&install_config.binary_source_path);
+    if !binary_source.exists() {
+        let with_exe = PathBuf::from(format!("{}.exe", install_config.binary_source_path));
+        if with_exe.exists() {
+            binary_source = with_exe;
+        }
+    }
+    let mut binary_dest = bin_dir.join(&install_config.binary_name);
+    // On Windows, the destination also needs .exe
+    #[cfg(windows)]
+    {
+        binary_dest = bin_dir.join(format!("{}.exe", install_config.binary_name));
+    }
 
     if binary_source.exists() {
         std::fs::copy(&binary_source, &binary_dest)?;
         ctx.log_info(&format!("Copied binary: {} -> {}", binary_source.display(), binary_dest.display()));
 
-        // Make binary executable
+        // Make binary executable (Unix only)
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -940,10 +952,12 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
         ctx.log_warn(&format!("Binary source not found: {}", binary_source.display()));
     }
 
-    // Create default config file by copying from project config
+    // Create default config file by copying from project config.
+    // Never overwrite an existing config — even with --force — to preserve
+    // user customisations (MCP servers, credentials, auto-handoff, etc.).
     let config_file_name = format!("{}.toml", agent_name);
     let config_file = agent_dir.join("config").join(&config_file_name);
-    if !config_file.exists() || force {
+    if !config_file.exists() {
         // Try to copy from the project's config/{agent_name}.toml
         let project_config = std::env::current_dir()?.join("config").join(&config_file_name);
         if project_config.exists() {
@@ -971,34 +985,43 @@ enable_streaming = true
             std::fs::write(&config_file, default_config)?;
             ctx.log_info(&format!("Created default config file: {}", config_file.display()));
         }
+    } else {
+        ctx.log_info(&format!("Config file already exists, keeping: {}", config_file.display()));
     }
 
-    // Create symlink in ~/.local/bin/
+    // Create symlink (Unix) or binary copy (Windows) in ~/.local/bin/
     let local_bin_path = shellexpand::tilde(&install_config.local_bin_path).to_string();
     let local_bin_dir = PathBuf::from(local_bin_path);
     std::fs::create_dir_all(&local_bin_dir)?;
 
-    let local_bin_symlink = local_bin_dir.join(&install_config.binary_name);
+    let local_bin_link = local_bin_dir.join(&install_config.binary_name);
+    // On Windows the link/copy also needs .exe
+    #[cfg(windows)]
+    let local_bin_link = local_bin_dir.join(format!("{}.exe", install_config.binary_name));
 
-    if local_bin_symlink.exists() {
+    if local_bin_link.exists() {
         if force {
-            std::fs::remove_file(&local_bin_symlink)?;
+            std::fs::remove_file(&local_bin_link)?;
         } else {
-            ctx.log_warn(&format!("Symlink already exists: {}", local_bin_symlink.display()));
+            ctx.log_warn(&format!("Binary link already exists: {}", local_bin_link.display()));
         }
     }
 
-    if !local_bin_symlink.exists() {
+    if !local_bin_link.exists() {
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&binary_dest, &local_bin_symlink)?;
-            ctx.log_info(&format!("Created symlink: {} -> {}", local_bin_symlink.display(), binary_dest.display()));
+            std::os::unix::fs::symlink(&binary_dest, &local_bin_link)?;
+            ctx.log_info(&format!("Created symlink: {} -> {}", local_bin_link.display(), binary_dest.display()));
         }
         #[cfg(windows)]
         {
             // On Windows, create a copy instead of symlink for better compatibility
-            std::fs::copy(&binary_dest, &local_bin_symlink)?;
-            ctx.log_info(&format!("Created binary copy: {} -> {}", binary_dest.display(), local_bin_symlink.display()));
+            if binary_dest.exists() {
+                std::fs::copy(&binary_dest, &local_bin_link)?;
+                ctx.log_info(&format!("Created binary copy: {} -> {}", binary_dest.display(), local_bin_link.display()));
+            } else {
+                ctx.log_warn(&format!("Cannot create binary copy, source not found: {}", binary_dest.display()));
+            }
         }
     }
 
@@ -1061,7 +1084,7 @@ enable_streaming = true
     ctx.log_success(&format!("{} initialized successfully", agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..]));
     ctx.log_info(&format!("Configuration directory: {}", agent_dir.display()));
     ctx.log_info(&format!("Binary installed to: {}", binary_dest.display()));
-    ctx.log_info(&format!("Symlink created: {}", local_bin_symlink.display()));
+    ctx.log_info(&format!("Binary link created: {}", local_bin_link.display()));
     Ok(())
 }
 

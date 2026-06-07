@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `windows::Win32::System::SystemInformation::GlobalMemoryStatusEx` on Windows
   instead of returning 0.
 
+## [0.5.45] - 2026-06-06
+
+### Fixed
+- **fix(init): never overwrite existing config file** — `init --force` now skips
+  `~/.{agent}/config/{agent}.toml` if it already exists, preserving user customisations
+  (MCP servers, credentials, auto-handoff settings, etc.).
+- **fix(init): Windows binary handling** — on Windows the binary is now correctly
+  found as `{name}.exe` (source) and installed as `{name}.exe` (dest + local bin copy).
+
+## [0.5.44] - 2026-06-06
+
+### Changed
+- **Cross-platform checkpoint** — replaced unix-only `uname` crate with
+  `std::env::consts` + `hostname` crate. ABK now compiles and runs on
+  Linux, macOS, and Windows.
+
 ## [0.5.43] - 2026-05-21
 
 ### Added
