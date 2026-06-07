@@ -5,18 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.44] - 2026-06-12
+## [Unreleased]
+
+## [0.5.46] - 2026-06-07
 
 ### Changed
-- **`uname` dependency made Unix-only** — replaced unconditional `uname = "0.1"` with a
-  `[target.'cfg(unix)'.dependencies]` platform-specific entry so the crate compiles
-  on Windows and macOS without the Unix-only `libc::utsname` binding.
-- **`get_system_info()` now uses `std::env::consts` on non-Unix** — the `#[cfg(unix)]`
-  branch still calls `uname` for rich OS version info; the `#[cfg(not(unix))]` branch
-  uses `std::env::consts::{OS, ARCH}` and the existing `hostname` crate.
-- **Windows memory detection** — `get_total_memory()` now uses
-  `windows::Win32::System::SystemInformation::GlobalMemoryStatusEx` on Windows
-  instead of returning 0.
+- **deps: bump cats to 0.1.23** — bash tool now uses PowerShell instead of CMD on
+  Windows, fixing `%` expansion, quote mangling, and single-quote issues.
+- **executor: use PowerShell on Windows** — `CommandExecutor::execute_command()`
+  now uses `powershell.exe -NoProfile -Command` instead of hardcoded `sh -c`
+  on Windows. Previously `sh` did not exist on Windows, causing command execution
+  to fail outright. Linux/macOS behavior is unchanged (`sh -c`).
 
 ## [0.5.45] - 2026-06-06
 
@@ -30,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.44] - 2026-06-06
 
 ### Changed
+- **`uname` dependency made Unix-only** — replaced unconditional `uname = "0.1"` with a
+  `[target.'cfg(unix)'.dependencies]` platform-specific entry so the crate compiles
+  on Windows and macOS without the Unix-only `libc::utsname` binding.
+- **`get_system_info()` now uses `std::env::consts` on non-Unix** — the `#[cfg(unix)]`
+  branch still calls `uname` for rich OS version info; the `#[cfg(not(unix))]` branch
+  uses `std::env::consts::{OS, ARCH}` and the existing `hostname` crate.
+- **Windows memory detection** — `get_total_memory()` now uses
+  `windows::Win32::System::SystemInformation::GlobalMemoryStatusEx` on Windows
+  instead of returning 0.
 - **Cross-platform checkpoint** — replaced unix-only `uname` crate with
   `std::env::consts` + `hostname` crate. ABK now compiles and runs on
   Linux, macOS, and Windows.

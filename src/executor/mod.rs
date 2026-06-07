@@ -59,9 +59,19 @@ impl CommandExecutor {
         let timeout_secs = timeout_override.unwrap_or(self.timeout_seconds);
         self.last_command = Some(command.to_string());
 
-        let mut cmd = TokioCommand::new("sh");
-        cmd.arg("-c")
-            .arg(command)
+        // Use PowerShell on Windows to avoid CMD quoting pitfalls:
+        // CMD expands %VAR%, has no single-quote support, and mangles backslash-escaped quotes.
+        // PowerShell treats % as a literal character and has predictable quoting rules.
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = TokioCommand::new("powershell.exe");
+            c.arg("-NoProfile").arg("-Command");
+            c
+        } else {
+            let mut c = TokioCommand::new("sh");
+            c.arg("-c");
+            c
+        };
+        cmd.arg(command)
             .current_dir(&self.working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
