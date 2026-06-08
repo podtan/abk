@@ -593,7 +593,7 @@ pub struct ProjectConfigManager {
 impl ProjectConfigManager {
     /// Create a new project configuration manager
     pub fn new() -> super::errors::CheckpointResult<Self> {
-        let home_dir = crate::home_dir().map_err(|_| {
+        let home_dir = crate::get_home_dir().map_err(|_| {
             super::errors::CheckpointError::config("Could not determine home directory")
         })?;
         let config_file_path = PathBuf::from(home_dir)
