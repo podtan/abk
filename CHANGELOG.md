@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.49] - 2026-06-07
+
+### Fixed
+- **fix(resume): case-insensitive path matching on Windows** — `trustee resume` now
+  correctly identifies the current project on Windows where paths may differ in case
+  (e.g., `C:\Projects\Tanbal` vs `C:\projects\tanbal`). Previously all sessions appeared
+  under "Other Projects" because `==` comparison is case-sensitive. Linux/macOS behavior
+  is unchanged (case-sensitive paths).
+
 ## [0.5.47] - 2026-06-07
 
 ### Fixed

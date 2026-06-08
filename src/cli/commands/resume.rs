@@ -7,6 +7,44 @@ use crate::cli::adapters::context::CommandContext;
 use crate::cli::error::CliResult;
 use std::path::{Path, PathBuf};
 
+/// Compare two paths for equality.
+///
+/// On Windows, paths are case-insensitive (e.g., `C:\Projects\Tanbal` == `C:\projects\tanbal`).
+/// On Linux/macOS, paths are case-sensitive (e.g., `/Tanbal` != `/tanbal`).
+fn paths_match(a: &Path, b: &Path) -> bool {
+    if cfg!(target_os = "windows") {
+        a.to_str()
+            .zip(b.to_str())
+            .map(|(a, b)| a.eq_ignore_ascii_case(b))
+            .unwrap_or_else(|| a == b)
+    } else {
+        a == b
+    }
+}
+
+/// Check if `child` is inside or equal to `parent`.
+///
+/// On Windows, comparison is case-insensitive.
+/// On Linux/macOS, comparison is case-sensitive.
+fn path_starts_with(child: &Path, parent: &Path) -> bool {
+    if cfg!(target_os = "windows") {
+        let (Some(child_str), Some(parent_str)) = (child.to_str(), parent.to_str()) else {
+            return child.starts_with(parent);
+        };
+        let child_lower = child_str.to_lowercase();
+        let parent_lower = parent_str.to_lowercase();
+        // Add trailing separator to avoid /foo matching /foobar
+        let parent_with_sep = if parent_lower.ends_with('/') || parent_lower.ends_with('\\') {
+            parent_lower
+        } else {
+            format!("{}\\", parent_lower)
+        };
+        child_lower == parent_lower || child_lower.starts_with(&parent_with_sep)
+    } else {
+        child.starts_with(parent)
+    }
+}
+
 /// Resume session info for display
 #[derive(Debug, Clone)]
 pub struct ResumeSessionInfo {
@@ -86,8 +124,8 @@ where
 
         // Try current project first
         for project_metadata in &projects {
-            if current_dir.starts_with(&project_metadata.project_path)
-                || project_metadata.project_path == current_dir
+            if path_starts_with(&current_dir, &project_metadata.project_path)
+                || paths_match(&project_metadata.project_path, &current_dir)
             {
                 let sessions = checkpoint_access.list_sessions(&project_metadata.project_path).await?;
 
@@ -151,7 +189,7 @@ where
     for project_metadata in projects {
         let sessions = checkpoint_access.list_sessions(&project_metadata.project_path).await?;
 
-        let is_current_project = project_metadata.project_path == *current_dir;
+        let is_current_project = paths_match(&project_metadata.project_path, current_dir);
 
         for session_meta in sessions {
             // Only list sessions that have at least one checkpoint
