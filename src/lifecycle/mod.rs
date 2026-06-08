@@ -290,7 +290,7 @@ impl ExpandHome for PathBuf {
     fn expand_home(&self) -> Result<PathBuf> {
         if let Some(path_str) = self.to_str() {
             if path_str.starts_with("~") {
-                if let Ok(home) = std::env::var("HOME") {
+                if let Ok(home) = crate::get_home_dir() {
                     let expanded = path_str.replacen("~", &home, 1);
                     return Ok(PathBuf::from(expanded));
                 }

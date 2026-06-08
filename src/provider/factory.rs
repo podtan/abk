@@ -45,7 +45,7 @@ impl ProviderFactory {
         let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
         debug!("Factory - Agent name: {}", agent_name);
 
-        let extensions_dir = if let Ok(home_dir) = std::env::var("HOME") {
+        let extensions_dir = if let Ok(home_dir) = crate::get_home_dir() {
             PathBuf::from(home_dir).join(format!(".{}/extensions", agent_name))
         } else {
             PathBuf::from("extensions")

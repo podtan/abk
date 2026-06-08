@@ -1458,15 +1458,10 @@ fn get_home_checkpoint_dir() -> CheckpointResult<PathBuf> {
     let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     let dir_name = format!(".{}", agent_name);
     
-    if let Ok(home) = std::env::var("HOME") {
-        Ok(PathBuf::from(home).join(&dir_name))
-    } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        Ok(PathBuf::from(userprofile).join(&dir_name))
-    } else {
-        Err(CheckpointError::config(
-            "Unable to determine home directory",
-        ))
-    }
+    let home = crate::get_home_dir().map_err(|_| {
+        CheckpointError::config("Unable to determine home directory")
+    })?;
+    Ok(PathBuf::from(home).join(&dir_name))
 }
 
 /// Load or create project metadata using atomic operations

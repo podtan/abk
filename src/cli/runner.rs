@@ -255,7 +255,7 @@ impl CommandContext for RawConfigCommandContext {
     fn config_path(&self) -> CliResult<std::path::PathBuf> {
         // No file path - config was provided directly
         // Return a synthetic path based on agent name for compatibility
-        let home = std::env::var("HOME")
+        let home = crate::get_home_dir()
             .map_err(|_| CliError::ConfigError("Could not determine home directory".to_string()))?;
         let agent_name = &self.config.agent.name;
         Ok(std::path::PathBuf::from(home)
@@ -289,7 +289,7 @@ impl CommandContext for RawConfigCommandContext {
     }
 
     fn data_dir(&self) -> CliResult<std::path::PathBuf> {
-        let home = std::env::var("HOME")
+        let home = crate::get_home_dir()
             .map_err(|_| CliError::ConfigError("Could not determine home directory".to_string()))?;
         let agent_name = &self.config.agent.name;
         Ok(std::path::PathBuf::from(home).join(format!(".{}", agent_name)))

@@ -33,7 +33,7 @@ impl ResumeTracker {
         let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
         let dir_name = format!(".{}", agent_name);
         
-        let home_dir = std::env::var("HOME")
+        let home_dir = crate::get_home_dir()
             .map_err(|_| CheckpointError::storage("Could not determine home directory"))?;
         let tracker_file = PathBuf::from(home_dir)
             .join(&dir_name)

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.47] - 2026-06-07
+
+### Fixed
+- **fix(home): add shared `get_home_dir()` with USERPROFILE fallback for Windows** —
+  all 9 locations that read `HOME` now fall back through `HOME` → `USERPROFILE` → `"."`
+  so the agent works when opened directly in a Windows terminal (where `HOME` is typically
+  unset). Previously it fell back to `"."`, looking for config in the current directory.
+  Affected modules: checkpoint (resume_tracker, config, storage), cli (runner, context),
+  provider (factory), lifecycle, config.
+
 ## [0.5.46] - 2026-06-07
 
 ### Changed

@@ -72,6 +72,26 @@
 
 #![warn(missing_docs)]
 
+/// Get the home directory path (infallible).
+///
+/// Falls back through HOME → USERPROFILE → "." to support
+/// Linux/macOS, Windows SSH, and Windows direct terminal.
+pub fn home_dir() -> String {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string())
+}
+
+/// Get the home directory path (fallible).
+///
+/// Falls back through HOME → USERPROFILE.
+/// Returns an error if neither environment variable is set.
+pub fn get_home_dir() -> Result<String, String> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory".to_string())
+}
+
 /// Configuration management (enabled with the `config` feature)
 #[cfg(feature = "config")]
 pub mod config;

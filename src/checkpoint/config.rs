@@ -543,16 +543,11 @@ fn get_default_storage_location() -> PathBuf {
         std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     let dir_name = format!(".{}", agent_name);
 
-    if let Ok(home) = std::env::var("HOME") {
+    if let Ok(home) = crate::get_home_dir() {
         PathBuf::from(home).join(&dir_name)
     } else {
-        // Fallback for Windows
-        if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            PathBuf::from(userprofile).join(&dir_name)
-        } else {
-            // Last resort fallback
-            PathBuf::from("/tmp").join(&dir_name)
-        }
+        // Last resort fallback
+        PathBuf::from("/tmp").join(&dir_name)
     }
 }
 
@@ -598,7 +593,7 @@ pub struct ProjectConfigManager {
 impl ProjectConfigManager {
     /// Create a new project configuration manager
     pub fn new() -> super::errors::CheckpointResult<Self> {
-        let home_dir = std::env::var("HOME").map_err(|_| {
+        let home_dir = crate::home_dir().map_err(|_| {
             super::errors::CheckpointError::config("Could not determine home directory")
         })?;
         let config_file_path = PathBuf::from(home_dir)

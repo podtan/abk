@@ -68,7 +68,7 @@ pub trait CommandContext: Send + Sync {
     ///
     /// Typically $HOME or equivalent
     fn home_dir(&self) -> CliResult<PathBuf> {
-        std::env::var("HOME")
+        crate::get_home_dir()
             .map(PathBuf::from)
             .map_err(|_| crate::cli::error::CliError::ConfigError(
                 "Could not determine home directory".to_string()

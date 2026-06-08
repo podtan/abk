@@ -352,7 +352,7 @@ impl ConfigurationLoader {
     pub fn from_config(config: Configuration) -> Self {
         let agent_name = &config.agent.name;
         // Construct a synthetic config path for compatibility
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let home = crate::get_home_dir().unwrap_or_else(|_| ".".to_string());
         let config_path = PathBuf::from(home)
             .join(format!(".{}", agent_name))
             .join("config")
