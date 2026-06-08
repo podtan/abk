@@ -82,6 +82,26 @@ pub fn home_dir() -> String {
         .unwrap_or_else(|_| ".".to_string())
 }
 
+/// Strip the Windows UNC prefix `\\?\` from a path.
+///
+/// On Windows, `std::fs::canonicalize()` returns paths with a `\\?\` prefix
+/// (e.g., `\\?\C:\Projects\Foo`). This prefix is the Windows extended-length path
+/// notation that bypasses the 260-character MAX_PATH limit. While functionally
+/// equivalent to the unprefixed path, it causes string comparisons to fail.
+///
+/// This function strips the prefix so paths are stored and compared consistently.
+/// On non-Windows platforms, returns the path unchanged.
+pub fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+    if cfg!(target_os = "windows") {
+        if let Some(s) = path.to_str() {
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                return std::path::PathBuf::from(stripped);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
 /// Get the home directory path (fallible).
 ///
 /// Falls back through HOME → USERPROFILE.

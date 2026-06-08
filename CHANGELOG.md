@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.51] - 2026-06-08
+
+### Fixed
+- **fix(checkpoint): strip Windows UNC prefix `\\?\` from canonicalized paths** —
+  `std::fs::canonicalize()` on Windows returns paths with a `\\?\` prefix
+  (e.g., `\\?\C:\Projects\Foo`). This prefix was being stored in
+  `project_metadata.json` and caused path comparisons to fail, making all
+  sessions appear under "Other Projects" in `trustee resume`. Now stripped
+  before storing and before comparison. Also fixed `ProjectHash` to hash
+  the clean path so hashes are consistent across platforms.
+
 ## [0.5.49] - 2026-06-07
 
 ### Fixed

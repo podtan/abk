@@ -1475,9 +1475,11 @@ async fn load_or_create_project_metadata(
     if metadata_path.exists() {
         AtomicOps::read_json(&metadata_path)
     } else {
-        // Try to canonicalize the provided project path so we store an absolute/resolved path
+        // Try to canonicalize the provided project path so we store an absolute/resolved path.
+        // Strip the Windows UNC prefix (\\?\) so stored paths are clean for comparison.
         let canonical_project_path = project_path
             .canonicalize()
+            .map(|p| crate::strip_unc_prefix(&p))
             .unwrap_or_else(|_| project_path.to_path_buf());
 
         let metadata = ProjectMetadata {

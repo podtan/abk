@@ -9,9 +9,12 @@ use std::path::{Path, PathBuf};
 
 /// Compare two paths for equality.
 ///
-/// On Windows, paths are case-insensitive (e.g., `C:\Projects\Tanbal` == `C:\projects\tanbal`).
-/// On Linux/macOS, paths are case-sensitive (e.g., `/Tanbal` != `/tanbal`).
+/// - Strips the `\\?\\` UNC prefix from Windows canonicalized paths.
+/// - On Windows, comparison is case-insensitive.
+/// - On Linux/macOS, comparison is case-sensitive.
 fn paths_match(a: &Path, b: &Path) -> bool {
+    let a = crate::strip_unc_prefix(a);
+    let b = crate::strip_unc_prefix(b);
     if cfg!(target_os = "windows") {
         a.to_str()
             .zip(b.to_str())
@@ -24,22 +27,29 @@ fn paths_match(a: &Path, b: &Path) -> bool {
 
 /// Check if `child` is inside or equal to `parent`.
 ///
-/// On Windows, comparison is case-insensitive.
-/// On Linux/macOS, comparison is case-sensitive.
+/// - Strips the `\\?\\` UNC prefix from Windows canonicalized paths.
+/// - On Windows, comparison is case-insensitive.
+/// - On Linux/macOS, comparison is case-sensitive.
 fn path_starts_with(child: &Path, parent: &Path) -> bool {
+    let child = crate::strip_unc_prefix(child);
+    let parent = crate::strip_unc_prefix(parent);
     if cfg!(target_os = "windows") {
         let (Some(child_str), Some(parent_str)) = (child.to_str(), parent.to_str()) else {
             return child.starts_with(parent);
         };
         let child_lower = child_str.to_lowercase();
         let parent_lower = parent_str.to_lowercase();
+        // Direct equality check (e.g., same directory)
+        if child_lower == parent_lower {
+            return true;
+        }
         // Add trailing separator to avoid /foo matching /foobar
         let parent_with_sep = if parent_lower.ends_with('/') || parent_lower.ends_with('\\') {
             parent_lower
         } else {
             format!("{}\\", parent_lower)
         };
-        child_lower == parent_lower || child_lower.starts_with(&parent_with_sep)
+        child_lower.starts_with(&parent_with_sep)
     } else {
         child.starts_with(parent)
     }

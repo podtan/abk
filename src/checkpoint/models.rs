@@ -16,7 +16,7 @@ impl ProjectHash {
     pub fn new(project_path: &std::path::Path) -> super::CheckpointResult<Self> {
         use sha2::{Digest, Sha256};
 
-        let canonical_path = project_path.canonicalize().map_err(|e| {
+        let canonical_path = project_path.canonicalize().map(|p| crate::strip_unc_prefix(&p)).map_err(|e| {
             super::CheckpointError::storage(format!(
                 "Failed to canonicalize project path {}: {}",
                 project_path.display(),
