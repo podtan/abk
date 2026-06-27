@@ -13,6 +13,10 @@ use clap::ArgMatches;
 use crate::cli::adapters::CommandContext;
 use crate::cli::error::{CliError, CliResult};
 
+// Bring TokenStore trait into scope for method resolution on FileTokenStore
+#[cfg(feature = "registry-mcp-token")]
+use pep::TokenStore;
+
 /// Entry point for the `mcp` command.
 ///
 /// Dispatches to subcommand handlers based on the subcommand name.
@@ -55,7 +59,8 @@ async fn mcp_auth<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult
         .ok_or_else(|| CliError::ValidationError("Missing credential name".to_string()))?;
 
     // Find credential in config
-    let mcp_config = &ctx.config().mcp;
+    let mcp_config = ctx.config().mcp.as_ref()
+        .ok_or_else(|| CliError::ConfigError("MCP configuration not found".to_string()))?;
     let cred = mcp_config
         .credentials
         .get(&cred_name)
@@ -88,7 +93,7 @@ async fn mcp_auth<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult
     let redirect_port = *redirect_port;
 
     // Generate PKCE pair
-    let oidc_client = pep::OidcClient::new();
+    let oidc_client = pep::oidc_client::OidcClient::new();
     let verifier = pep::oidc_client::OidcClient::generate_code_verifier();
     let challenge = pep::oidc_client::OidcClient::generate_code_challenge(&verifier);
     let state = pep::oidc_client::OidcClient::generate_state();
@@ -158,7 +163,23 @@ async fn mcp_auth<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult
             .unwrap_or_default()
             .as_secs();
         let expires_epoch = now + tokens.expires_in.unwrap_or(900);
-        epoch_to_rfc3339_local(expires_epoch)
+        // Inline RFC-3339 conversion (days + hms)
+        let days = expires_epoch / 86400;
+        let rem = expires_epoch % 86400;
+        let h = rem / 3600;
+        let m = (rem % 3600) / 60;
+        let s = rem % 60;
+        let z = days as i64 + 719468;
+        let era = if z >= 0 { z } else { z - 146096 } / 146097;
+        let doe = (z - era * 146097) as u64;
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        let y = yoe as i64 + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let mon = if mp < 10 { mp + 3 } else { mp - 9 };
+        let yr = if mon <= 2 { y + 1 } else { y };
+        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", yr, mon, d, h, m, s)
     };
 
     let stored = StoredToken::new(
@@ -192,8 +213,14 @@ async fn mcp_auth<C: CommandContext>(ctx: &C, _matches: &ArgMatches) -> CliResul
 
 /// List all configured MCP servers and their authentication status.
 async fn mcp_list<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    let verbose = matches.try_get_flag("verbose").unwrap_or(false);
-    let mcp_config = &ctx.config().mcp;
+    let verbose = matches.get_flag("verbose");
+    let mcp_config = match ctx.config().mcp.as_ref() {
+        Some(m) => m,
+        None => {
+            ctx.log_info("MCP is not configured.");
+            return Ok(());
+        }
+    };
 
     if !mcp_config.enabled {
         ctx.log_info("MCP is disabled in configuration.");
@@ -287,7 +314,8 @@ async fn mcp_logout<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResu
         .ok_or_else(|| CliError::ValidationError("Missing credential name".to_string()))?;
 
     // Verify credential exists in config
-    let mcp_config = &ctx.config().mcp;
+    let mcp_config = ctx.config().mcp.as_ref()
+        .ok_or_else(|| CliError::ConfigError("MCP configuration not found".to_string()))?;
     if !mcp_config.credentials.contains_key(&cred_name) {
         return Err(CliError::ConfigError(format!(
             "Credential '{}' not found in [mcp.credentials]",
@@ -439,7 +467,8 @@ async fn mcp_debug<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResul
         .cloned()
         .ok_or_else(|| CliError::ValidationError("Missing server name".to_string()))?;
 
-    let mcp_config = &ctx.config().mcp;
+    let mcp_config = ctx.config().mcp.as_ref()
+        .ok_or_else(|| CliError::ConfigError("MCP configuration not found".to_string()))?;
 
     // Find server by name
     let server = mcp_config
