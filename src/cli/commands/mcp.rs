@@ -150,11 +150,22 @@ async fn mcp_auth<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult
     let token_store = pep::FileTokenStore::new(&agent_name);
 
     use pep::token_store::StoredToken;
+
+    // Compute expires_at as RFC-3339 from expires_in seconds
+    let expires_at = {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let expires_epoch = now + tokens.expires_in.unwrap_or(900);
+        epoch_to_rfc3339_local(expires_epoch)
+    };
+
     let stored = StoredToken::new(
         &tokens.access_token,
         tokens.refresh_token.clone(),
         &tokens.token_type,
-        &pep::token_provider::compute_expires_at_str(tokens.expires_in),
+        &expires_at,
         tokens.scope.clone(),
     );
 
