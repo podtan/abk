@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.57] - 2026-06-27
+
+### Fixed
+- **fix(observability): multi-user /tmp/{agent_name} permission fix** —
+  On multi-user systems, the first user to run the agent creates `/tmp/{agent_name}/`
+  with mode 0755, blocking all other users. Now sets `0o1777` (world-writable + sticky
+  bit, same as `/tmp` itself) after `create_dir_all()`. Each user can write their own
+  log files but cannot interfere with others'.
+
 ## [0.5.51] - 2026-06-08
 
 ### Fixed

@@ -97,6 +97,16 @@ impl Logger {
         std::fs::create_dir_all(&log_dir)
             .with_context(|| format!("Failed to create log directory: {}", log_dir.display()))?;
 
+        // On multi-user systems, the /tmp/{agent_name}/ directory may be created
+        // by one user, preventing others from writing. Set world-writable + sticky
+        // bit (0o1777, same as /tmp itself) so all users can create their own log
+        // files, but only the file owner can delete/rename them.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&log_dir, std::fs::Permissions::from_mode(0o1777));
+        }
+
         let log_file = log_dir.join(filename);
 
         let log_level = log_level.unwrap_or("INFO").to_string();
