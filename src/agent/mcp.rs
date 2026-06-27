@@ -273,6 +273,54 @@ async fn build_registry_config(
                         );
                     }
                 }
+                McpCredentialConfig::Interactive {
+                    issuer_url,
+                    client_id,
+                    client_secret,
+                    scope,
+                    redirect_port,
+                } => {
+                    #[cfg(feature = "registry-mcp-token")]
+                    {
+                        use pep::token_provider::{
+                            InteractiveConfig, InteractiveTokenProvider,
+                            TokenProviderEnum,
+                        };
+                        use pep::token_store::{FileTokenStore, TokenStore};
+                        use std::sync::Arc;
+
+                        let agent_name = std::env::var("ABK_AGENT_NAME")
+                            .unwrap_or_else(|_| "trustee".into());
+
+                        let token_store: Arc<dyn TokenStore> =
+                            Arc::new(FileTokenStore::new(&agent_name));
+
+                        let provider = InteractiveTokenProvider::with_store(
+                            InteractiveConfig {
+                                issuer_url: resolve_env_var(issuer_url),
+                                client_id: resolve_env_var(client_id),
+                                client_secret: client_secret.as_ref().map(|s| resolve_env_var(s)),
+                                redirect_uri: format!("http://localhost:{}/callback", redirect_port),
+                                scope: resolve_env_var(scope),
+                                credential_name: cred_name.to_string(),
+                            },
+                            token_store,
+                        );
+
+                        crate::observability::tee_eprintln(
+                            &format!("[MCP] Interactive token provider attached for '{}' (credential={}).", name, cred_name)
+                        );
+
+                        config = config.with_token_provider(TokenProviderEnum::Interactive(provider));
+                    }
+                    #[cfg(not(feature = "registry-mcp-token"))]
+                    {
+                        let _ = (issuer_url, client_id, client_secret, scope, redirect_port);
+                        crate::observability::tee_eprintln(
+                            &format!("Warning: Server '{}' uses interactive credentials but registry-mcp-token feature is disabled.", name)
+                        );
+                    }
+                }
             }
             return config;
         } else {

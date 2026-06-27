@@ -2238,12 +2238,13 @@ dependencies = [
 
 [[package]]
 name = "pep"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fbd68da9bbf4925445386abf9812d7a85be92281a4804ff185ef5d7f103da9c"
+checksum = "3940d0b0734cb1c05b067a9b552112c077127c989c67d9d07e77a878bba87031"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "dirs 5.0.1",
  "http",
  "jsonwebtoken",
  "rand 0.8.5",

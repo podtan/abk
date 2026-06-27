@@ -135,9 +135,10 @@ pub struct McpServerConfig {
 
 /// Named credential configuration for MCP server authentication.
 ///
-/// Supports two modes:
+/// Supports three modes:
 /// - `static`: A plain token string (same as `auth_token`, but reusable)
 /// - `service-account`: Long-lived API token → RFC 8693 exchange for short-lived OIDC access tokens
+/// - `interactive`: Browser-based OAuth login (PKCE) with stored tokens and auto-refresh
 ///
 /// # Example (TOML)
 ///
@@ -148,6 +149,15 @@ pub struct McpServerConfig {
 /// issuer_url = "https://idm.tanbal.ir/oauth2/openid/pdt-api"
 /// client_id = "pdt-api"
 /// audience = "pdt-api"
+/// ```
+///
+/// ```toml
+/// [mcp.credentials.kanidm_interactive]
+/// type = "interactive"
+/// issuer_url = "https://idm.tanbal.ir/oauth2/openid/pdt-api"
+/// client_id = "pdt-api"
+/// scope = "openid profile email groups"
+/// redirect_port = 8765
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -173,6 +183,28 @@ pub enum McpCredentialConfig {
         /// Scopes to request during exchange (optional, default: `openid profile email`).
         scope: Option<String>,
     },
+    /// Interactive browser-based OAuth login with PKCE.
+    ///
+    /// Tokens are obtained via `trustee mcp auth` and stored on disk.
+    /// The `InteractiveTokenProvider` loads/refreshes them automatically.
+    Interactive {
+        /// OIDC issuer URL.
+        issuer_url: String,
+        /// OAuth2 client ID.
+        client_id: String,
+        /// OAuth2 client secret (optional for public clients).
+        client_secret: Option<String>,
+        /// OAuth2 scopes to request.
+        scope: String,
+        /// Local port for the OAuth callback server.
+        #[serde(default = "default_redirect_port")]
+        redirect_port: u16,
+    },
+}
+
+/// Default redirect port for interactive OAuth callback.
+fn default_redirect_port() -> u16 {
+    8765
 }
 
 fn default_transport() -> String {
