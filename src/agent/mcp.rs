@@ -249,7 +249,7 @@ async fn build_registry_config(
 
                     #[cfg(feature = "registry-mcp-token")]
                     {
-                        use pep::token_provider::{ServiceAccountConfig, ServiceAccountTokenProvider, TokenProvider};
+                        use pep::token_provider::{ServiceAccountConfig, ServiceAccountTokenProvider, TokenProviderEnum};
                         let provider = ServiceAccountTokenProvider::new(ServiceAccountConfig {
                             service_token: svc_token,
                             issuer_url: issuer,
@@ -260,22 +260,10 @@ async fn build_registry_config(
                         });
 
                         crate::observability::tee_eprintln(
-                            &format!("[MCP] Exchanging service token for '{}' (audience={})...", name, &config.name)
+                            &format!("[MCP] Service account token provider attached for '{}' (audience={}). Token will be exchanged lazily with automatic refresh.", name, &config.name)
                         );
 
-                        match provider.get_token().await {
-                            Ok(access_token) => {
-                                crate::observability::tee_eprintln(
-                                    &format!("[MCP] ✓ Token exchange successful for '{}'", name)
-                                );
-                                config = config.with_auth(access_token);
-                            }
-                            Err(e) => {
-                                crate::observability::tee_eprintln(
-                                    &format!("[MCP] Warning: Token exchange failed for '{}': {}. Continuing without auth.", name, e)
-                                );
-                            }
-                        }
+                        config = config.with_token_provider(TokenProviderEnum::ServiceAccount(provider));
                     }
                     #[cfg(not(feature = "registry-mcp-token"))]
                     {

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.58] - 2026-06-27
+
+### Fixed
+- **fix(mcp): use dynamic token provider for service-account credentials** —
+  Previously, `build_registry_config()` eagerly exchanged the service token for
+  an access token and stored it as a static `auth_token`. The access token
+  expired after ~15 minutes, causing MCP tool calls to fail on long agent
+  sessions. Now attaches a `ServiceAccountTokenProvider` via
+  `with_token_provider()`, which lazily obtains and automatically refreshes
+  tokens 30 seconds before expiry.
+
 ## [0.5.57] - 2026-06-27
 
 ### Fixed
