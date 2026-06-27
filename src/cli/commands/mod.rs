@@ -12,5 +12,7 @@ pub mod checkpoints;
 pub mod resume;
 pub mod run;
 pub mod extension;
+#[cfg(feature = "registry-mcp")]
+pub mod mcp;
 
 
