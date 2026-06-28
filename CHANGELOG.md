@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.58] - 2026-06-27
+## [0.6.2] - 2026-06-07
+
+### Changed
+- Updated `cats` dependency to 0.1.28 — removes the interactive command detector
+  that caused excessive false positives (commands killed for containing words
+  like `password:`, `Are you sure`, `Permission denied` in their output).
+
+## [0.6.1] - 2026-06-07
 
 ### Fixed
 - **fix(mcp): use dynamic token provider for service-account credentials** —
