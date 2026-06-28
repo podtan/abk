@@ -19,7 +19,7 @@ use crate::extension::LifecycleExtensionInstance;
 macro_rules! debug {
     ($($arg:tt)*) => {
         if std::env::var("RUST_LOG").map(|v| v.to_lowercase().contains("debug")).unwrap_or(false) {
-            eprintln!("[DEBUG LIFECYCLE] {}", format!($($arg)*));
+            crate::observability::tee_eprintln(&format!("[DEBUG LIFECYCLE] {}", format!($($arg)*)));
         }
     };
 }
@@ -337,7 +337,7 @@ pub async fn find_lifecycle_plugin_with_config(
         let manifest_path = path.join("extension.toml");
         if manifest_path.exists() {
             debug!("Found legacy lifecycle extension at: {}", path.display());
-            eprintln!("[WARN] Using deprecated lifecycle plugin location. Please migrate to ~/.{}/extensions/coder-lifecycle/", agent_name);
+            crate::observability::tee_eprintln(&format!("[WARN] Using deprecated lifecycle plugin location. Please migrate to ~/.{}/extensions/coder-lifecycle/", agent_name));
             return Ok(Box::new(WasmLifecycle::new(path.clone()).await?));
         }
         

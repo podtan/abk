@@ -112,9 +112,9 @@ impl ExtensionManager {
                         }
                         Err(e) => {
                             // Log warning but continue discovering other extensions
-                            eprintln!(
-                                "[WARN] Failed to parse extension manifest {:?}: {}",
-                                manifest_path, e
+                            crate::observability::tee_eprintln(
+                                &format!("[WARN] Failed to parse extension manifest {:?}: {}",
+                                manifest_path, e)
                             );
                         }
                     }

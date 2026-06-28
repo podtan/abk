@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-07
+
+### Fixed
+- **fix(observability): replace all raw `eprintln!` with TUI-safe `tee_eprintln`** —
+  raw `eprintln!` calls throughout the codebase were writing directly to stderr,
+  bypassing the TUI mode check. In TUI mode (alternate screen), this corrupted
+  the ratatui display — particularly MCP server errors and timeouts appearing as
+  garbage text in the bottom status box. All `eprintln!` calls now go through
+  `crate::observability::tee_eprintln()` which suppresses console output in TUI
+  mode while still logging to the log file. Affected modules: `registry/client.rs`
+  (MCP auth failures, MCP init timeouts), `lifecycle/mod.rs`, `provider/factory.rs`,
+  `provider/wasm/mod.rs`, `provider/extension.rs`, `config/environment.rs`,
+  `checkpoint/storage.rs`, `orchestration/runtime.rs`, `extension/mod.rs`,
+  `cli/utils.rs`.
+
 ## [0.6.3] - 2026-06-07
 
 ### Fixed
@@ -15,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   causing compilation failures when abk was built without the `registry-mcp` feature
   (e.g. by trustee-tui which only enables `cli`, `orchestration`, `agent`, `observability`,
   `extension`).
+
+### Changed
+- Updated `cats` dependency to 0.1.28 — removes the interactive command detector
+  that caused excessive false positives (commands killed for containing words
+  like `password:`, `Are you sure`, `Permission denied` in their output).
 
 ## [0.6.3] - 2026-06-07
 
@@ -30,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `cats` dependency to 0.1.28 — removes the interactive command detector
   that caused excessive false positives (commands killed for containing words
   like `password:`, `Are you sure`, `Permission denied` in their output).
+
+## [0.6.1] - 2026-06-07
 
 ## [0.6.1] - 2026-06-07
 

@@ -27,7 +27,7 @@ impl EnvironmentLoader {
         // expect default values.
         if env_file.is_some() && env_path.exists() {
             if let Err(e) = dotenv::from_path(env_path) {
-                eprintln!("Warning: Failed to load .env file: {}", e);
+                crate::observability::tee_eprintln(&format!("Warning: Failed to load .env file: {}", e));
             }
         }
 

@@ -180,7 +180,7 @@ impl McpClient {
             }
             Ok(None) => {}
             Err(e) => {
-                eprintln!("Warning: Failed to resolve auth token for '{}': {}", config.name, e);
+                crate::observability::tee_eprintln(&format!("Warning: Failed to resolve auth token for '{}': {}", config.name, e));
             }
         }
     }
@@ -370,7 +370,7 @@ impl McpClient {
         config: &McpServerConfig,
     ) -> RegistryResult<Vec<McpTool>> {
         if let Err(e) = self.initialize(config).await {
-            eprintln!("Warning: MCP initialize failed (continuing): {}", e);
+            crate::observability::tee_eprintln(&format!("Warning: MCP initialize failed (continuing): {}", e));
         }
 
         self.fetch_tools(config).await

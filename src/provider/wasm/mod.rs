@@ -40,7 +40,7 @@ use wasmtime_wasi::{WasiCtx, WasiView};
 macro_rules! debug {
     ($($arg:tt)*) => {
         if std::env::var("RUST_LOG").map(|v| v.to_lowercase().contains("debug")).unwrap_or(false) {
-            eprintln!("[DEBUG] {}", format!($($arg)*));
+            crate::observability::tee_eprintln(&format!("[DEBUG] {}", format!($($arg)*)));
         }
     };
 }

@@ -198,7 +198,7 @@ impl AgentRuntime {
         if let Some(ref logger) = self.logger {
             logger.tee_eprintln(&format!("Warning: {}", message));
         } else {
-            eprintln!("Warning: {}", message);
+            crate::observability::tee_eprintln(&format!("Warning: {}", message));
         }
     }
 

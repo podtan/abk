@@ -9,32 +9,32 @@ use anyhow::Result;
 /// Display a user-friendly error message with suggestions
 pub fn display_error_with_suggestions<E: std::fmt::Display>(error: &E, context: &str, app_name: Option<&str>) {
     let app = app_name.unwrap_or("agent");
-    
-    eprintln!("{} {}", "❌ Error:".red().bold(), context);
-    eprintln!("   {}", error.to_string().red());
+
+    crate::observability::tee_eprintln(&format!("{} {}", "❌ Error:".red().bold(), context));
+    crate::observability::tee_eprintln(&format!("   {}", error.to_string().red()));
 
     // Provide contextual suggestions based on error type
     let error_str = error.to_string().to_lowercase();
     if error_str.contains("no such file or directory") {
-        eprintln!("{}", "💡 Suggestions:".blue());
-        eprintln!("   • Check that the file or directory path is correct");
-        eprintln!("   • Run '{} sessions list' to see available sessions", app);
-        eprintln!("   • Use '{} init' to initialize a new project", app);
+        crate::observability::tee_eprintln(&format!("{}", "💡 Suggestions:".blue()));
+        crate::observability::tee_eprintln(&format!("   • Check that the file or directory path is correct"));
+        crate::observability::tee_eprintln(&format!("   • Run '{} sessions list' to see available sessions", app));
+        crate::observability::tee_eprintln(&format!("   • Use '{} init' to initialize a new project", app));
     } else if error_str.contains("permission denied") {
-        eprintln!("{}", "💡 Suggestions:".blue());
-        eprintln!("   • Check file permissions");
-        eprintln!("   • Try running with appropriate user permissions");
-        eprintln!("   • Ensure the ~/.{} directory is writable", app);
+        crate::observability::tee_eprintln(&format!("{}", "💡 Suggestions:".blue()));
+        crate::observability::tee_eprintln(&format!("   • Check file permissions"));
+        crate::observability::tee_eprintln(&format!("   • Try running with appropriate user permissions"));
+        crate::observability::tee_eprintln(&format!("   • Ensure the ~/.{} directory is writable", app));
     } else if error_str.contains("session") && error_str.contains("not found") {
-        eprintln!("{}", "💡 Suggestions:".blue());
-        eprintln!("   • Run '{} sessions list' to see available sessions", app);
-        eprintln!("   • Check the session ID spelling");
-        eprintln!("   • Use '{} sessions validate' to check for issues", app);
+        crate::observability::tee_eprintln(&format!("{}", "💡 Suggestions:".blue()));
+        crate::observability::tee_eprintln(&format!("   • Run '{} sessions list' to see available sessions", app));
+        crate::observability::tee_eprintln(&format!("   • Check the session ID spelling"));
+        crate::observability::tee_eprintln(&format!("   • Use '{} sessions validate' to check for issues", app));
     } else if error_str.contains("connection") || error_str.contains("network") {
-        eprintln!("{}", "💡 Suggestions:".blue());
-        eprintln!("   • Check your internet connection");
-        eprintln!("   • Verify API endpoints are accessible");
-        eprintln!("   • Try again in a few moments");
+        crate::observability::tee_eprintln(&format!("{}", "💡 Suggestions:".blue()));
+        crate::observability::tee_eprintln(&format!("   • Check your internet connection"));
+        crate::observability::tee_eprintln(&format!("   • Verify API endpoints are accessible"));
+        crate::observability::tee_eprintln(&format!("   • Try again in a few moments"));
     }
 }
 

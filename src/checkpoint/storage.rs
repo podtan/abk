@@ -102,14 +102,14 @@ impl CheckpointStorageManager {
                     
                 let collection = &backend_config.collection;
                 
-                eprintln!("[checkpoint] Connecting to DocumentDB: database={}, collection={}", database, collection);
+                crate::observability::tee_eprintln(&format!("[checkpoint] Connecting to DocumentDB: database={}, collection={}", database, collection));
                 
                 let backend = DocumentDBStorageBackend::new(&connection_string, &database, collection)
                     .await
                     .map_err(|e| CheckpointError::config(format!("Failed to connect to DocumentDB: {}", e)))?;
                 
                 if backend.is_available().await {
-                    eprintln!("[checkpoint] ✅ DocumentDB backend connected successfully");
+                    crate::observability::tee_eprintln("[checkpoint] ✅ DocumentDB backend connected successfully");
                     Ok(Some(Arc::new(backend)))
                 } else {
                     Err(CheckpointError::config("DocumentDB backend not available"))
