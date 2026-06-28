@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-28
+
+### Added
+- **feat(output): `OutputEvent::McpServerStatus` variant** — new structured event
+  for MCP server connection status. Emitted during agent initialization through
+  the existing `OutputSink` pattern, keeping ABK TUI-agnostic. Carries server
+  name, connected/failed flag, tool count, and optional error message.
+- **feat(agent): `McpServerInfo` struct and `server_statuses` field on `McpToolLoader`** —
+  collects per-server connection results during `McpToolLoader::new()`. Each server
+  (success or failure) is tracked with name, connected flag, tool count, and error.
+- **feat(agent): `Agent::emit_mcp_server_statuses()` method** — bridges MCP server
+  status data from the loader to the output sink. Called from `execute_run()` after
+  agent initialization so TUI/CLI consumers receive MCP status events.
+
+### Changed
+- `execute_run()` in `cli/commands/run.rs` now calls `agent.emit_mcp_server_statuses()`
+  after the output sink is wired up, enabling TUI to display MCP server health.
+
 ## [0.7.0] - 2026-06-07
 
 ### Fixed

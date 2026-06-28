@@ -80,6 +80,14 @@ pub enum OutputEvent {
     Info {
         message: String,
     },
+
+    /// MCP server status during initialization
+    McpServerStatus {
+        name: String,
+        connected: bool,
+        tool_count: usize,
+        error: Option<String>,
+    },
 }
 
 impl std::fmt::Display for OutputEvent {
@@ -127,6 +135,14 @@ impl std::fmt::Display for OutputEvent {
             }
             Self::Info { message } => {
                 write!(f, "{}", message)
+            }
+            Self::McpServerStatus { name, connected, tool_count, error } => {
+                if *connected {
+                    write!(f, "✓ MCP server '{}': {} tools", name, tool_count)
+                } else {
+                    let err = error.as_deref().unwrap_or("unknown error");
+                    write!(f, "✗ MCP server '{}': {}", name, err)
+                }
             }
         }
     }

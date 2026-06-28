@@ -109,6 +109,10 @@ pub async fn execute_run<C: CommandContext>(
         agent.set_on_checkpoint_sender(Some(tx.clone()));
     }
 
+    // Emit MCP server status events through the output sink so the TUI (and
+    // other consumers) can display per-server connection health.
+    agent.emit_mcp_server_statuses();
+
     // Check for resume context — from TUI parameter OR from last_resume.json
     let resume_context = if let Some(ref info) = resume_info {
         // TUI provided resume info directly (no file needed)

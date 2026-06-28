@@ -12,6 +12,20 @@ use anyhow::Result;
 #[cfg(feature = "registry-mcp")]
 use std::collections::HashMap;
 
+/// Status of a single MCP server connection after initialization.
+#[cfg(feature = "registry-mcp")]
+#[derive(Debug, Clone)]
+pub struct McpServerInfo {
+    /// Server name from config
+    pub name: String,
+    /// Whether the server connected successfully
+    pub connected: bool,
+    /// Number of tools loaded from this server
+    pub tool_count: usize,
+    /// Error message if the server failed to connect
+    pub error: Option<String>,
+}
+
 /// MCP tools container that can be merged with CATS tools.
 #[cfg(feature = "registry-mcp")]
 pub struct McpToolLoader {
@@ -23,6 +37,10 @@ pub struct McpToolLoader {
     server_configs: HashMap<String, RegistryServerConfig>,
     /// HTTP client for making tool calls
     client: McpClient,
+    /// Per-server connection status collected during `new()`.
+    /// Used by the agent to emit `OutputEvent::McpServerStatus` events
+    /// through the output sink.
+    pub server_statuses: Vec<McpServerInfo>,
 }
 
 #[cfg(feature = "registry-mcp")]
@@ -46,8 +64,11 @@ impl McpToolLoader {
                 tool_count: 0,
                 server_configs,
                 client,
+                server_statuses: Vec::new(),
             });
         }
+
+        let mut server_statuses = Vec::new();
 
         for server in &config.servers {
             // Skip non-HTTP transports for now
@@ -87,20 +108,40 @@ impl McpToolLoader {
                                 &format!("✓ Loaded {} tools from MCP server '{}'",
                                 registered, server.name)
                             );
+                            server_statuses.push(McpServerInfo {
+                                name: server.name.clone(),
+                                connected: true,
+                                tool_count: registered,
+                                error: None,
+                            });
                         }
                         Err(e) => {
+                            let err_msg = format!("Failed to register tools: {}", e);
                             crate::observability::tee_eprintln(
                                 &format!("Warning: Failed to register tools from '{}': {}",
                                 server.name, e)
                             );
+                            server_statuses.push(McpServerInfo {
+                                name: server.name.clone(),
+                                connected: false,
+                                tool_count: 0,
+                                error: Some(err_msg),
+                            });
                         }
                     }
                 }
                 Err(e) => {
+                    let err_msg = format!("{}", e);
                     crate::observability::tee_eprintln(
                         &format!("Warning: Failed to fetch tools from MCP server '{}': {}",
                         server.name, e)
                     );
+                    server_statuses.push(McpServerInfo {
+                        name: server.name.clone(),
+                        connected: false,
+                        tool_count: 0,
+                        error: Some(err_msg),
+                    });
                 }
             }
         }
@@ -110,6 +151,7 @@ impl McpToolLoader {
             tool_count: total_tools,
             server_configs,
             client,
+            server_statuses,
         })
     }
 

@@ -425,6 +425,27 @@ impl Agent {
             .context("Failed to render format_error template")
     }
 
+    /// Emit MCP server status events through the output sink.
+    ///
+    /// This should be called after agent initialization (and after MCP tools
+    /// are loaded) so that TUI/CLI consumers receive the status of each MCP
+    /// server connection.
+    #[cfg(feature = "registry-mcp")]
+    pub fn emit_mcp_server_statuses(&self) {
+        if let Some(ref mcp) = self.mcp_tools {
+            for status in &mcp.server_statuses {
+                self.output_sink.emit(
+                    crate::orchestration::output::OutputEvent::McpServerStatus {
+                        name: status.name.clone(),
+                        connected: status.connected,
+                        tool_count: status.tool_count,
+                        error: status.error.clone(),
+                    }
+                );
+            }
+        }
+    }
+
     /// Set the output sink used for structured events.
     ///
     /// Call this after construction to override the default `StdoutSink`.
