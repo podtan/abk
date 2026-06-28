@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-06-07
+
+### Fixed
+- **fix(cli): gate `mcp` command behind `registry-mcp` feature in runner** — the match
+  arm in `run_configured_cli()` was missing a `#[cfg(feature = "registry-mcp")]` guard,
+  causing compilation failures when abk was built without the `registry-mcp` feature
+  (e.g. by trustee-tui which only enables `cli`, `orchestration`, `agent`, `observability`,
+  `extension`).
+
+## [0.6.3] - 2026-06-07
+
+### Fixed
+- **fix(cli): gate `mcp` command routing behind `registry-mcp` feature** — the runner
+  unconditionally referenced `crate::cli::commands::mcp::mcp_command` even when the
+  `registry-mcp` feature was disabled, causing compilation failure for downstream
+  consumers that enable `cli` without `registry-mcp`.
+
 ## [0.6.2] - 2026-06-07
 
 ### Changed

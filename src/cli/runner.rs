@@ -775,6 +775,7 @@ pub async fn run_configured_cli<C: CommandContext>(
         Some(("extension", sub_matches)) => {
             extension_command(ctx, sub_matches).await
         }
+        #[cfg(feature = "registry-mcp")]
         Some(("mcp", sub_matches)) => {
             crate::cli::commands::mcp::mcp_command(ctx, sub_matches).await
         }
