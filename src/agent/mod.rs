@@ -175,11 +175,14 @@ impl Agent {
                 if mcp_config.enabled {
                     match McpToolLoader::new(mcp_config).await {
                         Ok(loader) => {
-                            if loader.has_tools() {
-                                Some(loader)
-                            } else {
-                                None
-                            }
+                            // Always keep the loader, even when no tools loaded.
+                            // The loader carries `server_statuses` with per-server
+                            // error details that must be emitted to the TUI/CLI
+                            // even when ALL servers fail.  Previously, discarding
+                            // the loader when `has_tools()` was false caused the
+                            // MCP panel to permanently show "0/0 (none)" with no
+                            // indication that servers were attempted.
+                            Some(loader)
                         }
                         Err(e) => {
                             crate::observability::tee_eprintln(&format!("Warning: Failed to load MCP tools: {}", e));
@@ -445,6 +448,10 @@ impl Agent {
             }
         }
     }
+
+    /// No-op when `registry-mcp` feature is disabled.
+    #[cfg(not(feature = "registry-mcp"))]
+    pub fn emit_mcp_server_statuses(&self) {}
 
     /// Set the output sink used for structured events.
     ///
