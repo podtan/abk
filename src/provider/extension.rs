@@ -249,6 +249,9 @@ impl LlmProvider for ExtensionProvider {
         let tools_json = config.tools.as_ref().map(|t| serde_json::to_string(t)).transpose()?;
         let tool_choice_json = config.tool_choice.as_ref().map(|tc| serde_json::to_string(tc)).transpose()?;
 
+        // Log messages JSON (what we're sending to the WASM for formatting)
+        debug!("\n===== ExtensionProvider generate() MESSAGES_JSON =====\n{}\n===== END MESSAGES_JSON =====", messages_json);
+
         // Format request using extension (async)
         let request_body = {
             let mut manager = self.manager.lock().await;
@@ -264,6 +267,9 @@ impl LlmProvider for ExtensionProvider {
                 false, // Non-streaming
             ).await.map_err(|e| anyhow::anyhow!("format_request_from_json failed: {}", e))?
         };
+
+        // Log the formatted request body (what's actually sent to the API)
+        debug!("\n===== ExtensionProvider generate() REQUEST BODY =====\n{}\n===== END REQUEST BODY =====", request_body);
 
         // Get API URL (async)
         let api_url = {
@@ -392,6 +398,9 @@ impl LlmProvider for ExtensionProvider {
         let tools_json = config.tools.as_ref().map(|t| serde_json::to_string(t)).transpose()?;
         let tool_choice_json = config.tool_choice.as_ref().map(|tc| serde_json::to_string(tc)).transpose()?;
 
+        // Log messages JSON (what we're sending to the WASM for formatting)
+        debug!("\n===== ExtensionProvider stream() MESSAGES_JSON =====\n{}\n===== END MESSAGES_JSON =====", messages_json);
+
         // Format request with streaming enabled (async)
         let request_body = {
             let mut manager = self.manager.lock().await;
@@ -407,6 +416,9 @@ impl LlmProvider for ExtensionProvider {
                 true, // Enable streaming
             ).await.map_err(|e| anyhow::anyhow!("format_request_from_json failed: {}", e))?
         };
+
+        // Log the formatted request body (what's actually sent to the API)
+        debug!("\n===== ExtensionProvider stream() REQUEST BODY =====\n{}\n===== END REQUEST BODY =====", request_body);
 
         // Get API URL (async)
         let api_url = {
