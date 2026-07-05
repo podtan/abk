@@ -168,15 +168,25 @@ pub trait CommandContext: Send + Sync {
         path.exists()
     }
 
-    /// Read a line from stdin with prompt
+    /// Read a line from stdin with prompt.
+    ///
+    /// Performs the blocking stdin read in a dedicated OS thread to avoid
+    /// tokio/IOCP conflicts on Windows when called from within the async
+    /// runtime (issue #2dd0cbb2). This works regardless of tokio runtime
+    /// flavor (multi-thread or current-thread).
     fn read_line(&self, prompt: &str) -> CliResult<String> {
         use std::io::{self, Write};
         print!("{}", prompt);
         io::stdout().flush()?;
-        
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        Ok(input)
+
+        // Read stdin in a dedicated thread so the blocking syscall does not
+        // stall the tokio worker thread or conflict with IOCP on Windows.
+        let handle = std::thread::spawn(|| {
+            let mut input = String::new();
+            let _ = io::stdin().read_line(&mut input);
+            input
+        });
+        Ok(handle.join().unwrap_or_default())
     }
 
     /// Create an agent instance for executing tasks

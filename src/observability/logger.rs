@@ -502,7 +502,10 @@ impl Logger {
     /// Tee-print: write to both stdout and log file.
     /// Use this for raw output that should be mirrored exactly.
     pub fn tee_println(&self, message: &str) {
-        if !is_tui_mode() { println!("{}", message); }
+        if !is_tui_mode() {
+            println!("{}", message);
+            let _ = std::io::stdout().flush();
+        }
         let _ = self.append_to_log(&format!("{}\n", message));
     }
 
@@ -566,6 +569,7 @@ pub fn strip_ansi(s: &str) -> String {
 pub fn tee_println(message: &str) {
     if !is_tui_mode() {
         println!("{}", message);
+        let _ = std::io::stdout().flush();
     }
     append_to_global_log(&format!("{}\n", strip_ansi(message)));
 }

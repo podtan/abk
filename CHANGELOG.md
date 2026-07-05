@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-07-05
+
+### Fixed
+- **fix(resume): `resume -i` hang on Windows** — `read_line` now performs the blocking stdin read in a dedicated OS thread (`std::thread::spawn`) to avoid tokio/IOCP conflict on Windows where console input notifications may not reach the blocking read under the async runtime (issue #2dd0cbb2).
+- **fix(observability): add explicit `stdout().flush()` to `tee_println`** — Both `Logger::tee_println` method and standalone `tee_println` function now flush stdout after printing, matching the existing behavior of `tee_print`. Fixes delayed/garbled output on Windows ConPTY/Windows Terminal.
+
 ## [0.7.3] - 2026-06-30
 
 ### Fixed
