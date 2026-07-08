@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-07-08
+
+### Changed
+- **perf(checkpoint): eliminate per-iteration `_agent.json` and `_metadata.json` duplicates** —
+  `SessionStorage::save_checkpoint()` now writes `session_agent.json` ONCE per session (first
+  checkpoint only) instead of duplicating the 8KB agent state across N checkpoint files.
+  Per-checkpoint `_metadata.json` files are no longer written; all metadata lives in the
+  existing `checkpoints.json` index. Only `{id}_conversation.json` is written per checkpoint
+  (legitimately unique). Reduces a 99-iteration session from 299 files to 101 files,
+  eliminating ~1.2MB of redundant disk/DocumentDB writes.
+- **Backward compatible**: Old sessions with per-checkpoint `_agent.json` / `_metadata.json`
+  files remain fully readable via fallback logic in `try_load_from_local()` /
+  `try_load_from_remote()`. Resume API is unchanged.
+- Applies to both `SessionStorage` (V1, active) and `SessionStorageV2` (V2).
+- Works with all storage modes: Local, Remote (DocumentDB), and Mirror.
+
 ## [0.7.4] - 2026-07-05
 
 ### Fixed

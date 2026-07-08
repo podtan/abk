@@ -23,6 +23,9 @@ pub struct SessionStorageV2 {
 
     /// Events log handler
     events_log: EventsLog,
+
+    /// Tracks whether `session_agent.json` has been written
+    session_agent_written: bool,
 }
 
 impl SessionStorageV2 {
@@ -40,11 +43,15 @@ impl SessionStorageV2 {
         // Create events log handler
         let events_log = EventsLog::new(&session_path);
 
+        // Check if session_agent.json already exists
+        let session_agent_written = session_path.join("session_agent.json").exists();
+
         Ok(Self {
             session_path,
             metadata,
             index,
             events_log,
+            session_agent_written,
         })
     }
 
@@ -60,11 +67,15 @@ impl SessionStorageV2 {
         // Create events log handler
         let events_log = EventsLog::new(&session_path);
 
+        // Check if session_agent.json already exists
+        let session_agent_written = session_path.join("session_agent.json").exists();
+
         Ok(Self {
             session_path,
             metadata,
             index,
             events_log,
+            session_agent_written,
         })
     }
 
@@ -81,12 +92,19 @@ impl SessionStorageV2 {
 
     /// Save checkpoint with split files
     ///
-    /// Creates:
-    /// - `{checkpoint_id}_metadata.json`
-    /// - `{checkpoint_id}_agent.json`
-    /// - `{checkpoint_id}_conversation.json`
+    /// ## Optimized layout (avoids per-iteration duplicates)
     ///
-    /// Also updates `checkpoints.json` index.
+    /// **Session-level (written once):**
+    /// - `session_agent.json` — agent state snapshot, written on first checkpoint only
+    ///
+    /// **Per-checkpoint:**
+    /// - `{checkpoint_id}_conversation.json` — conversation state (legitimately unique)
+    ///
+    /// **Index:**
+    /// - `checkpoints.json` — contains all `CheckpointMetadataV2` entries
+    ///
+    /// Old sessions with per-checkpoint `_agent.json` / `_metadata.json` files
+    /// remain readable via fallback in `load_checkpoint`.
     pub async fn save_checkpoint(
         &mut self,
         metadata: CheckpointMetadataV2,
@@ -95,29 +113,24 @@ impl SessionStorageV2 {
     ) -> CheckpointResult<()> {
         let checkpoint_id = &metadata.checkpoint_id;
 
-        // 1. Save metadata file
-        let metadata_path = self
-            .session_path
-            .join(format!("{}_metadata.json", checkpoint_id));
-        AtomicOps::write_json(&metadata_path, &metadata)?;
+        // 1. Write session_agent.json ONCE (first checkpoint or if file doesn't exist yet)
+        if !self.session_agent_written {
+            let agent_path = self.session_path.join("session_agent.json");
+            AtomicOps::write_json(&agent_path, agent_state)?;
+            self.session_agent_written = true;
+        }
 
-        // 2. Save agent state file
-        let agent_path = self
-            .session_path
-            .join(format!("{}_agent.json", checkpoint_id));
-        AtomicOps::write_json(&agent_path, agent_state)?;
-
-        // 3. Save conversation file
+        // 2. Save conversation file (per-checkpoint, legitimately unique)
         let conv_path = self
             .session_path
             .join(format!("{}_conversation.json", checkpoint_id));
         AtomicOps::write_json(&conv_path, conversation)?;
 
-        // 4. Update index
+        // 3. Update index (replaces per-checkpoint _metadata.json)
         self.index.add(metadata);
         self.save_index().await?;
 
-        // 5. Update session metadata
+        // 4. Update session metadata
         self.metadata.checkpoint_count = self.index.len();
         self.metadata.touch();
         self.save_metadata().await?;
@@ -126,27 +139,42 @@ impl SessionStorageV2 {
     }
 
     /// Load checkpoint by ID
+    ///
+    /// Uses session-level `session_agent.json` and in-memory index for metadata.
+    /// Falls back to legacy per-checkpoint `_agent.json` and `_metadata.json`
+    /// for backward compatibility.
     pub async fn load_checkpoint(
         &self,
         checkpoint_id: &str,
     ) -> CheckpointResult<(CheckpointMetadataV2, AgentStateV2, ConversationFileV2)> {
-        // 1. Load metadata
-        let metadata_path = self
-            .session_path
-            .join(format!("{}_metadata.json", checkpoint_id));
+        // 1. Load metadata: in-memory index first, fallback to per-checkpoint file
+        let metadata = if let Some(m) = self.index.get(checkpoint_id) {
+            m.clone()
+        } else {
+            // Legacy fallback: per-checkpoint metadata file
+            let metadata_path = self
+                .session_path
+                .join(format!("{}_metadata.json", checkpoint_id));
 
-        if !metadata_path.exists() {
-            return Err(CheckpointError::CheckpointNotFound {
-                checkpoint_id: checkpoint_id.to_string(),
-                session_id: self.metadata.session_id.clone(),
-            });
-        }
+            if !metadata_path.exists() {
+                return Err(CheckpointError::CheckpointNotFound {
+                    checkpoint_id: checkpoint_id.to_string(),
+                    session_id: self.metadata.session_id.clone(),
+                });
+            }
 
-        let metadata: CheckpointMetadataV2 = Self::load_json(&metadata_path).await?;
+            Self::load_json(&metadata_path).await?
+        };
 
-        // 2. Load agent state
-        let agent_path = self.session_path.join(&metadata.refs.agent_file);
-        let agent_state: AgentStateV2 = Self::load_json(&agent_path).await?;
+        // 2. Load agent state: session_agent.json first, fallback to per-checkpoint
+        let session_agent_path = self.session_path.join("session_agent.json");
+        let agent_state: AgentStateV2 = if session_agent_path.exists() {
+            Self::load_json(&session_agent_path).await?
+        } else {
+            // Legacy fallback
+            let agent_path = self.session_path.join(&metadata.refs.agent_file);
+            Self::load_json(&agent_path).await?
+        };
 
         // 3. Load conversation
         let conv_path = self.session_path.join(&metadata.refs.conversation_file);
@@ -180,16 +208,23 @@ impl SessionStorageV2 {
         Self::load_json(&metadata_path).await
     }
 
-    /// Load only agent state for a checkpoint
-    pub async fn load_agent_state(&self, checkpoint_id: &str) -> CheckpointResult<AgentStateV2> {
+    /// Load only agent state (session-level, shared across checkpoints)
+    pub async fn load_agent_state(&self, _checkpoint_id: &str) -> CheckpointResult<AgentStateV2> {
+        // Try session_agent.json first
+        let session_agent_path = self.session_path.join("session_agent.json");
+        if session_agent_path.exists() {
+            return Self::load_json(&session_agent_path).await;
+        }
+
+        // Legacy fallback: per-checkpoint agent file
         let agent_path = self
             .session_path
-            .join(format!("{}_agent.json", checkpoint_id));
+            .join(format!("{}_agent.json", _checkpoint_id));
 
         if !agent_path.exists() {
             return Err(CheckpointError::storage(format!(
                 "Agent state file not found for checkpoint {}",
-                checkpoint_id
+                _checkpoint_id
             )));
         }
 
@@ -216,12 +251,16 @@ impl SessionStorageV2 {
     }
 
     /// Delete a checkpoint
+    ///
+    /// Deletes only the per-checkpoint conversation file. Session-level files
+    /// (`session_agent.json`) are preserved. Legacy per-checkpoint files
+    /// (`_agent.json`, `_metadata.json`) are also cleaned up if they exist.
     pub async fn delete_checkpoint(&mut self, checkpoint_id: &str) -> CheckpointResult<()> {
-        // Remove files
+        // Remove conversation file (new + old format share this naming)
         let files = [
-            format!("{}_metadata.json", checkpoint_id),
-            format!("{}_agent.json", checkpoint_id),
             format!("{}_conversation.json", checkpoint_id),
+            format!("{}_metadata.json", checkpoint_id),  // Legacy cleanup
+            format!("{}_agent.json", checkpoint_id),     // Legacy cleanup
         ];
 
         for file in &files {
@@ -449,11 +488,13 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify files exist
-        assert!(session_path.join("001_metadata.json").exists());
-        assert!(session_path.join("001_agent.json").exists());
+        // Verify optimized files exist
+        assert!(session_path.join("session_agent.json").exists());
         assert!(session_path.join("001_conversation.json").exists());
         assert!(session_path.join("checkpoints.json").exists());
+        // Per-checkpoint _metadata.json and _agent.json should NOT exist
+        assert!(!session_path.join("001_metadata.json").exists());
+        assert!(!session_path.join("001_agent.json").exists());
 
         // Load checkpoint
         let (loaded_meta, loaded_agent, loaded_conv) =
