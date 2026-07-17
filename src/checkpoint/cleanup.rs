@@ -42,9 +42,9 @@ impl CleanupManager {
         let mut errors = Vec::new();
 
         if self.verbose {
-            println!("🧹 Starting cleanup with retention policy");
+            crate::observability::tee_println("🧹 Starting cleanup with retention policy");
             if self.dry_run {
-                println!("   Running in dry-run mode - no actual deletion");
+                crate::observability::tee_println("   Running in dry-run mode - no actual deletion");
             }
         }
 
@@ -56,12 +56,12 @@ impl CleanupManager {
                 freed_bytes += bytes;
 
                 if self.verbose {
-                    println!(
+                    crate::observability::tee_println(&format!(
                         "   Cleaned {} expired sessions ({} checkpoints, {})",
                         sessions,
                         checkpoints,
                         format_bytes(bytes)
-                    );
+                    ));
                 }
             }
             Err(e) => errors.push(format!("Failed to clean expired sessions: {}", e)),
@@ -79,12 +79,12 @@ impl CleanupManager {
                     freed_bytes += bytes;
 
                     if self.verbose && sessions > 0 {
-                        println!(
+                        crate::observability::tee_println(&format!(
                             "   Quota cleanup: {} sessions ({} checkpoints, {})",
                             sessions,
                             checkpoints,
                             format_bytes(bytes)
-                        );
+                        ));
                     }
                 }
                 Err(e) => errors.push(format!("Failed to enforce storage quota: {}", e)),
@@ -95,7 +95,7 @@ impl CleanupManager {
         match self.cleanup_empty_directories().await {
             Ok(dirs_removed) => {
                 if self.verbose && dirs_removed > 0 {
-                    println!("   Removed {} empty directories", dirs_removed);
+                    crate::observability::tee_println(&format!("   Removed {} empty directories", dirs_removed));
                 }
             }
             Err(e) => errors.push(format!("Failed to clean empty directories: {}", e)),
@@ -106,10 +106,10 @@ impl CleanupManager {
             Ok(temp_bytes) => {
                 freed_bytes += temp_bytes;
                 if self.verbose && temp_bytes > 0 {
-                    println!(
+                    crate::observability::tee_println(&format!(
                         "   Cleaned up {} of temporary files",
                         format_bytes(temp_bytes)
-                    );
+                    ));
                 }
             }
             Err(e) => errors.push(format!("Failed to clean temporary files: {}", e)),
@@ -174,11 +174,11 @@ impl CleanupManager {
                     if !self.dry_run {
                         if let Err(e) = fs::remove_dir_all(&session_path).await {
                             if self.verbose {
-                                println!(
+                                crate::observability::tee_println(&format!(
                                     "   Warning: Failed to delete {}: {}",
                                     session_path.display(),
                                     e
-                                );
+                                ));
                             }
                             continue;
                         }
@@ -189,7 +189,7 @@ impl CleanupManager {
                     freed_bytes += session_size;
 
                     if self.verbose {
-                        println!(
+                        crate::observability::tee_println(&format!(
                             "   {} session: {} ({} checkpoints, {})",
                             if self.dry_run {
                                 "Would delete"
@@ -199,7 +199,7 @@ impl CleanupManager {
                             session_entry.file_name().to_string_lossy(),
                             checkpoint_count,
                             format_bytes(session_size)
-                        );
+                        ));
                     }
                 }
             }
@@ -291,7 +291,7 @@ impl CleanupManager {
             freed_bytes += session_size;
 
             if self.verbose {
-                println!(
+                crate::observability::tee_println(&format!(
                     "   {} session for quota: {} ({} checkpoints, {})",
                     if self.dry_run {
                         "Would delete"
@@ -304,7 +304,7 @@ impl CleanupManager {
                         .to_string_lossy(),
                     checkpoint_count,
                     format_bytes(session_size)
-                );
+                ));
             }
         }
 
@@ -361,7 +361,7 @@ impl CleanupManager {
                 *removed_count += 1;
 
                 if self.verbose {
-                    println!(
+                    crate::observability::tee_println(&format!(
                         "   {} empty directory: {}",
                         if self.dry_run {
                             "Would remove"
@@ -369,7 +369,7 @@ impl CleanupManager {
                             "Removed"
                         },
                         dir_path.display()
-                    );
+                    ));
                 }
             }
 
@@ -438,13 +438,13 @@ impl CleanupManager {
 
                         if !self.dry_run {
                             if let Err(e) = fs::remove_file(&entry_path).await {
-                                if self.verbose {
-                                    println!(
-                                        "   Warning: Failed to delete temp file {}: {}",
-                                        entry_path.display(),
-                                        e
-                                    );
-                                }
+                            if self.verbose {
+                                crate::observability::tee_println(&format!(
+                                    "   Warning: Failed to delete temp file {}: {}",
+                                    entry_path.display(),
+                                    e
+                                ));
+                            }
                                 continue;
                             }
                         }
@@ -452,7 +452,7 @@ impl CleanupManager {
                         *freed_bytes += file_size;
 
                         if self.verbose {
-                            println!(
+                            crate::observability::tee_println(&format!(
                                 "   {} temp file: {} ({})",
                                 if self.dry_run {
                                     "Would delete"
@@ -461,7 +461,7 @@ impl CleanupManager {
                                 },
                                 filename,
                                 format_bytes(file_size)
-                            );
+                            ));
                         }
                     }
                 }

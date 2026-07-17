@@ -188,7 +188,7 @@ impl AgentRuntime {
     fn log_info(&self, message: &str) {
         if let Some(ref logger) = self.logger {
             logger.info(message);
-        } else {
+        } else if !crate::observability::is_tui_mode() {
             println!("INFO: {}", message);
         }
     }
@@ -206,7 +206,7 @@ impl AgentRuntime {
     fn tee_println(&self, message: &str) {
         if let Some(ref logger) = self.logger {
             logger.tee_println(message);
-        } else {
+        } else if !crate::observability::is_tui_mode() {
             println!("{}", message);
         }
     }

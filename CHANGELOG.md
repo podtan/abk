@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9] - 2026-07-17
+
+### Fixed
+- **fix(tui): gate all raw `println!`/`eprintln!` with `is_tui_mode()` checks** — `AgentRuntime::log_info()` and `AgentRuntime::tee_println()` in `orchestration/runtime.rs` had bare `println!` in their `else` branches (when `self.logger` is `None`). `CleanupManager` in `checkpoint/cleanup.rs` had ~15 `println!` calls gated only by `self.verbose`. These bypassed the TUI mode flag and wrote directly to stdout while ratatui held the terminal in raw/alternate-screen mode, causing orphan characters and jagged border boxes during streaming output. All occurrences now route through `tee_println()` or check `is_tui_mode()`.
+
 ## [0.7.8] - 2026-07-17
 
 ### Fixed
