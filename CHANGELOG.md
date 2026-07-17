@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-07-17
+
+### Added
+- **feat(provider): add native Rust OpenAI provider** — `OpenAIProvider` implements `LlmProvider` using pure `reqwest` (no wasmtime dependency). Handles non-streaming `generate()`, streaming `generate_stream()` with SSE parsing, tool calling, and reasoning content support for thinking models.
+- **feat(provider): split `provider` and `provider-wasm` features** — The `provider` feature no longer requires `wasmtime`/`wasmtime-wasi`. The new `provider-wasm` feature adds wasmtime for WASM-based extensions. This allows building agents with native providers only, significantly reducing compile times and binary size.
+
+### Changed
+- **refactor(factory): dispatch `LLM_PROVIDER=openai-unofficial` to native `OpenAIProvider`** — Default (unset) also routes to native. `LLM_PROVIDER=openai-unofficial-wasm` or any other value routes to the WASM `ExtensionProvider`.
+- **refactor(provider): gate `wasm` module behind `provider-wasm` feature** — The `extension` module is gated behind the `extension` feature.
+- **refactor(agent): use `provider-wasm` instead of direct `wasmtime` dependency** — The `agent` feature now transitively enables `provider-wasm` instead of listing `wasmtime`/`wasmtime-wasi` directly.
+
 ## [0.7.5] - 2026-07-08
 
 ### Changed

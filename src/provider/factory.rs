@@ -3,10 +3,15 @@
 //! This module provides a factory for dynamically creating LLM providers
 //! based on configuration and environment settings.
 //!
-//! The factory uses the extension system: ~/.{agent}/extensions/{name}/
+//! Dispatch logic:
+//! - `openai-unofficial` (or unset) → native Rust `OpenAIProvider` (no wasmtime)
+//! - `openai-unofficial-wasm` → WASM `ExtensionProvider`
+//! - Any other name → `ExtensionProvider` (WASM extension system)
 
 use crate::config::EnvironmentLoader;
 use crate::provider::LlmProvider;
+use crate::provider::openai::OpenAIProvider;
+#[cfg(feature = "extension")]
 use crate::provider::extension::ExtensionProvider;
 use anyhow::Result;
 use std::path::PathBuf;
@@ -25,19 +30,40 @@ pub struct ProviderFactory;
 impl ProviderFactory {
     /// Create a provider based on environment configuration
     ///
-    /// Uses extension system: ~/.{agent}/extensions/{name}/
-    ///
-    /// # Arguments
-    /// * `env` - Environment loader with configuration
-    ///
-    /// # Returns
-    /// A boxed LLM provider implementation
+    /// Dispatch:
+    /// - `openai-unofficial` or unset → native Rust `OpenAIProvider`
+    /// - `openai-unofficial-wasm` or any other → `ExtensionProvider` (WASM)
     pub async fn create(env: &EnvironmentLoader) -> Result<Box<dyn LlmProvider>> {
         let provider_name = env.llm_provider().unwrap_or_else(|| "openai-unofficial".to_string());
-        Self::create_extension_provider(&provider_name, env).await
+
+        debug!("Factory - provider_name: {}", provider_name);
+
+        // Route to native Rust provider for the default / native case
+        if provider_name == "openai-unofficial" {
+            debug!("Factory - using native Rust OpenAIProvider");
+            let provider = OpenAIProvider::new()?;
+            return Ok(Box::new(provider));
+        }
+
+        // Everything else goes through the WASM extension system
+        #[cfg(feature = "extension")]
+        {
+            debug!("Factory - using WASM ExtensionProvider for: {}", provider_name);
+            return Self::create_extension_provider(&provider_name, env).await;
+        }
+
+        #[cfg(not(feature = "extension"))]
+        {
+            anyhow::bail!(
+                "Provider '{}' requires the 'extension' feature (WASM), which is not enabled. \
+                 Set LLM_PROVIDER=openai-unofficial for the native Rust provider.",
+                provider_name
+            );
+        }
     }
 
-    /// Create an extension-based provider
+    /// Create an extension-based (WASM) provider
+    #[cfg(feature = "extension")]
     async fn create_extension_provider(
         provider_name: &str,
         env: &EnvironmentLoader,
