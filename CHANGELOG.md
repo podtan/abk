@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-07-17
+
+### Fixed
+- **fix(provider): tool results sent as empty content to LLM** — `messages_to_openai()` in the native OpenAI provider only checked `MessageContent::Text` for tool-role messages, but `ChatMLAdapter` wraps tool results as `MessageContent::Blocks(vec![ContentBlock::ToolResult{...}])`. The `Tool` role handler now also extracts content from `ToolResult` and `Text` blocks, fixing the critical bug where all tool outputs (bash, read, write) were silently dropped to empty strings.
+
 ## [0.7.7] - 2026-07-17
 
 ### Changed

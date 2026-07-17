@@ -79,10 +79,24 @@ pub fn messages_to_openai(messages: &[InternalMessage]) -> Vec<Value> {
             }
 
             umf::MessageRole::Tool => {
-                let content = msg
-                    .text()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
+                // Tool result content can be in Text or Blocks form.
+                // ChatMLAdapter wraps it as Blocks(vec![ToolResult{...}]).
+                let content = if let Some(text) = msg.text() {
+                    text.to_string()
+                } else if let Some(blocks) = msg.blocks() {
+                    // Extract content from ToolResult blocks
+                    blocks
+                        .iter()
+                        .filter_map(|b| match b {
+                            umf::ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+                            umf::ContentBlock::Text { text } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    String::new()
+                };
 
                 result.push(json!({
                     "role": "tool",
