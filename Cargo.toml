@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.7.6"
+version = "0.7.7"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -23,14 +23,16 @@ checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "
 provider = ["serde", "serde_json", "anyhow", "async-trait", "reqwest", "futures-util", "umf", "tokio", "config"]
 provider-wasm = ["provider", "wasmtime", "wasmtime-wasi"]
 orchestration = ["anyhow", "tokio", "tokio-util", "serde_json", "async-trait", "umf", "uuid", "futures-util", "provider"]
-agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "config", "observability", "checkpoint", "provider", "orchestration", "executor", "extension", "provider-wasm"]
+agent = ["serde", "serde_json", "anyhow", "tokio", "chrono", "async-trait", "umf", "cats", "regex", "config", "observability", "checkpoint", "provider", "orchestration", "executor"]
 executor = ["anyhow", "tokio"]
 extension = ["serde", "serde_json", "toml", "anyhow", "thiserror", "tokio", "wasmtime", "wasmtime-wasi", "wasmparser", "tracing"]
+# Convenience feature: enables WASM-based provider + extension system (adds wasmtime)
+wasm = ["provider-wasm", "extension"]
 # Registry features for multi-source tool aggregation
 registry = ["serde", "serde_json", "thiserror", "umf"]
 registry-mcp = ["registry", "reqwest", "tokio", "anyhow"]
 registry-mcp-token = ["registry-mcp", "dep:pep"]
-all = ["config", "observability", "cli", "checkpoint", "provider", "provider-wasm", "orchestration", "agent", "extension", "registry", "registry-mcp"]
+all = ["config", "observability", "cli", "checkpoint", "provider", "provider-wasm", "orchestration", "agent", "extension", "wasm", "registry", "registry-mcp"]
 
 # Storage backend features (optional)
 storage-documentdb = ["checkpoint", "mongodb", "futures-util"]

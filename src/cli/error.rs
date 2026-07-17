@@ -65,7 +65,6 @@ pub enum CliError {
     UnknownCommand(String),
 
     /// Extension operation error
-    #[cfg(feature = "extension")]
     #[error("Extension error: {0}")]
     ExtensionError(String),
 }

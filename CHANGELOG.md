@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-07-17
+
+### Changed
+- **feat(features): make WASM fully optional** — The `agent` feature no longer pulls in `extension` or `provider-wasm`. A new convenience feature `wasm` enables both `provider-wasm` and `extension` in one step. Consumers opt into WASM with `features = ["agent", "wasm"]` or `--features wasm`.
+- **refactor(lifecycle): gate `WasmLifecycle` behind `extension` feature** — `SimpleLifecycle` (pure Rust) is always available. `WasmLifecycle`, `find_lifecycle_plugin()`, and `create_standalone_instance()` require the `extension` feature. `find_lifecycle_plugin_with_config()` falls back to `SimpleLifecycle` when the `extension` feature is off.
+- **fix(cli): ungate `ExtensionError` variant** — `CliError::ExtensionError` is now always available (was previously behind `#[cfg(feature = "extension")]`), so extension CLI commands compile without the extension feature.
+
 ## [0.7.6] - 2026-07-17
 
 ### Added

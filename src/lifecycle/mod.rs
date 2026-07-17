@@ -12,8 +12,11 @@ use anyhow::{Context, Result};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+
+#[cfg(feature = "extension")]
 use std::sync::Mutex;
 
+#[cfg(feature = "extension")]
 use crate::extension::LifecycleExtensionInstance;
 
 macro_rules! debug {
@@ -46,12 +49,14 @@ pub trait Lifecycle: Send + Sync {
 }
 
 /// WASM-based lifecycle extension wrapper
+#[cfg(feature = "extension")]
 pub struct WasmLifecycle {
     instance: Mutex<LifecycleExtensionInstance>,
     #[allow(dead_code)]
     extension_path: PathBuf,
 }
 
+#[cfg(feature = "extension")]
 impl WasmLifecycle {
     pub async fn new(extension_dir: PathBuf) -> Result<Self> {
         debug!("Creating lifecycle plugin from: {}", extension_dir.display());
@@ -74,6 +79,7 @@ impl WasmLifecycle {
     }
 }
 
+#[cfg(feature = "extension")]
 impl Lifecycle for WasmLifecycle {
     fn load_template(&self, template_name: &str) -> Pin<Box<dyn Future<Output = Result<String>> + Send + '_>> {
         let template_name = template_name.to_string();
@@ -243,8 +249,10 @@ impl Lifecycle for SimpleLifecycle {
 }
 
 /// Legacy LifecyclePlugin type alias for backward compatibility
+#[cfg(feature = "extension")]
 pub type LifecyclePlugin = WasmLifecycle;
 
+#[cfg(feature = "extension")]
 fn create_standalone_instance(extension_dir: &PathBuf) -> Result<LifecycleExtensionInstance> {
     use crate::extension::ExtensionManifest;
     use std::sync::Arc;
@@ -303,7 +311,7 @@ impl ExpandHome for PathBuf {
 /// Find and load the lifecycle extension (WASM or simple built-in)
 /// 
 /// If `lifecycle_enabled` is false, returns the simple built-in lifecycle.
-/// Otherwise searches for WASM extension.
+/// Otherwise searches for WASM extension (requires `extension` feature).
 pub async fn find_lifecycle_plugin_with_config(
     lifecycle_enabled: bool,
     system_template: Option<String>,
@@ -311,45 +319,48 @@ pub async fn find_lifecycle_plugin_with_config(
     if !lifecycle_enabled {
         return Ok(Box::new(SimpleLifecycle::new(system_template)));
     }
-    
-    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
-    
-    let extension_paths = vec![
-        PathBuf::from("extensions/coder-lifecycle"),
-        PathBuf::from(format!("~/.{}/extensions/coder-lifecycle", agent_name)).expand_home()?,
-    ];
 
-    for path in &extension_paths {
-        let manifest_path = path.join("extension.toml");
-        if manifest_path.exists() {
-            debug!("Found lifecycle extension at: {}", path.display());
-            return Ok(Box::new(WasmLifecycle::new(path.clone()).await?));
-        }
-    }
-
-    // Legacy paths
-    let legacy_paths = vec![
-        PathBuf::from("providers/lifecycle"),
-        PathBuf::from(format!("~/.{}/providers/lifecycle", agent_name)).expand_home()?,
-    ];
-
-    for path in &legacy_paths {
-        let manifest_path = path.join("extension.toml");
-        if manifest_path.exists() {
-            debug!("Found legacy lifecycle extension at: {}", path.display());
-            crate::observability::tee_eprintln(&format!("[WARN] Using deprecated lifecycle plugin location. Please migrate to ~/.{}/extensions/coder-lifecycle/", agent_name));
-            return Ok(Box::new(WasmLifecycle::new(path.clone()).await?));
-        }
+    #[cfg(feature = "extension")]
+    {
+        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
         
-        let wasm_path = path.join("lifecycle.wasm");
-        if wasm_path.exists() {
-            anyhow::bail!(
-                "Found old-format lifecycle plugin at {}. \n\
-                The new extension system requires an extension.toml manifest.\n\
-                Please update to the new coder-lifecycle-wasm extension format.\n\
-                See: https://github.com/podtan/coder-lifecycle-wasm",
-                wasm_path.display()
-            );
+        let extension_paths = vec![
+            PathBuf::from("extensions/coder-lifecycle"),
+            PathBuf::from(format!("~/.{}/extensions/coder-lifecycle", agent_name)).expand_home()?,
+        ];
+
+        for path in &extension_paths {
+            let manifest_path = path.join("extension.toml");
+            if manifest_path.exists() {
+                debug!("Found lifecycle extension at: {}", path.display());
+                return Ok(Box::new(WasmLifecycle::new(path.clone()).await?));
+            }
+        }
+
+        // Legacy paths
+        let legacy_paths = vec![
+            PathBuf::from("providers/lifecycle"),
+            PathBuf::from(format!("~/.{}/providers/lifecycle", agent_name)).expand_home()?,
+        ];
+
+        for path in &legacy_paths {
+            let manifest_path = path.join("extension.toml");
+            if manifest_path.exists() {
+                debug!("Found legacy lifecycle extension at: {}", path.display());
+                crate::observability::tee_eprintln(&format!("[WARN] Using deprecated lifecycle plugin location. Please migrate to ~/.{}/extensions/coder-lifecycle/", agent_name));
+                return Ok(Box::new(WasmLifecycle::new(path.clone()).await?));
+            }
+            
+            let wasm_path = path.join("lifecycle.wasm");
+            if wasm_path.exists() {
+                anyhow::bail!(
+                    "Found old-format lifecycle plugin at {}. \n\
+                    The new extension system requires an extension.toml manifest.\n\
+                    Please update to the new coder-lifecycle-wasm extension format.\n\
+                    See: https://github.com/podtan/coder-lifecycle-wasm",
+                    wasm_path.display()
+                );
+            }
         }
     }
 
@@ -359,6 +370,7 @@ pub async fn find_lifecycle_plugin_with_config(
 }
 
 /// Legacy function for backward compatibility (always tries to load WASM)
+#[cfg(feature = "extension")]
 pub async fn find_lifecycle_plugin() -> Result<LifecyclePlugin> {
     let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
     
