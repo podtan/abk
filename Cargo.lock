@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "abk"
-version = "0.7.9"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -391,9 +391,9 @@ dependencies = [
 
 [[package]]
 name = "cats"
-version = "0.1.28"
+version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683a5d127722f239863acaec650a49d7f9eaa19c4365fed027df9bfa566ad8ea"
+checksum = "471aa2fd2b4489e204f9366bb36a1cfafd53c8ae931c9688e4593132813e844a"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
