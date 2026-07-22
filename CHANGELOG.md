@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.9] - 2026-07-17
+## [0.8.1] - 2026-07-22
+
+### Fixed
+- **fix(orchestration): checkpoint tool results before cancellation check** — In `handle_tool_calls()` (`agent_orchestration.rs`), the cancel token check was positioned before tool results were added to conversation history. When ESC was pressed during an in-flight tool call (e.g. file write), the tool completed on disk but its result was never recorded in the session checkpoint, causing a silent desync between on-disk state and session context. The cancel check now runs after tool results are added to `chat_formatter`, ensuring the checkpoint captures the completed iteration while cancellation still takes effect immediately after the tool batch.
+
+## [0.8.0] - 2026-07-17
 
 ### Fixed
 - **fix(tui): gate all raw `println!`/`eprintln!` with `is_tui_mode()` checks** — `AgentRuntime::log_info()` and `AgentRuntime::tee_println()` in `orchestration/runtime.rs` had bare `println!` in their `else` branches (when `self.logger` is `None`). `CleanupManager` in `checkpoint/cleanup.rs` had ~15 `println!` calls gated only by `self.verbose`. These bypassed the TUI mode flag and wrote directly to stdout while ratatui held the terminal in raw/alternate-screen mode, causing orphan characters and jagged border boxes during streaming output. All occurrences now route through `tee_println()` or check `is_tui_mode()`.
