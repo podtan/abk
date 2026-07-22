@@ -222,7 +222,31 @@ pub async fn execute_run<C: CommandContext>(
     };
 
     // Create final checkpoint and extract resume info for session continuity
-    let final_resume_info = agent.create_final_checkpoint_and_get_resume_info().await;
+    // On error/cancel, we still need to checkpoint any tool results that were
+    // recorded in conversation history (e.g. tools that completed before ESC).
+    // We also sync metadata so checkpoint_count stays accurate for `resume`.
+    let final_resume_info = match &workflow_result {
+        Ok(_) => agent.create_final_checkpoint_and_get_resume_info().await,
+        Err(e) => {
+            let err_msg = format!("{:#}", e);
+            let is_cancel = err_msg.contains("Cancelled by user");
+
+            if is_cancel && agent.is_checkpointing_enabled() {
+                // Create a final checkpoint to capture any tool results that
+                // completed before ESC (0.8.1 ensures they're in conversation).
+                if let Err(cp_err) = agent.create_checkpoint_now().await {
+                    ctx.log_info(&format!("Note: Failed to create final checkpoint on cancel: {}", cp_err));
+                }
+            }
+
+            // Always sync metadata so checkpoint_count matches reality.
+            if let Err(meta_err) = agent.finalize_checkpoint_session().await {
+                ctx.log_info(&format!("Note: Failed to sync session metadata: {}", meta_err));
+            }
+
+            agent.create_final_checkpoint_and_get_resume_info().await
+        }
+    };
 
     // Also send via channel so TUI has it even if TaskResult return is lost (e.g. ESC)
     if let Some(tx) = &on_checkpoint {

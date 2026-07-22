@@ -341,6 +341,26 @@ impl Agent {
         result
     }
 
+    /// Create a checkpoint at the current iteration (public wrapper).
+    /// Used by `execute_run` to capture tool results on the cancel/error path.
+    pub async fn create_checkpoint_now(&mut self) -> Result<()> {
+        let mut session_manager = self.session_manager
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("SessionManager not initialized"))?;
+
+        let result = session_manager.create_checkpoint(self).await;
+        self.session_manager = Some(session_manager);
+        result
+    }
+
+    /// Check if checkpointing is enabled (public wrapper).
+    pub fn is_checkpointing_enabled(&self) -> bool {
+        self.session_manager
+            .as_ref()
+            .map(|sm| sm.is_checkpointing_enabled())
+            .unwrap_or(false)
+    }
+
     /// Execute tool calls and return structured results for proper OpenAI API tool message handling.
     /// This method returns individual tool results that can be sent as separate tool messages.
 

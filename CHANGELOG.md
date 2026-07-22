@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-07-22
+
+### Fixed
+- **fix(run): create final checkpoint and sync metadata on cancel/error paths** — When a workflow was cancelled (ESC) or errored, `execute_run` skipped `stop_session()` entirely, meaning no final checkpoint was created and `session_metadata.json` went stale. Now on the `Err` path: (1) if cancelled, creates a final checkpoint to capture tool results that completed before ESC, (2) always calls `finalize_checkpoint_session()` to sync `checkpoint_count` with reality. New pub methods `Agent::create_checkpoint_now()` and `Agent::is_checkpointing_enabled()` added.
+- **fix(storage): heal stale checkpoint_count on every read** — `load_sessions_from_disk()` previously only healed `checkpoint_count` when it was exactly 0. Non-zero stale counts (from cancelled sessions where `finalize` was skipped) were never corrected. Now always cross-checks against `checkpoints.json` index and persists the healed value.
+
 ## [0.8.1] - 2026-07-22
 
 ### Fixed
