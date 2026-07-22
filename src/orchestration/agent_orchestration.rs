@@ -434,16 +434,7 @@ async fn handle_tool_calls<A: AgentContext>(
     // Execute tools
     let results = agent.execute_tool_calls_structured(tool_calls).await?;
 
-    // After tools finish, check if we were cancelled during execution.
-    // This allows ESC pressed during a long bash command to take effect
-    // immediately after the tool returns (instead of waiting for the next iteration).
-    if let Some(token) = cancel_token {
-        if token.is_cancelled() {
-            return Err(anyhow::anyhow!("Cancelled by user"));
-        }
-    }
-
-    // Emit per-tool completion events (ToolCompleted variant exists but was never wired)
+    // Emit per-tool completion events
     for result in &results {
         agent.output_sink().emit(OutputEvent::ToolCompleted {
             tool_name: result.tool_name.clone(),
@@ -453,13 +444,28 @@ async fn handle_tool_calls<A: AgentContext>(
         });
     }
 
-    // Add tool messages
+    // Add tool messages to conversation history BEFORE checking cancellation.
+    // This ensures that when ESC is pressed during a tool call (e.g. a file
+    // write), the completed tool results are recorded in the conversation and
+    // captured in the final checkpoint.  Without this, the checkpoint would
+    // be missing the iteration that performed the tool call, causing a
+    // silent desync between the on-disk state and the session context.
     for result in &results {
         agent.chat_formatter_mut().add_tool_message(
             result.content.clone(),
             result.tool_call_id.clone(),
             result.tool_name.clone(),
         );
+    }
+
+    // After tool messages are safely recorded, check if we were cancelled
+    // during execution.  This allows ESC pressed during a long bash command
+    // to take effect immediately after the tool returns (instead of waiting
+    // for the next iteration), while still preserving the checkpoint.
+    if let Some(token) = cancel_token {
+        if token.is_cancelled() {
+            return Err(anyhow::anyhow!("Cancelled by user"));
+        }
     }
 
     // Log results
