@@ -95,7 +95,10 @@ impl super::Agent {
     }
 
     /// Finalize the current checkpoint session when workflow completes or is interrupted.
-    async fn finalize_checkpoint_session(&mut self) -> Result<()> {
+    ///
+    /// Called by the orchestration layer's `stop_session()` on normal completion and
+    /// by `execute_run()` on cancel/error paths to ensure metadata stays in sync.
+    pub async fn finalize_checkpoint_session(&mut self) -> Result<()> {
         if let Some(ref mut session_storage) = self.current_session {
             if let Err(e) = session_storage.synchronize_metadata().await {
                 self.logger.log_error(
