@@ -88,9 +88,18 @@ pub async fn execute_run<C: CommandContext>(
     // Check for resume context before starting new session
     let current_dir = std::env::current_dir()
         .map_err(|e| CliError::IoError(e))?;
+
+    // If resume_info provides a project_path, use that as the effective working
+    // directory for both checkpoint lookup and tool execution (cross-project resume).
+    // Otherwise fall back to the process CWD (legacy behaviour).
+    let effective_dir = resume_info
+        .as_ref()
+        .and_then(|ri| ri.project_path.clone())
+        .unwrap_or_else(|| current_dir.clone());
     
-    // Set the working directory for all tools (fixes issue where tools use wrong directory)
-    agent.set_working_directory(current_dir.clone());
+    // Set the working directory for all tools — use the effective project dir
+    // (may differ from CWD when resuming a session from another project).
+    agent.set_working_directory(effective_dir.clone());
 
     // Set the output sink for the agent:
     // - If a custom output_sink was provided (e.g., TuiSink from TUI mode), use it.
@@ -115,17 +124,17 @@ pub async fn execute_run<C: CommandContext>(
 
     // Check for resume context — from TUI parameter OR from last_resume.json
     let resume_context = if let Some(ref info) = resume_info {
-        // TUI provided resume info directly (no file needed)
+        // TUI/API provided resume info directly (no file needed)
         ctx.log_info(&format!(
-            "TUI resume info: session={}, checkpoint={}",
+            "Resume info: session={}, checkpoint={}",
             info.session_id, info.checkpoint_id
         ));
         Some(crate::checkpoint::resume_tracker::ResumeContext {
-            project_path: current_dir.clone(),
+            project_path: effective_dir.clone(),
             session_id: info.session_id.clone(),
             checkpoint_id: info.checkpoint_id.clone(),
             restored_at: chrono::Utc::now(),
-            working_directory: current_dir.clone(),
+            working_directory: effective_dir.clone(),
             task_description: String::new(),
             workflow_step: "Continue".to_string(),
             iteration: info.iteration,

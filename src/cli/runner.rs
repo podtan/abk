@@ -19,14 +19,25 @@ use crate::cli::adapters::checkpoint::{
 use crate::cli::adapters::storage::AbkStorageAccess;
 use async_trait::async_trait;
 
-/// Information needed to resume a session on the next task.////// Carries the checkpoint identifiers required to restore a previous
+/// Information needed to resume a session on the next task.
+///
+/// Carries the checkpoint identifiers required to restore a previous
 /// conversation.  Used by the TUI for in-memory session continuity
 /// (no files, no race conditions, works with multiple TUI instances).
+///
+/// `project_path` is the absolute path of the project where the checkpoint
+/// was created.  When `Some`, the agent resolves checkpoints from that
+/// project instead of the process's current working directory — enabling
+/// cross-project resume.  When `None`, falls back to CWD (legacy behaviour).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResumeInfo {
     pub session_id: String,
     pub checkpoint_id: String,
     pub iteration: u32,
+    /// Original project path for cross-project resume (added 0.8.3).
+    /// `None` = use CWD (backward compatible with pre-0.8.3 callers).
+    #[serde(default)]
+    pub project_path: Option<std::path::PathBuf>,
 }
 
 /// Result returned by `run_task_from_raw_config`.

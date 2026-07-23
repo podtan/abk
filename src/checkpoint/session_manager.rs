@@ -850,6 +850,7 @@ impl SessionManager {
             session_id: session_storage.session_id().to_string(),
             checkpoint_id,
             iteration,
+            project_path: Some(context.get_working_directory().to_path_buf()),
         })
     }
 }

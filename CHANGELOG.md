@@ -3,7 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.8.3] - 2026-07-23
+
+### Added
+- **feat(resume): cross-project session resume** — `ResumeInfo` now carries an optional `project_path: Option<PathBuf>` field. When set, `execute_run()` uses this path instead of the process CWD for checkpoint lookup and tool working directory, enabling sessions to be resumed from projects other than the current working directory. This fixes a long-standing limitation where resuming a session created in project B from project A would silently fail (checkpoint hash mismatch). Backward compatible: `None` falls back to CWD (legacy behaviour), and `#[serde(default)]` ensures old serialized data deserializes correctly.
 
 ## [0.8.2] - 2026-07-22
 
