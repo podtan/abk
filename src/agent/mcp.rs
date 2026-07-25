@@ -363,6 +363,98 @@ async fn build_registry_config(
                         );
                     }
                 }
+                McpCredentialConfig::WebSession { .. } => {
+                    #[cfg(feature = "registry-mcp-token")]
+                    {
+                        use pep::token_provider::{
+                            InteractiveConfig, InteractiveTokenProvider,
+                            TokenProviderEnum,
+                        };
+                        use pep::token_store::{FileTokenStore, TokenStore};
+                        use std::sync::Arc;
+
+                        let agent_name = std::env::var("ABK_AGENT_NAME")
+                            .unwrap_or_else(|_| "trustee".into());
+
+                        let token_store: Arc<dyn TokenStore> =
+                            Arc::new(FileTokenStore::new(&agent_name));
+
+                        // Reserved credential name — trustee-web writes the session
+                        // token here before each agent command.
+                        const SESSION_CRED_NAME: &str = "__web_session";
+
+                        let provider = InteractiveTokenProvider::with_store(
+                            InteractiveConfig {
+                                issuer_url: String::new(),
+                                client_id: String::new(),
+                                client_secret: None,
+                                redirect_uri: String::new(),
+                                scope: String::new(),
+                                credential_name: SESSION_CRED_NAME.to_string(),
+                            },
+                            token_store,
+                        );
+
+                        crate::observability::tee_eprintln(
+                            &format!("[MCP] Web session token provider attached for '{}' (reads __web_session from token store).", name)
+                        );
+
+                        config = config.with_token_provider(TokenProviderEnum::Interactive(provider));
+                    }
+                    #[cfg(not(feature = "registry-mcp-token"))]
+                    {
+                        crate::observability::tee_eprintln(
+                            &format!("Warning: Server '{}' uses web-session credentials but registry-mcp-token feature is disabled.", name)
+                        );
+                    }
+                }
+                McpCredentialConfig::WebInteractive {
+                    issuer_url,
+                    client_id,
+                    client_secret,
+                    scope,
+                } => {
+                    #[cfg(feature = "registry-mcp-token")]
+                    {
+                        use pep::token_provider::{
+                            InteractiveConfig, InteractiveTokenProvider,
+                            TokenProviderEnum,
+                        };
+                        use pep::token_store::{FileTokenStore, TokenStore};
+                        use std::sync::Arc;
+
+                        let agent_name = std::env::var("ABK_AGENT_NAME")
+                            .unwrap_or_else(|_| "trustee".into());
+
+                        let token_store: Arc<dyn TokenStore> =
+                            Arc::new(FileTokenStore::new(&agent_name));
+
+                        let provider = InteractiveTokenProvider::with_store(
+                            InteractiveConfig {
+                                issuer_url: resolve_env_var(issuer_url),
+                                client_id: resolve_env_var(client_id),
+                                client_secret: client_secret.as_ref().map(|s| resolve_env_var(s)),
+                                redirect_uri: String::new(),
+                                scope: resolve_env_var(scope),
+                                credential_name: cred_name.to_string(),
+                            },
+                            token_store,
+                        );
+
+                        crate::observability::tee_eprintln(
+                            &format!("[MCP] Web interactive token provider attached for '{}' (credential={}). Login via trustee-web UI.", name, cred_name)
+                        );
+
+                        config = config.with_token_provider(TokenProviderEnum::Interactive(provider));
+                    }
+                    #[cfg(not(feature = "registry-mcp-token"))]
+                    {
+                        let _ = (issuer_url, client_id, client_secret, scope);
+                        crate::observability::tee_eprintln(
+                            &format!("Warning: Server '{}' uses web-interactive credentials but registry-mcp-token feature is disabled.", name)
+                        );
+                    }
+                }
             }
             return config;
         } else {

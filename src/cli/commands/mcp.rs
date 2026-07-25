@@ -273,6 +273,31 @@ async fn mcp_list<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult
                                 ("interactive", cred_ref.as_str(), "(registry-mcp-token disabled)")
                             }
                         }
+                        crate::config::McpCredentialConfig::WebSession { .. } => {
+                            ("web-session", cred_ref.as_str(), "session (auto)")
+                        }
+                        crate::config::McpCredentialConfig::WebInteractive { .. } => {
+                            #[cfg(feature = "registry-mcp-token")]
+                            {
+                                let agent_name = std::env::var("ABK_AGENT_NAME")
+                                    .unwrap_or_else(|_| "trustee".into());
+                                let token_store = pep::FileTokenStore::new(&agent_name);
+                                match token_store.load(cred_ref) {
+                                    Ok(Some(token)) => {
+                                        if token.is_expired() {
+                                            ("web-interactive", cred_ref.as_str(), "expired (will refresh)")
+                                        } else {
+                                            ("web-interactive", cred_ref.as_str(), "authenticated")
+                                        }
+                                    }
+                                    _ => ("web-interactive", cred_ref.as_str(), "not connected (use web UI)"),
+                                }
+                            }
+                            #[cfg(not(feature = "registry-mcp-token"))]
+                            {
+                                ("web-interactive", cred_ref.as_str(), "(registry-mcp-token disabled)")
+                            }
+                        }
                     }
                 } else {
                     ("?", cred_ref.as_str(), "credential not found")
@@ -526,6 +551,38 @@ async fn mcp_debug<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResul
                             }
                             Ok(None) => {
                                 println!("No token stored. Run: trustee mcp auth {}", cred_ref);
+                            }
+                            Err(e) => println!("Error loading token: {}", e),
+                        }
+                    }
+                }
+                crate::config::McpCredentialConfig::WebSession { .. } => {
+                    println!("Found '{}' (web-session)", cred_ref);
+                    println!("Token comes from trustee-web session manager (auto-injected).");
+                }
+                crate::config::McpCredentialConfig::WebInteractive { .. } => {
+                    println!("Found '{}' (web-interactive)", cred_ref);
+
+                    #[cfg(feature = "registry-mcp-token")]
+                    {
+                        print!("Checking stored token...               ");
+                        let agent_name =
+                            std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".into());
+                        let token_store = pep::FileTokenStore::new(&agent_name);
+                        match token_store.load(cred_ref) {
+                            Ok(Some(token)) => {
+                                if token.is_expired() {
+                                    if token.refresh_token.is_some() {
+                                        println!("Expired, but refresh token available (will auto-refresh)");
+                                    } else {
+                                        println!("Expired, no refresh token. Use web UI to reconnect.");
+                                    }
+                                } else {
+                                    println!("Valid (expires at: {})", token.expires_at);
+                                }
+                            }
+                            Ok(None) => {
+                                println!("No token stored. Use trustee-web UI to connect.");
                             }
                             Err(e) => println!("Error loading token: {}", e),
                         }
