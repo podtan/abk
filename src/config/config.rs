@@ -135,10 +135,12 @@ pub struct McpServerConfig {
 
 /// Named credential configuration for MCP server authentication.
 ///
-/// Supports three modes:
+/// Supports five modes:
 /// - `static`: A plain token string (same as `auth_token`, but reusable)
 /// - `service-account`: Long-lived API token → RFC 8693 exchange for short-lived OIDC access tokens
-/// - `interactive`: Browser-based OAuth login (PKCE) with stored tokens and auto-refresh
+/// - `interactive`: Browser-based OAuth login (PKCE) via `trustee mcp auth` CLI
+/// - `web-session`: Reuse the trustee-web user's session token (injected before each command)
+/// - `web-interactive`: Per-server browser login via trustee-web UI (`/auth/mcp/login`)
 ///
 /// # Example (TOML)
 ///
@@ -158,6 +160,21 @@ pub struct McpServerConfig {
 /// client_id = "pdt-api"
 /// scope = "openid profile email groups"
 /// redirect_port = 8765
+/// ```
+///
+/// ```toml
+/// # C1: Reuse the logged-in user's session token
+/// [mcp.credentials.session]
+/// type = "web-session"
+/// ```
+///
+/// ```toml
+/// # C2: Per-server browser login via trustee-web
+/// [mcp.credentials.pdt_login]
+/// type = "web-interactive"
+/// issuer_url = "https://idm.tanbal.ir/oauth2/openid/pdt-api"
+/// client_id = "pdt-api"
+/// scope = "openid profile email groups"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -200,6 +217,51 @@ pub enum McpCredentialConfig {
         #[serde(default = "default_redirect_port")]
         redirect_port: u16,
     },
+    /// Web session token reuse (C1).
+    ///
+    /// Uses the logged-in user's OIDC session token from trustee-web.
+    /// Trustee-web pushes the current access token into `FileTokenStore`
+    /// under the reserved name `__web_session` before each agent command.
+    /// The `InteractiveTokenProvider` reads it on every tool call.
+    WebSession {
+        /// Optional RFC 8693 token exchange if the MCP server requires
+        /// a different audience than the trustee-web session token.
+        #[serde(default)]
+        exchange: Option<ExchangeConfig>,
+    },
+    /// Per-server browser login via trustee-web UI (C2).
+    ///
+    /// Tokens are obtained via trustee-web's `/auth/mcp/login` route
+    /// and stored on disk via `FileTokenStore`. The `InteractiveTokenProvider`
+    /// loads and refreshes them automatically (same as `Interactive`, but
+    /// login is triggered from the web UI, not the CLI).
+    WebInteractive {
+        /// OIDC issuer URL.
+        issuer_url: String,
+        /// OAuth2 client ID.
+        client_id: String,
+        /// OAuth2 client secret (optional for public clients).
+        client_secret: Option<String>,
+        /// OAuth2 scopes to request.
+        scope: String,
+    },
+}
+
+/// Optional RFC 8693 token exchange configuration for `web-session` credentials.
+///
+/// Used when the trustee-web session token is issued by the `trustee` OIDC
+/// client but the MCP server expects tokens from a different client
+/// (e.g. `pdt-api`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExchangeConfig {
+    /// OIDC issuer URL for the token exchange.
+    pub issuer_url: String,
+    /// OAuth2 client ID for the target service.
+    pub client_id: String,
+    /// Target audience for the exchanged token (e.g. `pdt-api`).
+    pub audience: String,
+    /// OAuth2 client secret (optional, for confidential clients).
+    pub client_secret: Option<String>,
 }
 
 /// Default redirect port for interactive OAuth callback.

@@ -26,7 +26,7 @@ pub mod environment;
 
 // Re-export main types for convenience
 pub use self::config::{
-    AgentConfig, Configuration, ConfigurationLoader, ExecutionConfig, LlmConfig, LoggingConfig,
+    AgentConfig, Configuration, ConfigurationLoader, ExecutionConfig, ExchangeConfig, LlmConfig, LoggingConfig,
     McpConfig, McpCredentialConfig, McpServerConfig, ModeConfig, ModesConfig,
     SearchFilteringConfig, ToolSourceConfig, ToolsConfig,
 };
