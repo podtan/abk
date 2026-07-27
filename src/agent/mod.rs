@@ -244,16 +244,28 @@ impl Agent {
         Ok(())
     }
 
-    /// Set the working directory for all tools.
+    /// Set the working directory for all tools and the command executor.
     ///
     /// This should be called after determining the project directory,
-    /// before any tool execution. Tools will read from ToolState at
-    /// execution time rather than capturing the directory at instantiation.
+    /// before any tool execution. Updates both the ToolRegistry (for tools
+    /// that read working_dir from ToolState) and the CommandExecutor (for
+    /// bash command execution and checkpoint project hashing).
+    ///
+    /// Without syncing the executor, `AgentContext::get_working_directory()`
+    /// (which reads from the executor) would return the stale default `"."
+    /// while `Agent::get_working_directory()` (which reads from tool_registry)
+    /// returns the correct path. This divergence caused checkpoint sessions
+    /// to be created under the wrong project hash.
     ///
     /// # Arguments
     /// * `path` - The working directory path
     pub fn set_working_directory(&mut self, path: PathBuf) {
-        self.tool_registry.set_working_directory(path);
+        self.tool_registry.set_working_directory(path.clone());
+        if let Err(e) = self.executor.set_working_dir(&path) {
+            crate::observability::tee_eprintln(
+                &format!("[WARN] Failed to set executor working directory: {}", e)
+            );
+        }
     }
 
     /// Get the current working directory from tool state.
