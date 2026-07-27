@@ -645,9 +645,10 @@ impl SessionManager {
             checkpoint_manager.get_project_storage(current_dir).await?
         };
 
-        // Determine session ID: use identity if provided, otherwise auto-generate.
-        let session_id = if let Some(identity) = context.get_session_identity() {
-            identity.id.clone()
+        // Determine session ID and description: use identity if provided,
+        // otherwise auto-generate.
+        let (session_id, description) = if let Some(identity) = context.get_session_identity() {
+            (identity.id.clone(), identity.name.clone())
         } else {
             // Generate unique session ID based on task and timestamp
             let timestamp = chrono::Utc::now().format("%Y_%m_%d_%H_%M");
@@ -661,11 +662,13 @@ impl SessionManager {
                 .collect::<Vec<&str>>()
                 .join("_")
                 .to_lowercase();
-            format!("session_{}_{}", timestamp, task_slug)
+            (format!("session_{}_{}", timestamp, task_slug), Some(task_description.chars().take(80).collect()))
         };
 
-        // Create the session
-        let session_storage = project_storage.create_session(&session_id).await?;
+        // Create the session with description
+        let session_storage = project_storage
+            .create_session_with_description(&session_id, description)
+            .await?;
 
         Ok(session_storage)
     }

@@ -577,6 +577,18 @@ impl ProjectStorage {
 
     /// Create a new session
     pub async fn create_session(&self, session_id: &str) -> CheckpointResult<SessionStorage> {
+        self.create_session_with_description(session_id, None).await
+    }
+
+    /// Create a new session with an optional description.
+    ///
+    /// The description is stored in `SessionMetadata.description` and
+    /// displayed in session browsers (TUI, Web UI).
+    pub async fn create_session_with_description(
+        &self,
+        session_id: &str,
+        description: Option<String>,
+    ) -> CheckpointResult<SessionStorage> {
         use super::config::StorageMode;
         
         let session_path = self.storage_path.join("sessions").join(session_id);
@@ -595,7 +607,7 @@ impl ProjectStorage {
             last_accessed: Utc::now(),
             checkpoint_count: 0,
             status: SessionStatus::Active,
-            description: None,
+            description,
             tags: Vec::new(),
             size_bytes: 0,
         };
