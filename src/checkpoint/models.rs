@@ -35,6 +35,38 @@ impl ProjectHash {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Create a project hash from an explicit identity string (e.g., a UUID
+    /// or slug provided by the caller via [`crate::context::ProjectIdentity`]).
+    ///
+    /// The identity string is hashed with SHA-256 (same as path-based hashing)
+    /// so the resulting hash has the same format (16 hex chars). This ensures
+    /// that identity-based and path-based hashes are interchangeable in the
+    /// storage layer — they both produce a `ProjectHash(String)`.
+    ///
+    /// Unlike [`ProjectHash::new`], this method does NOT require a filesystem
+    /// path and does NOT canonicalize anything. The caller is responsible for
+    /// providing a stable, unique identity string.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use abk::checkpoint::ProjectHash;
+    ///
+    /// let hash = ProjectHash::from_identity("my-project-uuid").unwrap();
+    /// println!("Project hash: {}", hash);
+    /// ```
+    pub fn from_identity(identity: &str) -> super::CheckpointResult<Self> {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(identity.as_bytes());
+        let result = hasher.finalize();
+        Ok(ProjectHash(format!(
+            "{:016x}",
+            u64::from_be_bytes(result[..8].try_into().unwrap())
+        )))
+    }
 }
 
 impl std::fmt::Display for ProjectHash {

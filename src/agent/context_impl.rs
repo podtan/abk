@@ -121,6 +121,14 @@ impl crate::checkpoint::AgentContext for Agent {
         self.executor.working_dir()
     }
 
+    fn get_project_identity(&self) -> Option<&crate::context::ProjectIdentity> {
+        self.run_context.project()
+    }
+
+    fn get_session_identity(&self) -> Option<&crate::context::SessionIdentity> {
+        self.run_context.session()
+    }
+
     // ========================================================================
     // Agent State (Read/Write)
     // ========================================================================

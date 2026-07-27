@@ -112,9 +112,12 @@ pub fn get_home_dir() -> Result<String, String> {
         .map_err(|_| "Could not determine home directory".to_string())
 }
 
-/// Configuration management (enabled with the `config` feature)
-#[cfg(feature = "config")]
-pub mod config;
+ /// Runtime context for identity and configuration (always available)
+ pub mod context;
+
+ /// Configuration management (enabled with the `config` feature)
+ #[cfg(feature = "config")]
+ pub mod config;
 
 /// Observability utilities (enabled with the `observability` feature)
 #[cfg(feature = "observability")]

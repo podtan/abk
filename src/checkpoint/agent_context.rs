@@ -144,6 +144,27 @@ pub trait AgentContext {
     /// Get the agent's working directory.
     fn get_working_directory(&self) -> &Path;
 
+    /// Get the project identity, if provided by the caller.
+    ///
+    /// When `Some`, the `ProjectIdentity::id` overrides the default path-based
+    /// project hash for checkpoint storage. This allows callers to assign
+    /// stable, human-readable project identities that survive directory renames.
+    ///
+    /// Default: `None` (use path-based hashing).
+    fn get_project_identity(&self) -> Option<&crate::context::ProjectIdentity> {
+        None
+    }
+
+    /// Get the session identity, if provided by the caller.
+    ///
+    /// When `Some`, the `SessionIdentity::id` overrides the default
+    /// timestamp-based session ID generation for checkpoint storage.
+    ///
+    /// Default: `None` (auto-generate session IDs).
+    fn get_session_identity(&self) -> Option<&crate::context::SessionIdentity> {
+        None
+    }
+
     // ========================================================================
     // Agent State (Read/Write)
     // ========================================================================

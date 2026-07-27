@@ -98,6 +98,11 @@ pub struct Agent {
     // Conversation turn management for X-Request-Id (like VS Code Copilot)
     current_turn_id: Option<String>,
     turn_request_count: u32,
+
+    // Runtime context for identity (project/session naming)
+    // When set, identity fields override path-based hashing and timestamp-based
+    // session IDs. See `crate::context::RunContext` for details.
+    run_context: crate::context::RunContext,
 }
 
 impl Agent {
@@ -230,6 +235,7 @@ impl Agent {
             turn_request_count: 0,
             output_sink: crate::orchestration::output::stdout_sink(),
             on_checkpoint: None,
+            run_context: crate::context::RunContext::default(),
         })
     }
 
@@ -573,6 +579,37 @@ impl Agent {
     pub fn end_conversation_turn(&mut self) {
         self.current_turn_id = None;
         self.turn_request_count = 0;
+    }
+
+    /// Set the runtime context carrying project/session identity.
+    ///
+    /// When set, the project identity's `id` field overrides path-based
+    /// checkpoint project hashing, and the session identity's `id` overrides
+    /// timestamp-based session ID generation.
+    ///
+    /// This should be called after `new_from_config()` and before
+    /// `start_session()`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use abk::context::{RunContext, ProjectIdentity};
+    ///
+    /// agent.set_run_context(RunContext {
+    ///     project: Some(ProjectIdentity {
+    ///         id: "my-project-uuid".to_string(),
+    ///         name: Some("My Project".to_string()),
+    ///     }),
+    ///     ..Default::default()
+    /// });
+    /// ```
+    pub fn set_run_context(&mut self, ctx: crate::context::RunContext) {
+        self.run_context = ctx;
+    }
+
+    /// Get a reference to the current runtime context.
+    pub fn run_context(&self) -> &crate::context::RunContext {
+        &self.run_context
     }
 
 }

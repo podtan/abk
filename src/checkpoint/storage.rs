@@ -131,12 +131,29 @@ impl CheckpointStorageManager {
     ) -> CheckpointResult<ProjectStorage> {
         let project_hash = ProjectHash::new(project_path)?;
         
+        self.get_project_storage_with_hash(project_path, &project_hash).await
+    }
+
+    /// Get project storage using a pre-computed project hash.
+    ///
+    /// This is used when the caller has provided an explicit project identity
+    /// (via [`crate::context::ProjectIdentity`]) and the hash was computed
+    /// from the identity string rather than the path.
+    ///
+    /// # Arguments
+    /// * `project_path` - The working directory path (used for metadata)
+    /// * `project_hash` - Pre-computed hash (from path or identity)
+    pub async fn get_project_storage_with_hash(
+        &self,
+        project_path: &Path,
+        project_hash: &ProjectHash,
+    ) -> CheckpointResult<ProjectStorage> {
         #[cfg(feature = "storage-documentdb")]
         {
             let storage_mode = self.config.storage_backend.effective_storage_mode();
             ProjectStorage::with_remote_backend(
                 self.home_dir.clone(),
-                project_hash,
+                project_hash.clone(),
                 project_path.to_path_buf(),
                 self.remote_backend.clone(),
                 storage_mode,
@@ -148,7 +165,7 @@ impl CheckpointStorageManager {
         {
             ProjectStorage::new(
                 self.home_dir.clone(),
-                project_hash,
+                project_hash.clone(),
                 project_path.to_path_buf(),
             )
             .await
