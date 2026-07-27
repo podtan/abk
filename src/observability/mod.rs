@@ -39,3 +39,6 @@ pub use logger::{append_to_global_log, strip_ansi};
 
 // Re-export TUI mode control for suppressing console output in TUI environments
 pub use logger::{set_tui_mode, is_tui_mode};
+
+// Task-local scope helpers (TMU Phase 2)
+pub use logger::{with_tui_mode, with_logger};

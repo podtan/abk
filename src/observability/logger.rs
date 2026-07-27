@@ -8,30 +8,105 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Session start timestamp - set once when the logger module is first loaded
 static SESSION_START_TIMESTAMP: OnceLock<String> = OnceLock::new();
 
-/// Global logger instance - ensures all logs go to the same file
-static GLOBAL_LOGGER: OnceLock<Logger> = OnceLock::new();
+// ---------------------------------------------------------------------------
+// Task-local state — replaces process-global TUI_MODE and GLOBAL_LOGGER.
+//
+// In multi-user deployments (e.g., trustee-web), multiple concurrent
+// workflows run in separate tokio tasks. Task-local storage ensures
+// each workflow has its own TUI mode flag and logger, preventing
+// cross-user contamination.
+// ---------------------------------------------------------------------------
 
-/// TUI mode flag — when true, console output (stdout/stderr) is suppressed
-/// in tee_* functions and Logger methods. Log file writes are unaffected.
-/// This prevents ABK output from corrupting ratatui's alternate screen.
-static TUI_MODE: AtomicBool = AtomicBool::new(false);
+tokio::task_local! {
+    /// TUI mode flag for the current task.
+    ///
+    /// When true, console output (stdout/stderr) is suppressed in tee_*
+    /// functions and Logger methods. Log file writes are unaffected.
+    ///
+    /// Task-local so concurrent users don't share the same flag.
+    pub static TUI_MODE: bool;
 
-/// Check whether TUI mode is active.
-pub fn is_tui_mode() -> bool {
-    TUI_MODE.load(Ordering::Relaxed)
+    /// Logger for the current task.
+    ///
+    /// Replaces the old process-global `GLOBAL_LOGGER`. Each concurrent
+    /// workflow gets its own logger scope via [`with_logger`].
+    pub static TASK_LOGGER: Logger;
 }
 
-/// Enable or disable TUI mode.
-/// When enabled, all console output from tee_* functions and Logger methods
-/// is suppressed. Log file output is unaffected — the TUI reads the log file
-/// directly via a tailer.
+/// Process-global fallback logger for single-user CLI mode.
+///
+/// Only used when no task-local logger is set (i.e., when not running
+/// inside a [`with_logger`] scope). This preserves backward compatibility
+/// for CLI/TUI single-user operation.
+static FALLBACK_LOGGER: OnceLock<Logger> = OnceLock::new();
+
+/// Check whether TUI mode is active for the current task.
+///
+/// Returns `false` when no task-local scope is set (e.g., outside an
+/// async runtime, or in single-user CLI mode without a scope).
+pub fn is_tui_mode() -> bool {
+    match TUI_MODE.try_get() {
+        Ok(v) => v,
+        Err(_) => false,
+    }
+}
+
+/// **Deprecated.** Use [`with_tui_mode`] instead.
+///
+/// In task-local mode, this is a no-op — it cannot set the task-local
+/// flag from synchronous code. The flag is set by running the workflow
+/// inside a `with_tui_mode(enabled, future)` scope.
+///
+/// This function is kept for backward API compatibility. In debug builds
+/// it logs a warning.
 pub fn set_tui_mode(enabled: bool) {
-    TUI_MODE.store(enabled, Ordering::Relaxed);
+    // No-op: TUI mode is now task-local. Callers should use with_tui_mode().
+    if cfg!(debug_assertions) && enabled {
+        eprintln!("WARN: set_tui_mode(true) is a no-op in task-local mode; use with_tui_mode()");
+    }
+}
+
+/// Run a future with TUI mode enabled or disabled for the current task.
+///
+/// This is the task-local replacement for `set_tui_mode()`. All code
+/// running inside `fut` (and any child tasks spawned within it) will
+/// see the given TUI mode value from [`is_tui_mode`].
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn run() {
+/// abk::observability::with_tui_mode(true, async {
+///     // TUI mode is active here
+///     assert!(abk::observability::is_tui_mode());
+/// }).await;
+/// // TUI mode is no longer active
+/// assert!(!abk::observability::is_tui_mode());
+/// # }
+/// ```
+pub async fn with_tui_mode<F>(enabled: bool, fut: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    TUI_MODE.scope(enabled, fut).await
+}
+
+/// Run a future with a specific logger for the current task.
+///
+/// This replaces `init_global_logger()` for multi-user operation.
+/// Each concurrent workflow should call this to scope its logger.
+///
+/// When no scope is set, free functions like `tee_println()` fall back
+/// to the process-global [`FALLBACK_LOGGER`] (set by [`init_global_logger`]).
+pub async fn with_logger<F>(logger: Logger, fut: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    TASK_LOGGER.scope(logger, fut).await
 }
 
 /// Get or initialize the session timestamp
@@ -41,37 +116,54 @@ fn get_session_timestamp() -> &'static str {
     })
 }
 
-/// Get or initialize the global logger instance
-fn get_global_logger() -> &'static Logger {
-    GLOBAL_LOGGER.get_or_init(|| {
-        Logger::new(None, None).expect("Failed to create global logger")
-    })
+/// Resolve the logger for the current context.
+///
+/// Tries task-local logger first (multi-user mode), then falls back to
+/// the process-global [`FALLBACK_LOGGER`] (single-user CLI mode).
+///
+/// Returns `None` if neither is set.
+fn resolve_logger() -> Option<Logger> {
+    // Try task-local logger first
+    if let Ok(logger_ref) = TASK_LOGGER.try_get() {
+        return Some(logger_ref.clone());
+    }
+    // Fall back to process-global logger (single-user CLI mode)
+    FALLBACK_LOGGER.get().cloned()
 }
 
-/// Initialize the global logger with a specific Logger instance.
-/// This should be called early (e.g., from agent initialization) so that
-/// standalone tee_* functions write to the same log file as the agent's logger.
-/// If the global logger has already been initialized, this is a no-op.
+/// **Deprecated.** Use [`with_logger`] instead.
+///
+/// Stores the logger in a process-global fallback. This is only used
+/// when no task-local logger scope is active. In multi-user deployments,
+/// each workflow should use `with_logger()` to scope its logger.
+///
+/// If the fallback has already been set, this is a no-op.
 pub fn init_global_logger(logger: Logger) {
-    let _ = GLOBAL_LOGGER.set(logger);
+    let _ = FALLBACK_LOGGER.set(logger);
 }
 
-/// Get a reference to the global logger, returning None if not initialized.
-/// Unlike `get_global_logger()`, this does not create a default logger.
-pub fn get_global_logger_opt() -> Option<&'static Logger> {
-    GLOBAL_LOGGER.get()
+/// Get the logger for the current task, if any.
+///
+/// Tries task-local first, then the process-global fallback.
+/// Unlike the old `get_global_logger_opt()`, this returns an owned
+/// `Option<Logger>` rather than a `&'static Logger` reference.
+pub fn get_global_logger_opt() -> Option<Logger> {
+    resolve_logger()
 }
 
-/// Get the current log file path from the global logger.
-pub fn current_log_path() -> &'static Path {
-    get_global_logger().log_file()
+/// Get the current log file path.
+///
+/// Tries task-local logger first, then falls back to the process-global
+/// fallback logger. If neither is set, returns `None`.
+pub fn current_log_path() -> Option<std::path::PathBuf> {
+    resolve_logger().map(|l| l.log_file.to_path_buf())
 }
 
 /// Logger for agent interactions and commands.
 ///
 /// This logger creates markdown-formatted log files for tracking agent sessions,
 /// LLM interactions, command executions, and other events.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Logger {
     log_file: PathBuf,
     log_level: String,
@@ -551,9 +643,16 @@ impl Default for Logger {
 }
 
 
+/// Append content to the current task's logger (or fallback logger).
+///
+/// In multi-user mode, uses the task-local logger set by [`with_logger`].
+/// In single-user CLI mode, falls back to the process-global logger set
+/// by [`init_global_logger`]. If neither is set, the content is silently
+/// dropped.
 pub fn append_to_global_log(content: &str) {
-    let logger = get_global_logger();
-    let _ = logger.append_to_log(content);
+    if let Some(logger) = resolve_logger() {
+        let _ = logger.append_to_log(content);
+    }
 }
 
 /// Strip ANSI escape codes from a string.
