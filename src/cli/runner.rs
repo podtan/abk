@@ -95,22 +95,20 @@ pub async fn run_from_raw_config(
         }
     }
     
-    // Pre-extract agent name and set ABK_AGENT_NAME BEFORE full config parsing.
-    // This is critical because serde defaults (e.g., checkpoint storage_location)
-    // read ABK_AGENT_NAME during deserialization. Without this, storage_location
-    // defaults to ~/.NO_AGENT_NAME instead of ~/.{agent_name}.
+    // Pre-extract agent name for serde defaults. We still set the env var
+    // here because serde deserialize reads it for storage_location defaults.
+    // This is the read-only path (run_from_raw_config is CLI-only, single-user).
     if let Ok(partial) = config_toml.parse::<toml::Value>() {
         if let Some(name) = partial.get("agent").and_then(|a| a.get("name")).and_then(|n| n.as_str()) {
-            std::env::set_var("ABK_AGENT_NAME", name);
+            if std::env::var("ABK_AGENT_NAME").is_err() {
+                std::env::set_var("ABK_AGENT_NAME", name);
+            }
         }
     }
     
-    // Parse TOML configuration (serde defaults now use correct ABK_AGENT_NAME)
+    // Parse TOML configuration
     let config: crate::config::Configuration = toml::from_str(config_toml)
         .map_err(|e| format!("Failed to parse config TOML: {}", e))?;
-    
-    // Ensure ABK_AGENT_NAME is set (redundant but safe)
-    std::env::set_var("ABK_AGENT_NAME", &config.agent.name);
     
     // Create context from parsed config
     let context = RawConfigCommandContext::new(config)?;
@@ -156,6 +154,10 @@ pub async fn run_from_raw_config(
 ///   checks this token at each iteration loop and before each API call, returning
 ///   early with a `TaskResult` (success=false, error="Cancelled") if cancelled.
 ///
+/// * `ctx` - Optional runtime context carrying agent name, token store, and
+///   project/session identity. When `Some`, overrides `ABK_AGENT_NAME` env var
+///   for all path resolution and credential flows.
+///
 /// # Returns
 /// A `TaskResult` containing success/failure status and optional `ResumeInfo`
 /// for session continuity on the next call.
@@ -168,6 +170,7 @@ pub async fn run_task_from_raw_config(
     resume_info: Option<super::ResumeInfo>,
     resume_info_tx: Option<tokio::sync::mpsc::UnboundedSender<Option<super::ResumeInfo>>>,
     cancel_token: Option<tokio_util::sync::CancellationToken>,
+    ctx: Option<&crate::context::RunContext>,
 ) -> Result<super::TaskResult, Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
@@ -178,9 +181,31 @@ pub async fn run_task_from_raw_config(
     
     let _ = build_info; // build_info is attached to cli_config below
 
-    // Pre-extract agent name and set ABK_AGENT_NAME BEFORE full config parsing.
-    if let Ok(partial) = config_toml.parse::<toml::Value>() {
-        if let Some(name) = partial.get("agent").and_then(|a| a.get("name")).and_then(|n| n.as_str()) {
+    // Determine agent name: prefer RunContext, fall back to env var,
+    // then extract from config TOML. We do NOT write set_var — that's
+    // a process-global mutation that breaks multi-user (TMU) operation.
+    // For serde defaults that still read the env var, we set it once
+    // only if not already set (read-only behavior).
+    let agent_name = if let Some(ctx) = ctx {
+        Some(ctx.resolve_agent_name("trustee"))
+    } else {
+        // Fall back: extract from config TOML for serde default compatibility
+        config_toml.parse::<toml::Value>()
+            .ok()
+            .and_then(|v| {
+                v.get("agent")
+                    .and_then(|a| a.get("name"))
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string())
+            })
+            .or_else(|| std::env::var("ABK_AGENT_NAME").ok())
+    };
+
+    // Ensure env var is set for serde defaults (if not already).
+    // This is the ONLY remaining set_var, and it only fires if the env var
+    // is unset — existing values always take precedence.
+    if let Some(ref name) = agent_name {
+        if std::env::var("ABK_AGENT_NAME").is_err() {
             std::env::set_var("ABK_AGENT_NAME", name);
         }
     }
@@ -189,9 +214,7 @@ pub async fn run_task_from_raw_config(
     let config: crate::config::Configuration = toml::from_str(config_toml)
         .map_err(|e| format!("Failed to parse config TOML: {}", e))?;
 
-    std::env::set_var("ABK_AGENT_NAME", &config.agent.name);
-
-    let context = RawConfigCommandContext::new(config)?;
+    let context = RawConfigCommandContext::with_agent_name(config, agent_name.as_deref())?;
 
     let options = crate::cli::commands::run::RunOptions {
         task: task.to_string(),
@@ -203,6 +226,7 @@ pub async fn run_task_from_raw_config(
         resume_info,
         on_checkpoint: resume_info_tx,
         cancel_token,
+        run_context: ctx.cloned(),
     };
 
     let result = crate::cli::commands::run::execute_run(&context, options).await?;
@@ -220,6 +244,17 @@ pub struct RawConfigCommandContext {
 impl RawConfigCommandContext {
     /// Create a new context from already-parsed configuration
     pub fn new(config: crate::config::Configuration) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::with_agent_name(config, None)
+    }
+
+    /// Create a new context with an explicit agent name override.
+    ///
+    /// When `agent_name` is `Some`, it's passed to `Logger::with_agent_name()`
+    /// to avoid reading the `ABK_AGENT_NAME` env var.
+    pub fn with_agent_name(
+        config: crate::config::Configuration,
+        agent_name: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let log_dir_path = if config.logging.log_dir.is_empty() {
             None
         } else {
@@ -230,24 +265,19 @@ impl RawConfigCommandContext {
         } else {
             Some(config.logging.log_level.as_str())
         };
-        // Note: The global logger is initialized earlier in the call chain:
-        // - In trustee TUI mode: run_tui_mode() in main.rs sets ABK_AGENT_NAME
-        //   and creates the global logger before ABK runs.
-        // - In CLI mode: run_from_raw_config() / run_task_from_raw_config()
-        //   sets ABK_AGENT_NAME from config, then RawConfigCommandContext::new()
-        //   creates the logger below and init_global_logger() is called.
-        // init_global_logger is a no-op if already set (OnceLock semantics).
 
-        // Initialize the global logger so standalone tee_* functions use the same log file
-        let global_logger = crate::observability::Logger::new(
+        // Initialize the global logger with explicit agent name when provided
+        let global_logger = crate::observability::Logger::with_agent_name(
             log_dir_path.as_deref(),
             log_level,
+            agent_name,
         )?;
         crate::observability::init_global_logger(global_logger);
 
-        let logger = crate::observability::Logger::new(
+        let logger = crate::observability::Logger::with_agent_name(
             log_dir_path.as_deref(),
             log_level,
+            agent_name,
         )?;
 
         let working_dir = std::env::current_dir()
@@ -827,12 +857,13 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         task,
         yolo,
         mode,
-        run_mode: None, // Not configured in CLI, will use defaults
+        run_mode: None,
         verbose,
         output_sink: None,
-        resume_info: None, // CLI doesn't use TUI session continuity
-    cancel_token: None, // CLI doesn't support cancellation
+        resume_info: None,
+        cancel_token: None,
         on_checkpoint: None,
+        run_context: None,
     };
 
     crate::cli::commands::run::execute_run(ctx, options).await.map(|_| ())

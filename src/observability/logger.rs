@@ -81,11 +81,29 @@ impl Logger {
     /// Initialize logger.
     ///
     /// # Arguments
-    /// * `log_dir` - Directory for log files. If None, creates timestamped files in /tmp/{ABK_AGENT_NAME}/.
+    /// * `log_dir` - Directory for log files. If None, creates timestamped files in /tmp/{agent_name}/.
     /// * `log_level` - Logging level (defaults to "INFO").
+    /// * `agent_name` - Optional agent name override. When `None`, falls back to
+    ///   the `ABK_AGENT_NAME` env var, then `"agent"`.
     pub fn new(log_dir: Option<&Path>, log_level: Option<&str>) -> Result<Self> {
-        let agent_name = std::env::var("ABK_AGENT_NAME")
-            .unwrap_or_else(|_| "agent".to_string());
+        Self::with_agent_name(log_dir, log_level, None)
+    }
+
+    /// Initialize logger with an explicit agent name.
+    ///
+    /// When `agent_name` is `Some`, it overrides the `ABK_AGENT_NAME` env var
+    /// for log file naming and directory.
+    pub fn with_agent_name(
+        log_dir: Option<&Path>,
+        log_level: Option<&str>,
+        agent_name: Option<&str>,
+    ) -> Result<Self> {
+        let agent_name = agent_name
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::var("ABK_AGENT_NAME")
+                    .unwrap_or_else(|_| "agent".to_string())
+            });
         let timestamp = get_session_timestamp();
         let filename = format!("{}_{}.log", agent_name, timestamp);
 
