@@ -30,9 +30,18 @@ pub struct ResumeTracker {
 impl ResumeTracker {
     /// Create a new resume tracker
     pub fn new() -> CheckpointResult<Self> {
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+        let agent_name =
+            std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+        Self::with_agent_name(&agent_name)
+    }
+
+    /// Create a new resume tracker with an explicit agent name.
+    ///
+    /// This bypasses the `ABK_AGENT_NAME` environment variable. Use this
+    /// constructor when a `RunContext` is available.
+    pub fn with_agent_name(agent_name: &str) -> CheckpointResult<Self> {
         let dir_name = format!(".{}", agent_name);
-        
+
         let home_dir = crate::get_home_dir()
             .map_err(|_| CheckpointError::storage("Could not determine home directory"))?;
         let tracker_file = PathBuf::from(home_dir)

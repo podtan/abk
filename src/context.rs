@@ -151,16 +151,18 @@ impl std::fmt::Display for SessionIdentity {
 /// Runtime context that carries identity and configuration, replacing
 /// process-global state.
 ///
-/// This is the first step toward making ABK fully stateless. Currently it
-/// carries optional project/session identity. In future releases it will
-/// also carry the agent name, token store, and MCP configuration.
+/// `RunContext` is the primary state carrier for ABK. It holds:
+/// - Optional project/session identity (for checkpoint storage partitioning)
+/// - Optional agent name (replaces `ABK_AGENT_NAME` env var)
+/// - Optional token store (for per-user MCP credential isolation)
 ///
 /// ## Backward Compatibility
 ///
 /// All fields are optional. When `RunContext::default()` is used (all fields
-/// `None`), ABK behaves exactly as before — project identity is derived from
-/// the working directory path, and session IDs are auto-generated from
-/// timestamps.
+/// `None`), ABK falls back to environment-variable-based behavior — project
+/// identity is derived from the working directory path, session IDs are
+/// auto-generated from timestamps, and agent name is read from the
+/// `ABK_AGENT_NAME` environment variable.
 ///
 /// ## Example
 ///
@@ -177,9 +179,11 @@ impl std::fmt::Display for SessionIdentity {
 ///         name: None,
 ///     }),
 ///     agent_name: Some("trustee".to_string()),
+///     #[cfg(feature = "registry-mcp-token")]
+///     token_store: None,
 /// };
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 #[cfg_attr(
     any(feature = "checkpoint", feature = "config", feature = "agent", feature = "orchestration"),
     derive(Serialize, Deserialize)
@@ -194,12 +198,26 @@ pub struct RunContext {
     pub session: Option<SessionIdentity>,
 
     /// Optional agent name. When set, overrides the `ABK_AGENT_NAME`
-    /// environment variable for checkpoint storage paths and system messages.
+    /// environment variable for checkpoint storage paths, system messages,
+    /// and all other places that previously read the env var.
     ///
-    /// Note: In this release, the agent name from RunContext is available
-    /// to callers but does not yet override all uses of `ABK_AGENT_NAME`.
-    /// Full override will come in the 0.9.0 stateless refactor.
+    /// When `None`, falls back to `ABK_AGENT_NAME` environment variable
+    /// (or a default like `"agent"` if the env var is also unset).
     pub agent_name: Option<String>,
+
+    /// Optional token store for MCP credential isolation.
+    ///
+    /// When set, MCP credential initialization uses this token store
+    /// instead of creating a `FileTokenStore` from the agent name.
+    /// This enables per-user token isolation in multi-user deployments.
+    ///
+    /// Only available with the `registry-mcp-token` feature.
+    #[cfg(feature = "registry-mcp-token")]
+    #[cfg_attr(
+        any(feature = "checkpoint", feature = "config", feature = "agent", feature = "orchestration"),
+        serde(skip)
+    )]
+    pub token_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
 }
 
 impl RunContext {
@@ -226,6 +244,16 @@ impl RunContext {
         self
     }
 
+    /// Set the token store (requires `registry-mcp-token` feature).
+    #[cfg(feature = "registry-mcp-token")]
+    pub fn with_token_store(
+        mut self,
+        store: std::sync::Arc<dyn pep::token_store::TokenStore>,
+    ) -> Self {
+        self.token_store = Some(store);
+        self
+    }
+
     /// Get the project identity, if any.
     pub fn project(&self) -> Option<&ProjectIdentity> {
         self.project.as_ref()
@@ -239,6 +267,46 @@ impl RunContext {
     /// Get the agent name, if any.
     pub fn agent_name(&self) -> Option<&str> {
         self.agent_name.as_deref()
+    }
+
+    /// Get the token store, if any.
+    #[cfg(feature = "registry-mcp-token")]
+    pub fn token_store(&self) -> Option<&std::sync::Arc<dyn pep::token_store::TokenStore>> {
+        self.token_store.as_ref()
+    }
+
+    /// Resolve the agent name, falling back to the `ABK_AGENT_NAME`
+    /// environment variable, and then to the provided `default`.
+    ///
+    /// This is used internally by `SessionManager`, `CheckpointStorageManager`,
+    /// `ResumeTracker`, etc. to replace direct `std::env::var("ABK_AGENT_NAME")`
+    /// calls.
+    pub fn resolve_agent_name(&self, default: &str) -> String {
+        self.agent_name
+            .clone()
+            .or_else(|| std::env::var("ABK_AGENT_NAME").ok())
+            .unwrap_or_else(|| default.to_string())
+    }
+}
+
+impl std::fmt::Debug for RunContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunContext")
+            .field("project", &self.project)
+            .field("session", &self.session)
+            .field("agent_name", &self.agent_name)
+            .field(
+                "token_store",
+                #[cfg(feature = "registry-mcp-token")]
+                {
+                    &self.token_store.as_ref().map(|_| "<TokenStore>")
+                },
+                #[cfg(not(feature = "registry-mcp-token"))]
+                {
+                    &None::<&str>
+                },
+            )
+            .finish()
     }
 }
 
@@ -272,6 +340,28 @@ mod tests {
         assert_eq!(ctx.session().unwrap().id, "test-session");
         assert!(ctx.session().unwrap().name.is_none());
         assert_eq!(ctx.agent_name(), Some("my-agent"));
+    }
+
+    #[test]
+    fn test_resolve_agent_name_from_context() {
+        let ctx = RunContext::new().with_agent_name("explicit-name");
+        assert_eq!(ctx.resolve_agent_name("fallback"), "explicit-name");
+    }
+
+    #[test]
+    fn test_resolve_agent_name_fallback_to_default() {
+        // When neither context nor env var is set, should use default
+        // Save and clear env var to ensure deterministic test
+        let saved = std::env::var("ABK_AGENT_NAME").ok();
+        std::env::remove_var("ABK_AGENT_NAME");
+
+        let ctx = RunContext::default();
+        assert_eq!(ctx.resolve_agent_name("default-agent"), "default-agent");
+
+        // Restore
+        if let Some(v) = saved {
+            std::env::set_var("ABK_AGENT_NAME", v);
+        }
     }
 
     #[test]

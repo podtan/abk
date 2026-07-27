@@ -53,6 +53,44 @@ impl McpToolLoader {
     /// # Returns
     /// A new McpToolLoader with tools fetched from all configured servers.
     pub async fn new(config: &McpConfig) -> Result<Self> {
+        Self::with_token_store(config, None).await
+    }
+
+    /// Create a new MCP tool loader with an optional token store.
+    ///
+    /// When `token_store` is `Some`, interactive/web credential flows use
+    /// it instead of creating a `FileTokenStore`. This enables per-user
+    /// token isolation in multi-user deployments.
+    ///
+    /// # Arguments
+    /// * `config` - The MCP configuration from the agent config
+    /// * `token_store` - Optional shared token store for credential isolation
+    #[cfg(feature = "registry-mcp-token")]
+    pub async fn with_token_store(
+        config: &McpConfig,
+        token_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
+    ) -> Result<Self> {
+        Self::inner_new(config, token_store).await
+    }
+
+    /// Internal constructor (no token store).
+    #[cfg(not(feature = "registry-mcp-token"))]
+    async fn inner_new(config: &McpConfig) -> Result<Self> {
+        Self::create(config).await
+    }
+
+    /// Internal constructor (with optional token store).
+    #[cfg(feature = "registry-mcp-token")]
+    async fn inner_new(
+        config: &McpConfig,
+        token_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
+    ) -> Result<Self> {
+        Self::create(config, token_store).await
+    }
+
+    /// Shared construction logic.
+    #[cfg(not(feature = "registry-mcp-token"))]
+    async fn create(config: &McpConfig) -> Result<Self> {
         let registry = ToolRegistry::new();
         let mut total_tools = 0;
         let mut server_configs = HashMap::new();
@@ -71,7 +109,107 @@ impl McpToolLoader {
         let mut server_statuses = Vec::new();
 
         for server in &config.servers {
-            // Skip non-HTTP transports for now
+            if server.transport != "http" {
+                crate::observability::tee_eprintln(
+                    &format!("Warning: MCP server '{}' uses unsupported transport '{}', skipping",
+                    server.name, server.transport)
+                );
+                continue;
+            }
+
+            let client_config = build_registry_config(
+                &server.name,
+                &server.url,
+                server.auth_token.as_deref(),
+                server.credentials.as_deref(),
+                &config.credentials,
+            ).await;
+
+            server_configs.insert(server.name.clone(), client_config.clone());
+
+            let result = if server.auto_init {
+                client.fetch_tools_with_init(&client_config).await
+            } else {
+                client.fetch_tools(&client_config).await
+            };
+
+            match result {
+                Ok(tools) => {
+                    match registry.register_mcp_batch(tools, &server.name) {
+                        Ok(registered) => {
+                            total_tools += registered;
+                            crate::observability::tee_println(
+                                &format!("✓ Loaded {} tools from MCP server '{}'",
+                                registered, server.name)
+                            );
+                            server_statuses.push(McpServerInfo {
+                                name: server.name.clone(),
+                                connected: true,
+                                tool_count: registered,
+                                error: None,
+                            });
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Failed to register tools: {}", e);
+                            crate::observability::tee_eprintln(
+                                &format!("✗ MCP server '{}': {}", server.name, err_msg)
+                            );
+                            server_statuses.push(McpServerInfo {
+                                name: server.name.clone(),
+                                connected: false,
+                                tool_count: 0,
+                                error: Some(err_msg),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    crate::observability::tee_eprintln(
+                        &format!("✗ Failed to connect to MCP server '{}': {}", server.name, e)
+                    );
+                    server_statuses.push(McpServerInfo {
+                        name: server.name.clone(),
+                        connected: false,
+                        tool_count: 0,
+                        error: Some(format!("{}", e)),
+                    });
+                }
+            }
+        }
+
+        Ok(Self {
+            registry,
+            tool_count: total_tools,
+            server_configs,
+            client,
+            server_statuses,
+        })
+    }
+
+    /// Shared construction logic with optional token store.
+    #[cfg(feature = "registry-mcp-token")]
+    async fn create(
+        config: &McpConfig,
+        token_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
+    ) -> Result<Self> {
+        let registry = ToolRegistry::new();
+        let mut total_tools = 0;
+        let mut server_configs = HashMap::new();
+        let client = McpClient::new();
+
+        if !config.enabled {
+            return Ok(Self {
+                registry,
+                tool_count: 0,
+                server_configs,
+                client,
+                server_statuses: Vec::new(),
+            });
+        }
+
+        let mut server_statuses = Vec::new();
+
+        for server in &config.servers {
             if server.transport != "http" {
                 crate::observability::tee_eprintln(
                     &format!("Warning: MCP server '{}' uses unsupported transport '{}', skipping",
@@ -87,6 +225,7 @@ impl McpToolLoader {
                 server.auth_token.as_deref(),
                 server.credentials.as_deref(),
                 &config.credentials,
+                token_store.clone(),
             ).await;
 
             // Store the server config for later tool calls
@@ -256,6 +395,10 @@ pub struct McpToolExecutionResult {
 ///    - `static`: resolves env vars and stores as `auth_token`.
 /// 2. `auth_token` → static token
 /// 3. neither → no auth
+///
+/// When `token_store` is `Some`, interactive/web/web-interactive credential
+/// flows use it instead of creating a `FileTokenStore` from `ABK_AGENT_NAME`.
+/// This enables per-user token isolation in multi-user deployments.
 #[cfg(feature = "registry-mcp")]
 async fn build_registry_config(
     name: &str,
@@ -263,6 +406,7 @@ async fn build_registry_config(
     auth_token: Option<&str>,
     credentials_ref: Option<&str>,
     credentials_map: &HashMap<String, McpCredentialConfig>,
+    #[cfg(feature = "registry-mcp-token")] shared_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
 ) -> RegistryServerConfig {
     let mut config = RegistryServerConfig::new(name, url);
 
@@ -331,11 +475,12 @@ async fn build_registry_config(
                         use pep::token_store::{FileTokenStore, TokenStore};
                         use std::sync::Arc;
 
-                        let agent_name = std::env::var("ABK_AGENT_NAME")
-                            .unwrap_or_else(|_| "trustee".into());
-
-                        let token_store: Arc<dyn TokenStore> =
-                            Arc::new(FileTokenStore::new(&agent_name));
+                        let token_store: Arc<dyn TokenStore> = shared_store.clone()
+                            .unwrap_or_else(|| {
+                                let agent_name = std::env::var("ABK_AGENT_NAME")
+                                    .unwrap_or_else(|_| "trustee".into());
+                                Arc::new(FileTokenStore::new(&agent_name))
+                            });
 
                         let provider = InteractiveTokenProvider::with_store(
                             InteractiveConfig {
@@ -373,11 +518,12 @@ async fn build_registry_config(
                         use pep::token_store::{FileTokenStore, TokenStore};
                         use std::sync::Arc;
 
-                        let agent_name = std::env::var("ABK_AGENT_NAME")
-                            .unwrap_or_else(|_| "trustee".into());
-
-                        let token_store: Arc<dyn TokenStore> =
-                            Arc::new(FileTokenStore::new(&agent_name));
+                        let token_store: Arc<dyn TokenStore> = shared_store.clone()
+                            .unwrap_or_else(|| {
+                                let agent_name = std::env::var("ABK_AGENT_NAME")
+                                    .unwrap_or_else(|_| "trustee".into());
+                                Arc::new(FileTokenStore::new(&agent_name))
+                            });
 
                         // Reserved credential name — trustee-web writes the session
                         // token here before each agent command.
@@ -423,11 +569,12 @@ async fn build_registry_config(
                         use pep::token_store::{FileTokenStore, TokenStore};
                         use std::sync::Arc;
 
-                        let agent_name = std::env::var("ABK_AGENT_NAME")
-                            .unwrap_or_else(|_| "trustee".into());
-
-                        let token_store: Arc<dyn TokenStore> =
-                            Arc::new(FileTokenStore::new(&agent_name));
+                        let token_store: Arc<dyn TokenStore> = shared_store.clone()
+                            .unwrap_or_else(|| {
+                                let agent_name = std::env::var("ABK_AGENT_NAME")
+                                    .unwrap_or_else(|_| "trustee".into());
+                                Arc::new(FileTokenStore::new(&agent_name))
+                            });
 
                         let provider = InteractiveTokenProvider::with_store(
                             InteractiveConfig {

@@ -121,6 +121,10 @@ impl crate::checkpoint::AgentContext for Agent {
         self.executor.working_dir()
     }
 
+    fn get_agent_name(&self) -> String {
+        self.run_context.resolve_agent_name("agent")
+    }
+
     fn get_project_identity(&self) -> Option<&crate::context::ProjectIdentity> {
         self.run_context.project()
     }

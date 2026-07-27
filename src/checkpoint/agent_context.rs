@@ -144,6 +144,17 @@ pub trait AgentContext {
     /// Get the agent's working directory.
     fn get_working_directory(&self) -> &Path;
 
+    /// Get the agent name for system messages and checkpoint paths.
+    ///
+    /// When provided by the caller, this overrides the `ABK_AGENT_NAME`
+    /// environment variable. This is used by `SessionManager` to set
+    /// the system message author and by storage paths.
+    ///
+    /// Default: reads `ABK_AGENT_NAME` env var, falling back to `"agent"`.
+    fn get_agent_name(&self) -> String {
+        std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string())
+    }
+
     /// Get the project identity, if provided by the caller.
     ///
     /// When `Some`, the `ProjectIdentity::id` overrides the default path-based
