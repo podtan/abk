@@ -572,7 +572,13 @@ impl SessionManager {
         // Initialize checkpoint session with existing session if enabled
         if self.checkpointing_enabled {
             if let Some(ref checkpoint_manager) = self.storage_manager {
-                let project_storage = checkpoint_manager.get_project_storage(project_path).await?;
+                // Use identity-based hash if provided, otherwise path-based
+                let project_storage = if let Some(identity) = context.get_project_identity() {
+                    let project_hash = crate::checkpoint::ProjectHash::from_identity(&identity.id)?;
+                    checkpoint_manager.get_project_storage_with_hash(project_path, &project_hash).await?
+                } else {
+                    checkpoint_manager.get_project_storage(project_path).await?
+                };
                 match project_storage.create_session(session_id).await {
                     Ok(session_storage) => {
                         self.current_session = Some(session_storage);
@@ -608,23 +614,36 @@ impl SessionManager {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Checkpoint manager not initialized"))?;
 
-        // Get project storage for current working directory
+        // Determine project storage: use identity-based hash if provided,
+        // otherwise fall back to path-based hash.
         let current_dir = context.get_working_directory();
-        let project_storage = checkpoint_manager.get_project_storage(current_dir).await?;
+        let project_storage = if let Some(identity) = context.get_project_identity() {
+            let project_hash = crate::checkpoint::ProjectHash::from_identity(&identity.id)?;
+            checkpoint_manager
+                .get_project_storage_with_hash(current_dir, &project_hash)
+                .await?
+        } else {
+            checkpoint_manager.get_project_storage(current_dir).await?
+        };
 
-        // Generate unique session ID based on task and timestamp
-        let timestamp = chrono::Utc::now().format("%Y_%m_%d_%H_%M");
-        let task_slug = task_description
-            .chars()
-            .take(30)
-            .filter(|c| c.is_alphanumeric() || *c == ' ')
-            .collect::<String>()
-            .split_whitespace()
-            .take(3)
-            .collect::<Vec<&str>>()
-            .join("_")
-            .to_lowercase();
-        let session_id = format!("session_{}_{}", timestamp, task_slug);
+        // Determine session ID: use identity if provided, otherwise auto-generate.
+        let session_id = if let Some(identity) = context.get_session_identity() {
+            identity.id.clone()
+        } else {
+            // Generate unique session ID based on task and timestamp
+            let timestamp = chrono::Utc::now().format("%Y_%m_%d_%H_%M");
+            let task_slug = task_description
+                .chars()
+                .take(30)
+                .filter(|c| c.is_alphanumeric() || *c == ' ')
+                .collect::<String>()
+                .split_whitespace()
+                .take(3)
+                .collect::<Vec<&str>>()
+                .join("_")
+                .to_lowercase();
+            format!("session_{}_{}", timestamp, task_slug)
+        };
 
         // Create the session
         let session_storage = project_storage.create_session(&session_id).await?;
