@@ -257,9 +257,15 @@ pub async fn execute_run<C: CommandContext>(
         }
     };
 
-    // Also send via channel so TUI has it even if TaskResult return is lost (e.g. ESC)
+    // Send final resume info via channel for ESC safety (only if we have one).
+    // Don't send None — the incremental on_checkpoint sends already captured the
+    // last valid resume_info. Sending None here could overwrite a valid resume_info
+    // in the receiver if the final checkpoint creation failed but an earlier
+    // incremental checkpoint succeeded.
     if let Some(tx) = &on_checkpoint {
-        let _ = tx.send(final_resume_info.clone());
+        if final_resume_info.is_some() {
+            let _ = tx.send(final_resume_info.clone());
+        }
     }
 
     match workflow_result {
