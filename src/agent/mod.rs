@@ -171,8 +171,13 @@ impl Agent {
             config_value.unwrap_or(false)
         };
 
-        let session_manager = Some(crate::checkpoint::SessionManager::new(checkpointing_enabled)
-            .context("Failed to initialize session manager")?);
+        let session_manager = Some(
+            crate::checkpoint::SessionManager::with_agent_name(
+                checkpointing_enabled,
+                Some(&config_loader.config.agent.name),
+            )
+            .context("Failed to initialize session manager")?,
+        );
 
         #[cfg(feature = "registry-mcp")]
         let mcp_tools = {
@@ -203,6 +208,10 @@ impl Agent {
         };
 
         let open_window_size = config_loader.config.tools.open_file_window_size;
+
+        // Capture agent name before moving config_loader into the struct
+        let agent_name = config_loader.config.agent.name.clone();
+
         Ok(Self {
             env,
             config: config_loader,
@@ -235,7 +244,10 @@ impl Agent {
             turn_request_count: 0,
             output_sink: crate::orchestration::output::stdout_sink(),
             on_checkpoint: None,
-            run_context: crate::context::RunContext::default(),
+            run_context: crate::context::RunContext {
+                agent_name: Some(agent_name),
+                ..Default::default()
+            },
         })
     }
 
@@ -581,11 +593,13 @@ impl Agent {
         self.turn_request_count = 0;
     }
 
-    /// Set the runtime context carrying project/session identity.
+    /// Set the runtime context carrying project/session identity and token store.
     ///
     /// When set, the project identity's `id` field overrides path-based
     /// checkpoint project hashing, and the session identity's `id` overrides
-    /// timestamp-based session ID generation.
+    /// timestamp-based session ID generation. The agent name overrides
+    /// `ABK_AGENT_NAME` for system messages. The token store (if present)
+    /// overrides `FileTokenStore` for MCP credential flows.
     ///
     /// This should be called after `new_from_config()` and before
     /// `start_session()`.

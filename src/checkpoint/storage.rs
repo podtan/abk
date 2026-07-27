@@ -21,6 +21,8 @@ const SESSION_METADATA_FILENAME: &str = "session_metadata.json";
 /// Global checkpoint storage manager
 pub struct CheckpointStorageManager {
     home_dir: PathBuf, // ~/.{agent_name}/
+    /// Agent name resolved at construction time (for directory paths).
+    agent_name: String,
     #[allow(dead_code)]
     current_project: Option<ProjectHash>, // Currently active project
     config: GlobalCheckpointConfig,
@@ -32,14 +34,26 @@ pub struct CheckpointStorageManager {
 impl CheckpointStorageManager {
     /// Create a new storage manager
     pub fn new() -> CheckpointResult<Self> {
-        let home_dir = get_home_checkpoint_dir()?;
+        let agent_name =
+            std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+        Self::with_agent_name(&agent_name)
+    }
+
+    /// Create a new storage manager with an explicit agent name.
+    ///
+    /// This bypasses the `ABK_AGENT_NAME` environment variable, using the
+    /// provided agent name for all directory paths. This is the preferred
+    /// constructor when a `RunContext` is available.
+    pub fn with_agent_name(agent_name: &str) -> CheckpointResult<Self> {
+        let home_dir = get_home_checkpoint_dir_for(agent_name)?;
         let config = GlobalCheckpointConfig::default();
 
         // Ensure storage directories exist
-        ensure_global_storage_directories()?;
+        ensure_global_storage_directories_for(&home_dir)?;
 
         Ok(Self {
             home_dir,
+            agent_name: agent_name.to_string(),
             current_project: None,
             config,
             #[cfg(feature = "storage-documentdb")]
@@ -50,32 +64,38 @@ impl CheckpointStorageManager {
     /// Create a new storage manager with custom config
     pub fn with_config(config: GlobalCheckpointConfig) -> CheckpointResult<Self> {
         let home_dir = config.storage_location.clone();
+        let agent_name =
+            std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
 
         // Ensure storage directories exist
-        ensure_global_storage_directories()?;
+        ensure_global_storage_directories_for(&home_dir)?;
 
         Ok(Self {
             home_dir,
+            agent_name,
             current_project: None,
             config,
             #[cfg(feature = "storage-documentdb")]
             remote_backend: None,
         })
     }
-    
+
     /// Create a new storage manager with custom config and initialize backend
     #[cfg(feature = "storage-documentdb")]
     pub async fn with_config_async(config: GlobalCheckpointConfig) -> CheckpointResult<Self> {
         let home_dir = config.storage_location.clone();
+        let agent_name =
+            std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
 
         // Ensure storage directories exist
-        ensure_global_storage_directories()?;
-        
+        ensure_global_storage_directories_for(&home_dir)?;
+
         // Initialize remote backend if configured
         let remote_backend = Self::create_remote_backend(&config.storage_backend).await?;
 
         Ok(Self {
             home_dir,
+            agent_name,
             current_project: None,
             config,
             remote_backend,
@@ -122,6 +142,11 @@ impl CheckpointStorageManager {
     #[cfg(feature = "storage-documentdb")]
     pub fn remote_backend(&self) -> Option<Arc<dyn StorageBackend + Send + Sync>> {
         self.remote_backend.clone()
+    }
+
+    /// Get the agent name this storage manager was configured with.
+    pub fn agent_name(&self) -> &str {
+        &self.agent_name
     }
 
     /// Get project storage for a given project path
@@ -1586,7 +1611,11 @@ pub struct ProjectMetadata {
 /// Ensure global storage directories exist
 pub fn ensure_global_storage_directories() -> CheckpointResult<()> {
     let home_dir = get_home_checkpoint_dir()?;
+    ensure_global_storage_directories_for(&home_dir)
+}
 
+/// Ensure global storage directories exist for a given home directory
+fn ensure_global_storage_directories_for(home_dir: &Path) -> CheckpointResult<()> {
     let directories = ["", "config", "projects", "temp", "logs"];
 
     for dir in &directories {
@@ -1607,15 +1636,21 @@ pub fn ensure_global_storage_directories() -> CheckpointResult<()> {
     Ok(())
 }
 
-/// Get the home checkpoint directory (~/.{agent_name})
-/// Uses ABK_AGENT_NAME environment variable, defaults to "NO_AGENT_NAME" if not set
+/// Get the home checkpoint directory (~/.{agent_name}).
+///
+/// Uses `ABK_AGENT_NAME` environment variable, defaults to "NO_AGENT_NAME" if not set.
 fn get_home_checkpoint_dir() -> CheckpointResult<PathBuf> {
-    let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+    let agent_name =
+        std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+    get_home_checkpoint_dir_for(&agent_name)
+}
+
+/// Get the home checkpoint directory for a specific agent name.
+fn get_home_checkpoint_dir_for(agent_name: &str) -> CheckpointResult<PathBuf> {
     let dir_name = format!(".{}", agent_name);
-    
-    let home = crate::get_home_dir().map_err(|_| {
-        CheckpointError::config("Unable to determine home directory")
-    })?;
+
+    let home = crate::get_home_dir()
+        .map_err(|_| CheckpointError::config("Unable to determine home directory"))?;
     Ok(PathBuf::from(home).join(&dir_name))
 }
 

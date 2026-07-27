@@ -79,8 +79,27 @@ impl SessionManager {
     /// # Returns
     /// A new `SessionManager` instance, or an error if initialization fails.
     pub fn new(checkpointing_enabled: bool) -> Result<Self> {
+        Self::with_agent_name(checkpointing_enabled, None)
+    }
+
+    /// Create a new session manager with an explicit agent name.
+    ///
+    /// When `agent_name` is `Some`, it bypasses the `ABK_AGENT_NAME` env var
+    /// for all checkpoint storage paths. Use this when a `RunContext` is
+    /// available.
+    ///
+    /// # Arguments
+    /// * `checkpointing_enabled` - Whether to enable checkpoint saving
+    /// * `agent_name` - Optional agent name overriding `ABK_AGENT_NAME`
+    pub fn with_agent_name(
+        checkpointing_enabled: bool,
+        agent_name: Option<&str>,
+    ) -> Result<Self> {
         let storage_manager = if checkpointing_enabled {
-            Some(CheckpointStorageManager::new()?)
+            Some(match agent_name {
+                Some(name) => CheckpointStorageManager::with_agent_name(name)?,
+                None => CheckpointStorageManager::new()?,
+            })
         } else {
             None
         };
@@ -367,7 +386,7 @@ impl SessionManager {
         };
 
         // Initialize chat with system message and direct task
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+        let agent_name = context.get_agent_name();
         context.clear_messages();
         context.add_system_message(system_content, Some(agent_name));
         context.add_user_message(user_message, Some("user".to_string()));
@@ -420,7 +439,7 @@ impl SessionManager {
         );
 
         // Initialize chat with system message and classification+task request
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+        let agent_name = context.get_agent_name();
         context.clear_messages();
         context.add_system_message(execution_system_content, Some(agent_name));
         context.add_user_message(initial_message, Some("user".to_string()));
@@ -479,7 +498,7 @@ impl SessionManager {
             .context("Failed to render task template")?;
 
         // Initialize chat with system and task messages
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "agent".to_string());
+        let agent_name = context.get_agent_name();
         context.clear_messages();
         context.add_system_message(system_content, Some(agent_name));
         context.add_user_message(task_content, Some("user".to_string()));
