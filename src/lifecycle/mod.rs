@@ -316,13 +316,26 @@ pub async fn find_lifecycle_plugin_with_config(
     lifecycle_enabled: bool,
     system_template: Option<String>,
 ) -> Result<Box<dyn Lifecycle>> {
+    find_lifecycle_plugin_with_config_and_agent_name(lifecycle_enabled, system_template, None).await
+}
+
+/// Find lifecycle plugin with explicit agent name override.
+pub async fn find_lifecycle_plugin_with_config_and_agent_name(
+    lifecycle_enabled: bool,
+    system_template: Option<String>,
+    agent_name_override: Option<&str>,
+) -> Result<Box<dyn Lifecycle>> {
     if !lifecycle_enabled {
         return Ok(Box::new(SimpleLifecycle::new(system_template)));
     }
 
     #[cfg(feature = "extension")]
     {
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string());
+        let agent_name = agent_name_override
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "NO_AGENT_NAME".to_string())
+            });
         
         let extension_paths = vec![
             PathBuf::from("extensions/coder-lifecycle"),

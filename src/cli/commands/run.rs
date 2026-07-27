@@ -31,6 +31,9 @@ pub struct RunOptions {
     /// Optional cancellation token for cooperative workflow cancellation (e.g., ESC in TUI).
     /// When cancelled, the workflow loop checks this at each iteration and returns early.
     pub cancel_token: Option<CancellationToken>,
+    /// Optional runtime context carrying agent name, token store, and
+    /// project/session identity. When `Some`, overrides env var reads.
+    pub run_context: Option<crate::context::RunContext>,
 }
 
 /// Execute an agent workflow
@@ -38,7 +41,7 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<TaskResult> {
-    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token, run_context } = options;
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
@@ -76,6 +79,12 @@ pub async fn execute_run<C: CommandContext>(
     )
     .await
     .map_err(|e| CliError::ExecutionError(format!("Failed to create agent: {}", e)))?;
+
+    // Apply external RunContext when provided — overrides agent_name, token_store,
+    // and project/session identity from the caller's context.
+    if let Some(rc) = run_context {
+        agent.set_run_context(rc);
+    }
     
     // Initialize remote checkpoint backend if configured
     #[cfg(feature = "storage-documentdb")]

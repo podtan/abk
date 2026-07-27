@@ -68,7 +68,21 @@ impl ProviderFactory {
         provider_name: &str,
         env: &EnvironmentLoader,
     ) -> Result<Box<dyn LlmProvider>> {
-        let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
+        Self::create_extension_provider_with_agent_name(provider_name, env, None).await
+    }
+
+    /// Create an extension-based (WASM) provider with explicit agent name.
+    #[cfg(feature = "extension")]
+    async fn create_extension_provider_with_agent_name(
+        provider_name: &str,
+        env: &EnvironmentLoader,
+        agent_name: Option<&str>,
+    ) -> Result<Box<dyn LlmProvider>> {
+        let agent_name = agent_name
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string())
+            });
         debug!("Factory - Agent name: {}", agent_name);
 
         let extensions_dir = if let Ok(home_dir) = crate::get_home_dir() {
