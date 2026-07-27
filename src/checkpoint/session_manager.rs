@@ -539,12 +539,14 @@ impl SessionManager {
 
         let checkpoint = &restored_checkpoint.checkpoint;
 
-        // Restore agent state
+        // Restore agent state, incrementing iteration so the next checkpoint
+        // saves to N+1 instead of overwriting the checkpoint we just resumed
+        // from (which is at iteration N).
         context.set_current_mode(checkpoint.agent_state.current_mode.clone());
         context.set_current_step(
             context.checkpoint_step_to_agent_step(&checkpoint.agent_state.current_step),
         );
-        self.current_iteration = checkpoint.agent_state.current_iteration;
+        self.current_iteration = checkpoint.agent_state.current_iteration + 1;
         context.set_current_iteration(self.current_iteration);
         context.set_task_description(checkpoint.agent_state.task_description.clone());
 
