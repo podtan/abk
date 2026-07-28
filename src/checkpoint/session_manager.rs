@@ -199,9 +199,16 @@ impl SessionManager {
     /// # Returns
     /// Ok(()) if successful, or an error if backend initialization fails.
     #[cfg(feature = "storage-documentdb")]
-    pub async fn initialize_remote_backend(&mut self, config: super::GlobalCheckpointConfig) -> Result<()> {
+    pub async fn initialize_remote_backend(&mut self, mut config: super::GlobalCheckpointConfig) -> Result<()> {
         if !self.checkpointing_enabled {
             return Ok(());
+        }
+        
+        // Preserve the existing home_dir from the current storage manager.
+        // This is critical: set_run_context() may have set a per-user home_dir,
+        // and we must not lose it when initializing the remote backend.
+        if let Some(ref sm) = self.storage_manager {
+            config.storage_location = sm.home_dir().to_path_buf();
         }
         
         // Create a new storage manager with the configured backend
@@ -599,7 +606,7 @@ impl SessionManager {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Checkpoint manager not initialized"))?;
 
-        // Determine project storage: use identity-based hash if provided,
+        // Determine project storage: use identity-based project_id if provided,
         // otherwise fall back to path-based hash.
         let current_dir = context.get_working_directory();
         let project_storage = if let Some(identity) = context.get_project_identity() {
