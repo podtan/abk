@@ -639,25 +639,9 @@ impl RestorationAccess for AbkRestorationAccess {
         })
     }
 
-    async fn store_resume_context(&self, context: &ResumeContext) -> CliResult<()> {
-        let tracker = crate::checkpoint::ResumeTracker::new()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
-        
-        // Convert CLI ResumeContext to resume_tracker ResumeContext
-        let tracker_context = crate::checkpoint::resume_tracker::ResumeContext {
-            project_path: context.project_path.clone(),
-            session_id: context.session_id.clone(),
-            checkpoint_id: context.checkpoint_id.clone(),
-            restored_at: context.restored_at,
-            working_directory: context.working_directory.clone(),
-            task_description: context.task_description.clone().unwrap_or_else(|| "Unknown task".to_string()),
-            workflow_step: context.workflow_step.clone(),
-            iteration: context.iteration as u32,
-        };
-        
-        tracker.store_resume_context(&tracker_context)
-            .map_err(|e| CliError::CheckpointError(format!("Failed to store resume context: {}", e)))?;
-        
+    async fn store_resume_context(&self, _context: &ResumeContext) -> CliResult<()> {
+        // No-op: ResumeTracker file mechanism removed.
+        // CLI resume is handled via --resume flag → resume_info in memory.
         Ok(())
     }
 }
@@ -853,6 +837,14 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
     let mode = matches.get_one::<String>("mode").cloned();
     let verbose = matches.get_flag("verbose");
 
+    // Resolve --resume <session_id> to a ResumeInfo by searching all projects.
+    // This replaces the old two-step `trustee resume` → `trustee run` flow.
+    let resume_info = if let Some(session_id) = matches.get_one::<String>("resume") {
+        resolve_resume_info(ctx, session_id).await?
+    } else {
+        None
+    };
+
     let options = crate::cli::commands::run::RunOptions {
         task,
         yolo,
@@ -860,13 +852,58 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         run_mode: None,
         verbose,
         output_sink: None,
-        resume_info: None,
+        resume_info,
         cancel_token: None,
         on_checkpoint: None,
         run_context: None,
     };
 
     crate::cli::commands::run::execute_run(ctx, options).await.map(|_| ())
+}
+
+/// Resolve a session_id to ResumeInfo by searching all checkpoint projects.
+///
+/// Searches across all projects (not just CWD) for the given session_id,
+/// finds its latest checkpoint, and builds a ResumeInfo in memory.
+/// This is the stateless replacement for the old ResumeTracker file.
+async fn resolve_resume_info<C: CommandContext>(
+    ctx: &C,
+    session_id: &str,
+) -> CliResult<Option<crate::cli::ResumeInfo>> {
+    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
+
+    let projects = checkpoint_access.list_projects().await?;
+
+    for project in &projects {
+        let sessions = checkpoint_access
+            .list_sessions(&project.project_path)
+            .await?;
+
+        if sessions.iter().any(|s| s.session_id == session_id) {
+            let checkpoints = checkpoint_access
+                .list_checkpoints(&project.project_path, session_id)
+                .await?;
+
+            if let Some(latest) = checkpoints.iter().max_by_key(|cp| cp.created_at) {
+                ctx.log_info(&format!(
+                    "Resolved resume: session={}, checkpoint={}, iteration={}",
+                    session_id, latest.checkpoint_id, latest.iteration
+                ));
+                return Ok(Some(crate::cli::ResumeInfo {
+                    session_id: session_id.to_string(),
+                    checkpoint_id: latest.checkpoint_id.clone(),
+                    iteration: latest.iteration as u32,
+                    project_path: Some(project.project_path.clone()),
+                }));
+            }
+        }
+    }
+
+    ctx.log_warn(&format!(
+        "Session '{}' not found in any project — starting fresh",
+        session_id
+    ));
+    Ok(None)
 }
 
 /// Handle run command when called without subcommand

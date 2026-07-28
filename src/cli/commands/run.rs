@@ -131,9 +131,10 @@ pub async fn execute_run<C: CommandContext>(
     // other consumers) can display per-server connection health.
     agent.emit_mcp_server_statuses();
 
-    // Check for resume context — from TUI parameter OR from last_resume.json
+    // Resume path: only from explicit resume_info parameter.
+    // The file-based ResumeTracker fallback has been removed — ABK is now stateless.
+    // CLI callers pass resume_info via --resume flag; TUI/API pass it from Session.
     let resume_context = if let Some(ref info) = resume_info {
-        // TUI/API provided resume info directly (no file needed)
         ctx.log_info(&format!(
             "Resume info: session={}, checkpoint={}",
             info.session_id, info.checkpoint_id
@@ -149,12 +150,8 @@ pub async fn execute_run<C: CommandContext>(
             iteration: info.iteration,
         })
     } else {
-        // CLI mode: check for last_resume.json
-        let resume_tracker = crate::checkpoint::ResumeTracker::new()
-            .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
-        
-        resume_tracker.get_resume_context_for_project(&current_dir)
-            .map_err(|e| CliError::CheckpointError(format!("Failed to check resume context: {}", e)))?
+        // No resume_info → fresh session.
+        None
     };
 
     let result = if let Some(context) = resume_context {
@@ -170,14 +167,6 @@ pub async fn execute_run<C: CommandContext>(
         )
         .await
         .map_err(|e| CliError::ExecutionError(format!("Failed to resume from checkpoint: {}", e)))?;
-        
-        // Clear the resume context only if we read from file (not from TUI)
-        if resume_info.is_none() {
-            let resume_tracker = crate::checkpoint::ResumeTracker::new()
-                .map_err(|e| CliError::CheckpointError(format!("Failed to create resume tracker: {}", e)))?;
-            resume_tracker.clear_resume_context()
-                .map_err(|e| CliError::CheckpointError(format!("Failed to clear resume context: {}", e)))?;
-        }
         
         // Add the new task as a user message to the restored conversation
         agent.chat_formatter_mut().add_user_message(task.clone(), None);
