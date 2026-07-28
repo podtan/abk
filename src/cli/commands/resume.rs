@@ -518,6 +518,34 @@ where
     Ok(())
 }
 
+/// Interactive session selection — displays all sessions across all projects,
+/// lets the user pick one, and returns `(session_id, project_path)`.
+///
+/// Does NOT restore, does NOT write any files. The caller is responsible for
+/// resolving the latest checkpoint and building ResumeInfo from the result.
+///
+/// Returns `None` if the user cancels or no sessions are available.
+pub async fn select_session_interactive<C, A>(
+    ctx: &C,
+    checkpoint_access: &A,
+) -> CliResult<Option<(String, PathBuf)>>
+where
+    C: CommandContext + ?Sized,
+    A: CheckpointAccess + ?Sized,
+{
+    let current_dir = ctx.working_dir()?;
+    let sessions_info = discover_resume_sessions(ctx, checkpoint_access, &current_dir).await?;
+
+    if sessions_info.is_empty() {
+        ctx.log_warning("No sessions available for resume.");
+        return Ok(None);
+    }
+
+    display_resume_candidates(ctx, &sessions_info, false)?;
+
+    interactive_session_selection(ctx, &sessions_info)
+}
+
 // Utility functions
 
 fn format_time_ago(datetime: chrono::DateTime<chrono::Utc>) -> String {
