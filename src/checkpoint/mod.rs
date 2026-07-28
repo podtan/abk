@@ -60,8 +60,8 @@ pub use config::{
 pub use errors::{CheckpointError, CheckpointResult};
 pub use models::{
     AgentStateSnapshot, Checkpoint, CheckpointMetadata, CheckpointSummary, ConversationSnapshot,
-    EnvironmentSnapshot, FileSystemSnapshot, ProjectHash, SessionMetadata, SessionStatus,
-    ToolStateSnapshot,
+    EnvironmentSnapshot, FileSystemSnapshot, SessionMetadata, SessionStatus,
+    ToolStateSnapshot, project_id_from_path,
 };
 pub use restoration::{
     CheckpointRestoration, RestorationMetadata, RestorationResult, RestoredCheckpoint,

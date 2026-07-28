@@ -116,6 +116,42 @@ impl SessionManager {
             initial_additional_context: None,
         })
     }
+
+    /// Create a new session manager with an explicit home directory.
+    ///
+    /// This enables per-user isolation by specifying a custom home directory
+    /// (e.g., `~/.trustee/users/{user_hash}/`).
+    ///
+    /// # Arguments
+    /// * `checkpointing_enabled` - Whether to enable checkpoint saving
+    /// * `home_dir` - Custom home directory for checkpoint storage
+    /// * `agent_name` - Agent name for metadata
+    pub fn with_home_dir(
+        checkpointing_enabled: bool,
+        home_dir: impl Into<std::path::PathBuf>,
+        agent_name: &str,
+    ) -> Result<Self> {
+        let storage_manager = if checkpointing_enabled {
+            Some(CheckpointStorageManager::with_home_dir(
+                home_dir.into(),
+                agent_name,
+            )?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            storage_manager,
+            current_session: None,
+            current_iteration: 0,
+            checkpointing_enabled,
+            classification_done: false,
+            classified_task_type: None,
+            template_sent: false,
+            initial_task_description: String::new(),
+            initial_additional_context: None,
+        })
+    }
     
     /// Create a new session manager with config-based storage backend.
     ///
@@ -524,8 +560,7 @@ impl SessionManager {
             if let Some(ref checkpoint_manager) = self.storage_manager {
                 // Use identity-based hash if provided, otherwise path-based
                 let project_storage = if let Some(identity) = context.get_project_identity() {
-                    let project_hash = crate::checkpoint::ProjectHash::from_identity(&identity.id)?;
-                    checkpoint_manager.get_project_storage_with_hash(project_path, &project_hash).await?
+                    checkpoint_manager.get_project_storage_with_id(project_path, &identity.id).await?
                 } else {
                     checkpoint_manager.get_project_storage(project_path).await?
                 };
@@ -568,32 +603,23 @@ impl SessionManager {
         // otherwise fall back to path-based hash.
         let current_dir = context.get_working_directory();
         let project_storage = if let Some(identity) = context.get_project_identity() {
-            let project_hash = crate::checkpoint::ProjectHash::from_identity(&identity.id)?;
             checkpoint_manager
-                .get_project_storage_with_hash(current_dir, &project_hash)
+                .get_project_storage_with_id(current_dir, &identity.id)
                 .await?
         } else {
             checkpoint_manager.get_project_storage(current_dir).await?
         };
 
         // Determine session ID and description: use identity if provided,
-        // otherwise auto-generate.
+        // otherwise auto-generate using timestamp + UUID (no slug from command text).
         let (session_id, description) = if let Some(identity) = context.get_session_identity() {
             (identity.id.clone(), identity.name.clone())
         } else {
-            // Generate unique session ID based on task and timestamp
+            // Generate unique session ID: session_YYYY_MM_DD_HH_MM_{uuid8}
             let timestamp = chrono::Utc::now().format("%Y_%m_%d_%H_%M");
-            let task_slug = task_description
-                .chars()
-                .take(30)
-                .filter(|c| c.is_alphanumeric() || *c == ' ')
-                .collect::<String>()
-                .split_whitespace()
-                .take(3)
-                .collect::<Vec<&str>>()
-                .join("_")
-                .to_lowercase();
-            (format!("session_{}_{}", timestamp, task_slug), Some(task_description.chars().take(80).collect()))
+            let uuid_suffix = uuid::Uuid::new_v4().simple().to_string();
+            let uuid8 = &uuid_suffix[..8];
+            (format!("session_{}_{}", timestamp, uuid8), Some(task_description.chars().take(80).collect()))
         };
 
         // Create the session with description

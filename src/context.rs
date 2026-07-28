@@ -62,8 +62,8 @@ use serde::{Deserialize, Serialize};
 pub struct ProjectIdentity {
     /// Stable, immutable ID used as the storage partition key.
     ///
-    /// This value is hashed into a `ProjectHash` for checkpoint directory
-    /// naming. It should be globally unique (e.g., a UUID or slug).
+    /// This value is used directly as the checkpoint storage directory
+    /// name. It should be globally unique (e.g., a UUID or a path hash).
     /// Renaming a project must never change this value.
     pub id: String,
 
@@ -169,19 +169,20 @@ impl std::fmt::Display for SessionIdentity {
 /// ```
 /// use abk::context::{RunContext, ProjectIdentity, SessionIdentity};
 ///
-/// let ctx = RunContext {
-///     project: Some(ProjectIdentity {
-///         id: "proj-abc123".to_string(),
-///         name: Some("My Project".to_string()),
-///     }),
-///     session: Some(SessionIdentity {
-///         id: "sess-001".to_string(),
-///         name: None,
-///     }),
-///     agent_name: Some("trustee".to_string()),
-///     #[cfg(feature = "registry-mcp-token")]
-///     token_store: None,
-/// };
+    /// let ctx = RunContext {
+    ///     project: Some(ProjectIdentity {
+    ///         id: "proj-abc123".to_string(),
+    ///         name: Some("My Project".to_string()),
+    ///     }),
+    ///     session: Some(SessionIdentity {
+    ///         id: "sess-001".to_string(),
+    ///         name: None,
+    ///     }),
+    ///     agent_name: Some("trustee".to_string()),
+    ///     home_dir: None,
+    ///     #[cfg(feature = "registry-mcp-token")]
+    ///     token_store: None,
+    /// };
 /// ```
 #[derive(Clone, Default)]
 #[cfg_attr(
@@ -204,6 +205,16 @@ pub struct RunContext {
     /// When `None`, falls back to `ABK_AGENT_NAME` environment variable
     /// (or a default like `"agent"` if the env var is also unset).
     pub agent_name: Option<String>,
+
+    /// Optional home directory for checkpoint storage.
+    ///
+    /// When set, overrides the default `~/.{agent_name}/` path for checkpoint
+    /// storage. This enables per-user isolation in multi-user deployments:
+    /// e.g., `~/.trustee/users/{user_hash}/`.
+    ///
+    /// When `None`, falls back to the default `~/.{agent_name}/` path
+    /// computed from the agent name.
+    pub home_dir: Option<std::path::PathBuf>,
 
     /// Optional token store for MCP credential isolation.
     ///
@@ -244,6 +255,15 @@ impl RunContext {
         self
     }
 
+    /// Set the home directory for checkpoint storage.
+    ///
+    /// This enables per-user isolation when the home_dir is set to something
+    /// like `~/.trustee/users/{user_hash}/`.
+    pub fn with_home_dir(mut self, home_dir: impl Into<std::path::PathBuf>) -> Self {
+        self.home_dir = Some(home_dir.into());
+        self
+    }
+
     /// Set the token store (requires `registry-mcp-token` feature).
     #[cfg(feature = "registry-mcp-token")]
     pub fn with_token_store(
@@ -269,6 +289,11 @@ impl RunContext {
         self.agent_name.as_deref()
     }
 
+    /// Get the home directory, if any.
+    pub fn home_dir(&self) -> Option<&std::path::Path> {
+        self.home_dir.as_deref()
+    }
+
     /// Get the token store, if any.
     #[cfg(feature = "registry-mcp-token")]
     pub fn token_store(&self) -> Option<&std::sync::Arc<dyn pep::token_store::TokenStore>> {
@@ -287,6 +312,22 @@ impl RunContext {
             .or_else(|| std::env::var("ABK_AGENT_NAME").ok())
             .unwrap_or_else(|| default.to_string())
     }
+
+    /// Resolve the home directory for checkpoint storage.
+    ///
+    /// Falls back to `~/.{agent_name}/` when not explicitly set.
+    /// Returns an error if the home directory cannot be determined.
+    pub fn resolve_home_dir(&self) -> Result<std::path::PathBuf, String> {
+        if let Some(ref dir) = self.home_dir {
+            return Ok(dir.clone());
+        }
+        // Fall back to the agent name-based path
+        let agent_name = self.resolve_agent_name("agent");
+        let dir_name = format!(".{}", agent_name);
+        let home = crate::get_home_dir()
+            .map_err(|e| format!("Unable to determine home directory: {}", e))?;
+        Ok(std::path::PathBuf::from(home).join(dir_name))
+    }
 }
 
 impl std::fmt::Debug for RunContext {
@@ -295,6 +336,7 @@ impl std::fmt::Debug for RunContext {
             .field("project", &self.project)
             .field("session", &self.session)
             .field("agent_name", &self.agent_name)
+            .field("home_dir", &self.home_dir)
             .field(
                 "token_store",
                 #[cfg(feature = "registry-mcp-token")]
@@ -320,6 +362,7 @@ mod tests {
         assert!(ctx.project.is_none());
         assert!(ctx.session.is_none());
         assert!(ctx.agent_name.is_none());
+        assert!(ctx.home_dir.is_none());
     }
 
     #[test]

@@ -4,8 +4,9 @@ use super::{
     AgentStateSnapshot, AtomicOps, Checkpoint, CheckpointError, CheckpointMetadata,
     CheckpointResult, CleanupManager, ConversationSnapshot, EnvironmentSnapshot,
     FileSystemSnapshot, GlobalCheckpointConfig, MigrationReport, ProjectCheckpointConfig,
-    ProjectHash, ProjectStats, RetentionPolicy, SessionMetadata, SessionStats, SessionStatus,
+    ProjectStats, RetentionPolicy, SessionMetadata, SessionStats, SessionStatus,
     StorageBackendConfig, StorageBackendType, StorageStats, ToolStateSnapshot,
+    project_id_from_path,
 };
 use super::backend::{StorageBackend, StorageBackendExt};
 use chrono::{DateTime, Utc};
@@ -24,7 +25,7 @@ pub struct CheckpointStorageManager {
     /// Agent name resolved at construction time (for directory paths).
     agent_name: String,
     #[allow(dead_code)]
-    current_project: Option<ProjectHash>, // Currently active project
+    current_project: Option<String>, // Currently active project ID
     config: GlobalCheckpointConfig,
     /// Optional remote storage backend (DocumentDB/MongoDB)
     #[cfg(feature = "storage-documentdb")]
@@ -46,7 +47,30 @@ impl CheckpointStorageManager {
     /// constructor when a `RunContext` is available.
     pub fn with_agent_name(agent_name: &str) -> CheckpointResult<Self> {
         let home_dir = get_home_checkpoint_dir_for(agent_name)?;
-        let config = GlobalCheckpointConfig::default();
+        Self::with_home_dir(home_dir, agent_name)
+    }
+
+    /// Create a new storage manager with an explicit home directory.
+    ///
+    /// This is the primary constructor for per-user isolation. The `home_dir`
+    /// specifies where checkpoint data is stored (e.g., `~/.trustee/users/{user_hash}/`).
+    /// The `agent_name` is used for metadata and logging.
+    ///
+    /// # Arguments
+    /// * `home_dir` - The root directory for checkpoint storage
+    /// * `agent_name` - Agent name for metadata (does not affect directory path)
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use abk::checkpoint::CheckpointStorageManager;
+    /// use std::path::PathBuf;
+    ///
+    /// let home_dir = PathBuf::from("/home/user/.trustee/users/a1b2c3d4e5f6g7h8/");
+    /// let manager = CheckpointStorageManager::with_home_dir(home_dir, "trustee")?;
+    /// ```
+    pub fn with_home_dir(home_dir: PathBuf, agent_name: &str) -> CheckpointResult<Self> {
+        let mut config = GlobalCheckpointConfig::default();
+        config.storage_location = home_dir.clone();
 
         // Ensure storage directories exist
         ensure_global_storage_directories_for(&home_dir)?;
@@ -149,36 +173,42 @@ impl CheckpointStorageManager {
         &self.agent_name
     }
 
-    /// Get project storage for a given project path
+    /// Get the home directory this storage manager uses.
+    pub fn home_dir(&self) -> &Path {
+        &self.home_dir
+    }
+
+    /// Get project storage for a given project path.
+    ///
+    /// Computes a project_id from the canonical path using SHA-256.
     pub async fn get_project_storage(
         &self,
         project_path: &Path,
     ) -> CheckpointResult<ProjectStorage> {
-        let project_hash = ProjectHash::new(project_path)?;
-        
-        self.get_project_storage_with_hash(project_path, &project_hash).await
+        let project_id = project_id_from_path(project_path)?;
+        self.get_project_storage_with_id(project_path, &project_id).await
     }
 
-    /// Get project storage using a pre-computed project hash.
+    /// Get project storage using a pre-computed project_id.
     ///
     /// This is used when the caller has provided an explicit project identity
-    /// (via [`crate::context::ProjectIdentity`]) and the hash was computed
-    /// from the identity string rather than the path.
+    /// (via [`crate::context::ProjectIdentity`]) where the `id` is used
+    /// directly as the directory name (no hashing).
     ///
     /// # Arguments
     /// * `project_path` - The working directory path (used for metadata)
-    /// * `project_hash` - Pre-computed hash (from path or identity)
-    pub async fn get_project_storage_with_hash(
+    /// * `project_id` - Pre-computed project ID (from path hash or explicit identity)
+    pub async fn get_project_storage_with_id(
         &self,
         project_path: &Path,
-        project_hash: &ProjectHash,
+        project_id: &str,
     ) -> CheckpointResult<ProjectStorage> {
         #[cfg(feature = "storage-documentdb")]
         {
             let storage_mode = self.config.storage_backend.effective_storage_mode();
             ProjectStorage::with_remote_backend(
                 self.home_dir.clone(),
-                project_hash.clone(),
+                project_id.to_string(),
                 project_path.to_path_buf(),
                 self.remote_backend.clone(),
                 storage_mode,
@@ -190,7 +220,7 @@ impl CheckpointStorageManager {
         {
             ProjectStorage::new(
                 self.home_dir.clone(),
-                project_hash.clone(),
+                project_id.to_string(),
                 project_path.to_path_buf(),
             )
             .await
@@ -453,10 +483,10 @@ impl CheckpointStorageManager {
 
 /// Project-specific storage handler
 pub struct ProjectStorage {
-    project_hash: ProjectHash,
+    project_id: String,
     #[allow(dead_code)]
     project_path: PathBuf,
-    storage_path: PathBuf, // ~/.{agent_name}/projects/<hash>/
+    storage_path: PathBuf, // ~/.{agent_name}/projects/<project_id>/
     #[allow(dead_code)]
     metadata: ProjectMetadata,
     #[allow(dead_code)]
@@ -475,10 +505,10 @@ impl ProjectStorage {
     /// Create a new project storage instance
     pub async fn new(
         base_path: PathBuf,
-        project_hash: ProjectHash,
+        project_id: String,
         project_path: PathBuf,
     ) -> CheckpointResult<Self> {
-        let storage_path = base_path.join("projects").join(project_hash.as_str());
+        let storage_path = base_path.join("projects").join(&project_id);
 
         // Ensure storage directories exist
         fs::create_dir_all(&storage_path).await?;
@@ -486,11 +516,11 @@ impl ProjectStorage {
         fs::create_dir_all(storage_path.join("cache")).await?;
 
         let metadata =
-            load_or_create_project_metadata(&storage_path, &project_hash, &project_path).await?;
+            load_or_create_project_metadata(&storage_path, &project_id, &project_path).await?;
         let config = ProjectCheckpointConfig::default();
 
         Ok(Self {
-            project_hash,
+            project_id,
             project_path,
             storage_path,
             metadata,
@@ -507,12 +537,12 @@ impl ProjectStorage {
     #[cfg(feature = "storage-documentdb")]
     pub async fn with_remote_backend(
         base_path: PathBuf,
-        project_hash: ProjectHash,
+        project_id: String,
         project_path: PathBuf,
         remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
         storage_mode: super::config::StorageMode,
     ) -> CheckpointResult<Self> {
-        let storage_path = base_path.join("projects").join(project_hash.as_str());
+        let storage_path = base_path.join("projects").join(&project_id);
 
         // Ensure storage directories exist
         fs::create_dir_all(&storage_path).await?;
@@ -520,11 +550,11 @@ impl ProjectStorage {
         fs::create_dir_all(storage_path.join("cache")).await?;
 
         let metadata =
-            load_or_create_project_metadata(&storage_path, &project_hash, &project_path).await?;
+            load_or_create_project_metadata(&storage_path, &project_id, &project_path).await?;
         let config = ProjectCheckpointConfig::default();
 
         Ok(Self {
-            project_hash,
+            project_id,
             project_path,
             storage_path,
             metadata,
@@ -541,12 +571,12 @@ impl ProjectStorage {
         base_path: PathBuf,
         metadata: ProjectMetadata,
     ) -> CheckpointResult<Self> {
-        let project_hash = ProjectHash(metadata.project_hash.clone());
-        let storage_path = base_path.join("projects").join(project_hash.as_str());
+        let project_id = metadata.project_hash.clone();
+        let storage_path = base_path.join("projects").join(&project_id);
         let config = ProjectCheckpointConfig::default();
 
         Ok(Self {
-            project_hash,
+            project_id,
             project_path: metadata.project_path.clone(),
             storage_path,
             metadata,
@@ -602,7 +632,7 @@ impl ProjectStorage {
 
         let metadata = SessionMetadata {
             session_id: session_id.to_string(),
-            project_hash: self.project_hash.as_str().to_string(),
+            project_hash: self.project_id.clone(),
             created_at: Utc::now(),
             last_accessed: Utc::now(),
             checkpoint_count: 0,
@@ -625,14 +655,14 @@ impl ProjectStorage {
             if should_write_remote {
                 if let Some(ref backend) = self.remote_backend {
                     // Save project metadata to remote
-                    let project_key = format!("projects/{}/metadata.json", self.project_hash.as_str());
+                    let project_key = format!("projects/{}/metadata.json", self.project_id);
                     if let Err(e) = backend.write_json(&project_key, &self.metadata).await {
                         crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to write project metadata to remote: {}", e));
                     }
                     
                     // Save session metadata to remote  
                     let session_key = format!("projects/{}/sessions/{}/metadata.json", 
-                        self.project_hash.as_str(), session_id);
+                        self.project_id, session_id);
                     if let Err(e) = backend.write_json(&session_key, &metadata).await {
                         crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to write session metadata to remote: {}", e));
                     }
@@ -718,7 +748,7 @@ impl ProjectStorage {
             None => return Ok(None),
         };
         
-        let project_hash = self.project_hash.as_str();
+        let project_hash = &self.project_id;
         
         // List all documents with prefix: projects/{project_hash}/sessions/
         let prefix = format!("projects/{}/sessions/", project_hash);
@@ -1669,7 +1699,7 @@ fn get_home_checkpoint_dir_for(agent_name: &str) -> CheckpointResult<PathBuf> {
 /// Load or create project metadata using atomic operations
 async fn load_or_create_project_metadata(
     storage_path: &Path,
-    project_hash: &ProjectHash,
+    project_id: &str,
     project_path: &Path,
 ) -> CheckpointResult<ProjectMetadata> {
     let metadata_path = storage_path.join(PROJECT_METADATA_FILENAME);
@@ -1685,7 +1715,7 @@ async fn load_or_create_project_metadata(
             .unwrap_or_else(|_| project_path.to_path_buf());
 
         let metadata = ProjectMetadata {
-            project_hash: project_hash.as_str().to_string(),
+            project_hash: project_id.to_string(),
             project_path: canonical_project_path.clone(),
             name: canonical_project_path
                 .file_name()
@@ -1950,17 +1980,17 @@ mod tests {
         let project_path = temp_dir.path().join("test_project");
         fs::create_dir_all(&project_path).await.unwrap();
 
-        let project_hash = ProjectHash::new(&project_path).unwrap();
+        let project_id = project_id_from_path(&project_path).unwrap();
         let _project_storage = ProjectStorage::new(
             storage_path.clone(),
-            project_hash.clone(),
+            project_id.clone(),
             project_path.clone(),
         )
         .await
         .unwrap();
 
         // Verify project storage was created properly
-        let projects_dir = storage_path.join("projects").join(project_hash.as_str());
+        let projects_dir = storage_path.join("projects").join(&project_id);
         assert!(projects_dir.exists());
     }
 
@@ -1973,9 +2003,9 @@ mod tests {
         let project_path = temp_dir.path().join("test_project");
         fs::create_dir_all(&project_path).await.unwrap();
 
-        let project_hash = ProjectHash::new(&project_path).unwrap();
+        let project_id = project_id_from_path(&project_path).unwrap();
         let project_storage =
-            ProjectStorage::new(storage_path.clone(), project_hash, project_path.clone())
+            ProjectStorage::new(storage_path.clone(), project_id, project_path.clone())
                 .await
                 .unwrap();
 
@@ -1998,9 +2028,9 @@ mod tests {
         let project_path = temp_dir.path().join("test_project");
         fs::create_dir_all(&project_path).await.unwrap();
 
-        let project_hash = ProjectHash::new(&project_path).unwrap();
+        let project_id = project_id_from_path(&project_path).unwrap();
         let project_storage =
-            ProjectStorage::new(storage_path.clone(), project_hash, project_path.clone())
+            ProjectStorage::new(storage_path.clone(), project_id, project_path.clone())
                 .await
                 .unwrap();
 

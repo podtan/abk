@@ -5,74 +5,31 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Project identification hash
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ProjectHash(pub String);
+/// Compute a project_id from a project path using SHA-256.
+///
+/// Returns a 16-character hex string (first 8 bytes of the hash).
+/// This is used as the directory name for checkpoint storage.
+/// Only the path is hashed — git remotes and project markers are excluded
+/// because they can change, causing the same project to get a different ID.
+///
+/// For web/multi-user scenarios, callers should use a UUID directly as
+/// the project_id instead of calling this function.
+pub fn project_id_from_path(project_path: &std::path::Path) -> super::CheckpointResult<String> {
+    use sha2::{Digest, Sha256};
 
-impl ProjectHash {
-    /// Create a new project hash from the canonical project path using SHA-256.
-    /// Only the path is hashed — git remotes and project markers are excluded
-    /// because they can change, causing the same project to get a different hash.
-    pub fn new(project_path: &std::path::Path) -> super::CheckpointResult<Self> {
-        use sha2::{Digest, Sha256};
+    let canonical_path = project_path.canonicalize().map(|p| crate::strip_unc_prefix(&p)).map_err(|e| {
+        super::CheckpointError::storage(format!(
+            "Failed to canonicalize project path {}: {}",
+            project_path.display(),
+            e
+        ))
+    })?;
 
-        let canonical_path = project_path.canonicalize().map(|p| crate::strip_unc_prefix(&p)).map_err(|e| {
-            super::CheckpointError::storage(format!(
-                "Failed to canonicalize project path {}: {}",
-                project_path.display(),
-                e
-            ))
-        })?;
-
-        let mut hasher = Sha256::new();
-        hasher.update(canonical_path.to_string_lossy().as_bytes());
-        let result = hasher.finalize();
-        // Take the first 8 bytes → 16 hex chars, matching the existing directory format
-        Ok(ProjectHash(format!("{:016x}", u64::from_be_bytes(result[..8].try_into().unwrap()))))
-    }
-
-    /// Get the hash string
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Create a project hash from an explicit identity string (e.g., a UUID
-    /// or slug provided by the caller via [`crate::context::ProjectIdentity`]).
-    ///
-    /// The identity string is hashed with SHA-256 (same as path-based hashing)
-    /// so the resulting hash has the same format (16 hex chars). This ensures
-    /// that identity-based and path-based hashes are interchangeable in the
-    /// storage layer — they both produce a `ProjectHash(String)`.
-    ///
-    /// Unlike [`ProjectHash::new`], this method does NOT require a filesystem
-    /// path and does NOT canonicalize anything. The caller is responsible for
-    /// providing a stable, unique identity string.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use abk::checkpoint::ProjectHash;
-    ///
-    /// let hash = ProjectHash::from_identity("my-project-uuid").unwrap();
-    /// println!("Project hash: {}", hash);
-    /// ```
-    pub fn from_identity(identity: &str) -> super::CheckpointResult<Self> {
-        use sha2::{Digest, Sha256};
-
-        let mut hasher = Sha256::new();
-        hasher.update(identity.as_bytes());
-        let result = hasher.finalize();
-        Ok(ProjectHash(format!(
-            "{:016x}",
-            u64::from_be_bytes(result[..8].try_into().unwrap())
-        )))
-    }
-}
-
-impl std::fmt::Display for ProjectHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    let mut hasher = Sha256::new();
+    hasher.update(canonical_path.to_string_lossy().as_bytes());
+    let result = hasher.finalize();
+    // Take the first 8 bytes → 16 hex chars
+    Ok(format!("{:016x}", u64::from_be_bytes(result[..8].try_into().unwrap())))
 }
 
 /// Complete checkpoint data structure
