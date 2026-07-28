@@ -377,7 +377,7 @@ impl AbkCheckpointAccess {
     }
 
     /// Create with a pre-parsed Configuration to avoid file I/O
-    fn with_config(config: &crate::config::Configuration) -> Self {
+    pub fn with_config(config: &crate::config::Configuration) -> Self {
         #[cfg(feature = "checkpoint")]
         {
             let checkpoint_config = config.checkpointing.clone();
