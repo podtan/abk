@@ -364,7 +364,7 @@ impl CommandContext for RawConfigCommandContext {
 }
 
 /// Concrete implementation of CheckpointAccess using abk::checkpoint
-struct AbkCheckpointAccess {
+pub struct AbkCheckpointAccess {
     /// Pre-parsed checkpoint config to avoid re-reading files from disk
     checkpoint_config: Option<crate::checkpoint::GlobalCheckpointConfig>,
     /// Full config for checking storage mode
