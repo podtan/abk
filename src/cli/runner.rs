@@ -87,6 +87,7 @@ pub async fn run_from_raw_config(
     config_toml: &str,
     secrets: std::collections::HashMap<String, String>,
     build_info: Option<crate::cli::config::BuildInfo>,
+    ctx: Option<&crate::context::RunContext>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Inject secrets into environment (existing env vars take precedence)
     for (key, value) in &secrets {
@@ -111,7 +112,12 @@ pub async fn run_from_raw_config(
         .map_err(|e| format!("Failed to parse config TOML: {}", e))?;
     
     // Create context from parsed config
-    let context = RawConfigCommandContext::new(config)?;
+    let mut context = RawConfigCommandContext::new(config)?;
+
+    // Apply RunContext if provided (home_dir, agent_name, project/session identity)
+    if let Some(rc) = ctx {
+        context = context.with_run_context(rc.clone());
+    }
     
     // Convert config to CLI config
     let mut cli_config = CliConfig::from_agent_config(&context.config);
@@ -239,6 +245,9 @@ pub struct RawConfigCommandContext {
     config: crate::config::Configuration,
     logger: crate::observability::Logger,
     working_dir: std::path::PathBuf,
+    /// Optional RunContext to thread through to execute_run.
+    /// When set, provides home_dir, agent_name, project/session identity.
+    run_context: Option<crate::context::RunContext>,
 }
 
 impl RawConfigCommandContext {
@@ -287,7 +296,22 @@ impl RawConfigCommandContext {
             config,
             logger,
             working_dir,
+            run_context: None,
         })
+    }
+
+    /// Set a RunContext on this command context.
+    ///
+    /// When set, the RunContext is threaded through to `execute_run`,
+    /// providing home_dir, agent_name, and project/session identity.
+    pub fn with_run_context(mut self, ctx: crate::context::RunContext) -> Self {
+        self.run_context = Some(ctx);
+        self
+    }
+
+    /// Get the RunContext, if any.
+    pub fn run_context(&self) -> Option<&crate::context::RunContext> {
+        self.run_context.as_ref()
     }
 }
 
@@ -357,6 +381,10 @@ impl CommandContext for RawConfigCommandContext {
         self.logger.tee_println(&format!("✓ {}", message));
     }
 
+    fn run_context(&self) -> Option<&crate::context::RunContext> {
+        self.run_context.as_ref()
+    }
+
     async fn create_agent(&self) -> Result<crate::agent::Agent, Box<dyn std::error::Error + Send + Sync>> {
         // Use pre-parsed config directly — no file I/O needed
         Ok(crate::agent::Agent::new_from_config(self.config.clone(), None).await?)
@@ -369,11 +397,14 @@ pub struct AbkCheckpointAccess {
     checkpoint_config: Option<crate::checkpoint::GlobalCheckpointConfig>,
     /// Full config for checking storage mode
     storage_mode: Option<crate::checkpoint::StorageMode>,
+    /// Per-user home directory override. When set, checkpoint operations
+    /// use this directory instead of the global default.
+    home_dir: Option<std::path::PathBuf>,
 }
 
 impl AbkCheckpointAccess {
     fn new() -> Self {
-        Self { checkpoint_config: None, storage_mode: None }
+        Self { checkpoint_config: None, storage_mode: None, home_dir: None }
     }
 
     /// Create with a pre-parsed Configuration to avoid file I/O
@@ -383,17 +414,44 @@ impl AbkCheckpointAccess {
             let checkpoint_config = config.checkpointing.clone();
             let storage_mode = checkpoint_config.as_ref()
                 .map(|c| c.storage_backend.effective_storage_mode());
-            Self { checkpoint_config, storage_mode }
+            Self { checkpoint_config, storage_mode, home_dir: None }
         }
         #[cfg(not(feature = "checkpoint"))]
         {
-            Self { checkpoint_config: None, storage_mode: None }
+            Self { checkpoint_config: None, storage_mode: None, home_dir: None }
+        }
+    }
+
+    /// Create with a pre-parsed Configuration and explicit home_dir.
+    ///
+    /// When `home_dir` is `Some`, all checkpoint operations use the
+    /// specified directory instead of the global `~/.{agent_name}/`.
+    pub fn with_config_and_home(
+        config: &crate::config::Configuration,
+        home_dir: std::path::PathBuf,
+    ) -> Self {
+        #[cfg(feature = "checkpoint")]
+        {
+            let checkpoint_config = config.checkpointing.clone();
+            let storage_mode = checkpoint_config.as_ref()
+                .map(|c| c.storage_backend.effective_storage_mode());
+            Self { checkpoint_config, storage_mode, home_dir: Some(home_dir) }
+        }
+        #[cfg(not(feature = "checkpoint"))]
+        {
+            Self { checkpoint_config: None, storage_mode: None, home_dir: Some(home_dir) }
         }
     }
     
     /// Get storage manager with remote backend configuration if available.
     #[cfg(feature = "storage-documentdb")]
     async fn get_configured_storage_manager(&self) -> CliResult<crate::checkpoint::CheckpointStorageManager> {
+        // If home_dir is set, use it for per-user storage
+        if let Some(ref home) = self.home_dir {
+            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
+            return crate::checkpoint::CheckpointStorageManager::with_home_dir(home.clone(), &agent_name)
+                .map_err(|e| CliError::CheckpointError(format!("Failed to create storage manager with home_dir: {}", e)));
+        }
         if let Some(ref checkpoint_config) = self.checkpoint_config {
             match crate::checkpoint::CheckpointStorageManager::with_config_async(checkpoint_config.clone()).await {
                 Ok(m) => return Ok(m),
@@ -410,6 +468,12 @@ impl AbkCheckpointAccess {
     
     #[cfg(not(feature = "storage-documentdb"))]
     async fn get_configured_storage_manager(&self) -> CliResult<crate::checkpoint::CheckpointStorageManager> {
+        // If home_dir is set, use it for per-user storage
+        if let Some(ref home) = self.home_dir {
+            let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
+            return crate::checkpoint::CheckpointStorageManager::with_home_dir(home.clone(), &agent_name)
+                .map_err(|e| CliError::CheckpointError(format!("Failed to create storage manager with home_dir: {}", e)));
+        }
         crate::checkpoint::get_storage_manager()
             .map_err(|e| CliError::CheckpointError(format!("Failed to get storage manager: {}", e)))
     }
@@ -607,6 +671,7 @@ impl RestorationAccess for AbkRestorationAccess {
         let checkpoint_access = AbkCheckpointAccess {
             checkpoint_config: self.checkpoint_config.clone(),
             storage_mode: self.storage_mode,
+            home_dir: None,
         };
         let checkpoint = checkpoint_access.load_checkpoint(project_path, session_id, checkpoint_id).await?;
 
@@ -855,7 +920,7 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         resume_info,
         cancel_token: None,
         on_checkpoint: None,
-        run_context: None,
+        run_context: ctx.run_context().cloned(),
     };
 
     crate::cli::commands::run::execute_run(ctx, options).await.map(|_| ())
@@ -870,7 +935,15 @@ async fn resolve_resume_info<C: CommandContext>(
     ctx: &C,
     session_id: &str,
 ) -> CliResult<Option<crate::cli::ResumeInfo>> {
-    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
+    let checkpoint_access = if let Some(rc) = ctx.run_context() {
+        if let Some(ref home) = rc.home_dir {
+            AbkCheckpointAccess::with_config_and_home(ctx.config(), home.clone())
+        } else {
+            AbkCheckpointAccess::with_config(ctx.config())
+        }
+    } else {
+        AbkCheckpointAccess::with_config(ctx.config())
+    };
 
     let projects = checkpoint_access.list_projects().await?;
 
@@ -941,6 +1014,17 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> CliResult
     }
     
     Ok(())
+}
+
+/// Create checkpoint access from the command context, using per-user
+/// home_dir when available.
+fn checkpoint_access_for<C: CommandContext>(ctx: &C) -> AbkCheckpointAccess {
+    if let Some(rc) = ctx.run_context() {
+        if let Some(ref home) = rc.home_dir {
+            return AbkCheckpointAccess::with_config_and_home(ctx.config(), home.clone());
+        }
+    }
+    AbkCheckpointAccess::with_config(ctx.config())
 }
 
 /// Handle the init command
@@ -1234,7 +1318,7 @@ async fn resume_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> Cli
     };
 
     // Create concrete adapter implementations with pre-parsed config
-    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
+    let checkpoint_access = checkpoint_access_for(ctx);
     let restoration_access = AbkRestorationAccess::with_config(ctx.config());
 
     crate::cli::commands::resume::resume_session(ctx, &checkpoint_access, &restoration_access, opts).await
@@ -1242,7 +1326,7 @@ async fn resume_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> Cli
 
 /// Handle the checkpoints command
 async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
+    let checkpoint_access = checkpoint_access_for(ctx);
 
     if matches.get_flag("list") {
         let opts = crate::cli::commands::checkpoints::ListOptions {
@@ -1289,7 +1373,7 @@ async fn checkpoints_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -
 
 /// Handle the sessions command
 async fn sessions_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    let checkpoint_access = AbkCheckpointAccess::with_config(ctx.config());
+    let checkpoint_access = checkpoint_access_for(ctx);
 
     if matches.get_flag("list") {
         let opts = crate::cli::commands::sessions::ListOptions {

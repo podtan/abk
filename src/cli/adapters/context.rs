@@ -133,6 +133,14 @@ pub trait CommandContext: Send + Sync {
             .to_string())
     }
 
+    /// Get the optional RunContext for per-user home_dir and identity.
+    ///
+    /// Default implementation returns `None`. Override in contexts that
+    /// carry a RunContext (e.g., `RawConfigCommandContext`).
+    fn run_context(&self) -> Option<&crate::context::RunContext> {
+        None
+    }
+
     /// Format session entry for display
     fn format_session_entry(
         &self,

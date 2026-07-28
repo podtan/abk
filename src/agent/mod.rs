@@ -604,6 +604,10 @@ impl Agent {
     /// This should be called after `new_from_config()` and before
     /// `start_session()`.
     ///
+    /// When the provided `RunContext` has a `home_dir`, the internal
+    /// `SessionManager` is **recreated** using `SessionManager::with_home_dir()`
+    /// so checkpoint storage is isolated per user.
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -618,6 +622,31 @@ impl Agent {
     /// });
     /// ```
     pub fn set_run_context(&mut self, ctx: crate::context::RunContext) {
+        // If home_dir is specified, recreate SessionManager with per-user storage
+        if let Some(ref home_dir) = ctx.home_dir {
+            let checkpointing_enabled = self.session_manager
+                .as_ref()
+                .map(|sm| sm.is_checkpointing_enabled())
+                .unwrap_or(false);
+            if checkpointing_enabled {
+                let agent_name = ctx.resolve_agent_name("trustee");
+                match crate::checkpoint::SessionManager::with_home_dir(
+                    true,
+                    home_dir.clone(),
+                    &agent_name,
+                ) {
+                    Ok(sm) => {
+                        self.session_manager = Some(sm);
+                    }
+                    Err(e) => {
+                        crate::observability::tee_eprintln(&format!(
+                            "Warning: Failed to recreate session manager with home_dir {:?}: {}",
+                            home_dir, e
+                        ));
+                    }
+                }
+            }
+        }
         self.run_context = ctx;
     }
 
