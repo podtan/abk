@@ -501,15 +501,25 @@ impl SessionManager {
     ) -> Result<String> {
         context.set_running(true);
 
-        // Initialize checkpoint restoration
-        let restoration = crate::checkpoint::CheckpointRestoration::new()?;
+        // Load checkpoint using the EXISTING storage manager (which has the
+        // correct per-user home_dir). We must NOT create a new CheckpointRestoration
+        // because that would use CheckpointStorageManager::new() → global home_dir.
+        let checkpoint_manager = self
+            .storage_manager
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Checkpoint manager not initialized"))?;
 
-        // Load the checkpoint
-        let restored_checkpoint = restoration
-            .restore_checkpoint(project_path, session_id, checkpoint_id)
-            .await?;
+        // Use identity-based project_id if provided, otherwise path-based.
+        let project_storage = if let Some(identity) = context.get_project_identity() {
+            checkpoint_manager.get_project_storage_with_id(project_path, &identity.id).await?
+        } else {
+            checkpoint_manager.get_project_storage(project_path).await?
+        };
 
-        let checkpoint = &restored_checkpoint.checkpoint;
+        let session_storage = project_storage.create_session(session_id).await?;
+        let checkpoint = session_storage.load_checkpoint(checkpoint_id).await?;
+
+        let checkpoint = &checkpoint;
 
         // Restore agent state, incrementing iteration so the next checkpoint
         // saves to N+1 instead of overwriting the checkpoint we just resumed
