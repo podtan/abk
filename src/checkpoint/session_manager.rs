@@ -198,80 +198,9 @@ impl SessionManager {
         context.set_task_description(task_description.to_string());
         context.set_running(true);
 
-        // Check if there's a restored checkpoint context that we should use
-        if let Ok(tracker) = ResumeTracker::new() {
-            let current_dir = context.get_working_directory().to_path_buf();
-            if let Ok(Some(resume_context)) = tracker.get_resume_context_for_project(&current_dir) {
-                context.log_info(&format!(
-                    "Found restored checkpoint context for session: {}",
-                    resume_context.session_id
-                ));
-
-                // Clear the resume context since we're using it
-                let _ = tracker.clear_resume_context();
-
-                // Restore iteration number from resume context first
-                self.current_iteration = resume_context.iteration;
-                context.set_current_iteration(self.current_iteration);
-
-                // Try to resume from the checkpoint
-                let resume_result = self
-                    .resume_from_checkpoint(
-                        context,
-                        &resume_context.project_path,
-                        &resume_context.session_id,
-                        &resume_context.checkpoint_id,
-                    )
-                    .await;
-
-                // Even if resume fails, continue with new task
-                match resume_result {
-                    Ok(_) => {
-                        context.log_info("Successfully resumed from checkpoint");
-                    }
-                    Err(e) => {
-                        context.log_error(
-                            &format!(
-                                "Failed to resume from checkpoint: {}, continuing with new task",
-                                e
-                            ),
-                            None,
-                        )?;
-                    }
-                }
-
-                // Add the new task description as a user message
-                context.add_user_message(task_description.to_string(), None);
-
-                // Increment iteration counter
-                self.current_iteration += 1;
-                context.set_current_iteration(self.current_iteration);
-
-                // Create a new checkpoint with the new task if enabled
-                if self.checkpointing_enabled && self.current_session.is_some() {
-                    if let Err(e) = self.create_checkpoint(context).await {
-                        context.log_error(
-                            &format!(
-                                "Failed to create checkpoint with new task at iteration {}: {}",
-                                self.current_iteration, e
-                            ),
-                            None,
-                        )?;
-                    } else {
-                        context.log_info(&format!(
-                            "Created new checkpoint at iteration {} with new task",
-                            self.current_iteration
-                        ));
-                    }
-                }
-
-                return Ok(format!(
-                    "Session resumed and continued with new task. Current iteration: {}. Task: {}",
-                    self.current_iteration,
-                    context.get_task_description()
-                ));
-            }
-        }
+        // ResumeTracker file-based fallback removed — ABK is now stateless.
+        // Resume is handled exclusively via resume_info parameter in execute_run().
+        // start_session() always starts a fresh session.
 
         // Log session start
         let mut config_info = std::collections::HashMap::new();
