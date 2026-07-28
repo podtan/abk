@@ -125,6 +125,47 @@ impl CheckpointStorageManager {
             remote_backend,
         })
     }
+
+    /// Create a new storage manager with an explicit home directory AND remote backend config.
+    ///
+    /// This is the primary constructor for per-user isolation with remote storage.
+    /// It merges the per-user `home_dir` (for local storage paths) with a remote
+    /// backend configuration (for DocumentDB/MongoDB).
+    ///
+    /// # Arguments
+    /// * `home_dir` - Per-user home directory for checkpoint storage
+    /// * `agent_name` - Agent name for metadata
+    /// * `backend_config` - Storage backend configuration (DocumentDB/MongoDB settings)
+    #[cfg(feature = "storage-documentdb")]
+    pub async fn with_home_dir_and_backend(
+        home_dir: PathBuf,
+        agent_name: &str,
+        backend_config: StorageBackendConfig,
+    ) -> CheckpointResult<Self> {
+        let mut config = GlobalCheckpointConfig::default();
+        config.storage_location = home_dir.clone();
+        config.storage_backend = backend_config;
+
+        // Ensure storage directories exist (always create local dirs, even in Remote mode,
+        // because local fallback may be needed)
+        ensure_global_storage_directories_for(&home_dir)?;
+
+        // Initialize remote backend if configured
+        let remote_backend = Self::create_remote_backend(&config.storage_backend).await?;
+
+        Ok(Self {
+            home_dir,
+            agent_name: agent_name.to_string(),
+            current_project: None,
+            config,
+            remote_backend,
+        })
+    }
+
+    /// Get the storage backend configuration.
+    pub fn storage_backend_config(&self) -> &StorageBackendConfig {
+        &self.config.storage_backend
+    }
     
     /// Create remote storage backend based on configuration
     #[cfg(feature = "storage-documentdb")]
