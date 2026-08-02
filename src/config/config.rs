@@ -283,6 +283,14 @@ pub struct ToolsConfig {
     pub open_file_window_size: Option<usize>,
     pub max_tool_result_size_bytes: Option<u64>,
     pub truncate_large_results: Option<bool>,
+    /// Allowlist of tool names. `None` (absent) = all tools (backward compatible).
+    /// `Some([])` = zero tools (locked down). `Some(["read", "grep"])` = only those.
+    #[serde(default)]
+    pub enabled_tools: Option<Vec<String>>,
+    /// Denylist of tool names. Takes precedence over `enabled_tools`.
+    /// e.g. `["bash"]` = all tools except bash.
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
 }
 
 /// LLM provider configuration
@@ -501,6 +509,8 @@ impl ConfigurationLoader {
                 open_file_window_size: Some(1000),
                 max_tool_result_size_bytes: Some(256000),
                 truncate_large_results: Some(true),
+                enabled_tools: None,
+                disabled_tools: vec![],
             },
             search_filtering: Some(SearchFilteringConfig::default()),
             llm: Some(LlmConfig::default()),
