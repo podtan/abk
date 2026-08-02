@@ -208,13 +208,33 @@ impl AgentContext for super::Agent {
     }
     
     fn get_tool_schemas(&self) -> Vec<serde_json::Value> {
-        // Start with CATS tools
-        let mut schemas = self.tool_registry.get_all_schemas();
+        // Start with CATS tools — filter by enabled/disabled tool config
+        let mut schemas: Vec<serde_json::Value> = self.tool_registry
+            .get_all_schemas()
+            .into_iter()
+            .filter(|schema| {
+                let name = schema
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                self.is_tool_allowed(name)
+            })
+            .collect();
         
-        // Add MCP tools if available
+        // Add MCP tools if available (MCP tools are also subject to filtering)
         #[cfg(feature = "registry-mcp")]
         if let Some(ref mcp_loader) = self.mcp_tools {
-            schemas.extend(mcp_loader.get_openai_schemas());
+            for schema in mcp_loader.get_openai_schemas() {
+                let name = schema
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                if self.is_tool_allowed(name) {
+                    schemas.push(schema);
+                }
+            }
         }
         
         schemas

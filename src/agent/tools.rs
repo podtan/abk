@@ -50,6 +50,25 @@ impl super::Agent {
 
     /// Execute a single tool call, routing to MCP or CATS as appropriate.
     async fn execute_single_tool(&mut self, tc: &ToolCall) -> Result<ToolExecutionResult> {
+        // ── Execution guard: reject tools not in the allowed list ──
+        // This is the security layer — even if the LLM hallucinates or is
+        // prompt-injected into calling a hidden tool, the dispatch is blocked
+        // here before reaching cats or MCP.
+        if !self.is_tool_allowed(&tc.function.name) {
+            let msg = format!(
+                "Tool '{}' is not allowed. It has been blocked by the tool filter configuration.",
+                tc.function.name
+            );
+            crate::observability::tee_eprintln(&format!("[BLOCKED] {}", msg));
+            return Ok(ToolExecutionResult {
+                tool_call_id: tc.id.clone(),
+                tool_name: tc.function.name.clone(),
+                content: msg,
+                success: false,
+                description: None,
+            });
+        }
+
         // Check if this is an MCP tool
         #[cfg(feature = "registry-mcp")]
         if let Some(ref mcp_tools) = self.mcp_tools {

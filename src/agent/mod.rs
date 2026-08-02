@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use serde_json;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub mod types;
@@ -94,6 +95,12 @@ pub struct Agent {
     // Used by TUI to preserve session context when ESC cancels mid-workflow.
     // When None (non-TUI mode), sends are no-ops.
     on_checkpoint: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+
+    // Tool filtering: None = all tools allowed, Some(set) = only those tools.
+    // Set once at init from config.tools.enabled_tools for O(1) lookup.
+    enabled_tools_filter: Option<HashSet<String>>,
+    // Tool filtering: denylist, takes precedence over enabled_tools_filter.
+    disabled_tools_filter: HashSet<String>,
 
     // Conversation turn management for X-Request-Id (like VS Code Copilot)
     current_turn_id: Option<String>,
@@ -209,6 +216,13 @@ impl Agent {
 
         let open_window_size = config_loader.config.tools.open_file_window_size;
 
+        // Capture tool filter config before moving config_loader into the struct
+        let enabled_tools_filter = config_loader.config.tools.enabled_tools
+            .as_ref()
+            .map(|v| v.iter().cloned().collect::<HashSet<String>>());
+        let disabled_tools_filter = config_loader.config.tools.disabled_tools
+            .iter().cloned().collect::<HashSet<String>>();
+
         // Capture agent name before moving config_loader into the struct
         let agent_name = config_loader.config.agent.name.clone();
 
@@ -244,6 +258,8 @@ impl Agent {
             turn_request_count: 0,
             output_sink: crate::orchestration::output::stdout_sink(),
             on_checkpoint: None,
+            enabled_tools_filter,
+            disabled_tools_filter,
             run_context: crate::context::RunContext {
                 agent_name: Some(agent_name),
                 ..Default::default()
@@ -553,6 +569,24 @@ impl Agent {
     /// Get the tool registry.
     pub fn get_tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
+    }
+
+    /// Check if a tool is allowed by the enabled/disabled tool filter.
+    ///
+    /// Rules (applied in order):
+    /// 1. If the tool name is in `disabled_tools_filter`, deny it (denylist wins).
+    /// 2. If `enabled_tools_filter` is `None`, allow all (backward compatible).
+    /// 3. If `enabled_tools_filter` is `Some(set)`, allow only if the tool is in the set.
+    pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
+        // Denylist takes precedence
+        if self.disabled_tools_filter.contains(tool_name) {
+            return false;
+        }
+        // Allowlist: None = all allowed, Some = must be in set
+        match &self.enabled_tools_filter {
+            None => true,
+            Some(allowed) => allowed.contains(tool_name),
+        }
     }
 
     /// Get the executor.
