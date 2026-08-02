@@ -89,10 +89,14 @@ pub async fn run_from_raw_config(
     build_info: Option<crate::cli::config::BuildInfo>,
     ctx: Option<&crate::context::RunContext>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Inject secrets into environment (existing env vars take precedence)
-    for (key, value) in &secrets {
-        if std::env::var(key).is_err() {
-            std::env::set_var(key, value);
+    // Inject secrets into environment.
+    // In multi-user mode (RunContext present), skip env mutation to avoid races.
+    let is_multi_user = ctx.is_some();
+    if !is_multi_user {
+        for (key, value) in &secrets {
+            if std::env::var(key).is_err() {
+                std::env::set_var(key, value);
+            }
         }
     }
     
@@ -178,10 +182,21 @@ pub async fn run_task_from_raw_config(
     cancel_token: Option<tokio_util::sync::CancellationToken>,
     ctx: Option<&crate::context::RunContext>,
 ) -> Result<super::TaskResult, Box<dyn std::error::Error>> {
-    // Inject secrets into environment (existing env vars take precedence)
-    for (key, value) in &secrets {
-        if std::env::var(key).is_err() {
-            std::env::set_var(key, value);
+    // Inject secrets into environment.
+    //
+    // In single-user mode (no RunContext), we set env vars for backward
+    // compatibility with components that read via std::env::var().
+    //
+    // In multi-user mode (RunContext present), env var mutation is UNSAFE
+    // because concurrent users would race. Secrets are expected to already
+    // be in the config_toml or env at this point. We skip the set_var to
+    // avoid corrupting another user's env scope.
+    let is_multi_user = ctx.is_some();
+    if !is_multi_user {
+        for (key, value) in &secrets {
+            if std::env::var(key).is_err() {
+                std::env::set_var(key, value);
+            }
         }
     }
     
@@ -208,11 +223,14 @@ pub async fn run_task_from_raw_config(
     };
 
     // Ensure env var is set for serde defaults (if not already).
-    // This is the ONLY remaining set_var, and it only fires if the env var
-    // is unset — existing values always take precedence.
-    if let Some(ref name) = agent_name {
-        if std::env::var("ABK_AGENT_NAME").is_err() {
-            std::env::set_var("ABK_AGENT_NAME", name);
+    // In multi-user mode, skip this — the agent_name is passed explicitly
+    // to RawConfigCommandContext::with_agent_name() and serde defaults
+    // should read from the config_toml, not the process-global env var.
+    if !is_multi_user {
+        if let Some(ref name) = agent_name {
+            if std::env::var("ABK_AGENT_NAME").is_err() {
+                std::env::set_var("ABK_AGENT_NAME", name);
+            }
         }
     }
 
@@ -275,7 +293,12 @@ impl RawConfigCommandContext {
             Some(config.logging.log_level.as_str())
         };
 
-        // Initialize the global logger with explicit agent name when provided
+        // Initialize the global logger with explicit agent name when provided.
+        //
+        // init_global_logger() uses OnceLock — the first caller wins and all
+        // subsequent callers are no-ops. This is fine for single-user CLI mode.
+        // For multi-user (web server) mode, each workflow should be wrapped in
+        // with_logger() to scope the logger per-task (handled by the caller).
         let global_logger = crate::observability::Logger::with_agent_name(
             log_dir_path.as_deref(),
             log_level,
