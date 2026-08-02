@@ -947,4 +947,125 @@ enable_streaming = false
         );
         assert_eq!(loader.get_bool("tools.truncate_large_results"), Some(true));
     }
+
+    #[test]
+    fn test_tool_filtering_config_from_toml() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let toml_content = r#"
+[agent]
+name = "test"
+version = "0.1.0"
+default_mode = "confirm"
+
+[logging]
+log_dir = ""
+log_level = "INFO"
+
+[execution]
+timeout_seconds = 120
+max_retries = 3
+max_tokens = 4000
+max_history = 100
+enable_dangerous_command_validation = true
+max_iterations = 100
+request_interval_seconds = 0
+
+[modes.confirm]
+description = "Test confirm mode"
+auto_execute = false
+
+[modes.yolo]
+description = "Test yolo mode"
+auto_execute = true
+
+[modes.human]
+description = "Test human mode"
+auto_execute = false
+
+[tools]
+open_file_window_size = 1000
+enabled_tools = ["read", "grep", "list"]
+disabled_tools = ["bash"]
+"#;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        fs::write(temp_file.path(), toml_content).unwrap();
+
+        let loader = ConfigurationLoader::new(Some(temp_file.path())).unwrap();
+
+        // enabled_tools parsed correctly
+        assert_eq!(
+            loader.config.tools.enabled_tools,
+            Some(vec![
+                "read".to_string(),
+                "grep".to_string(),
+                "list".to_string()
+            ])
+        );
+
+        // disabled_tools parsed correctly
+        assert_eq!(
+            loader.config.tools.disabled_tools,
+            vec!["bash".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_tool_filtering_defaults() {
+        let config = ConfigurationLoader::get_default_config();
+        // Default: enabled_tools = None (all tools), disabled_tools = empty
+        assert!(config.tools.enabled_tools.is_none());
+        assert!(config.tools.disabled_tools.is_empty());
+    }
+
+    #[test]
+    fn test_tool_filtering_empty_allowlist() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let toml_content = r#"
+[agent]
+name = "test"
+version = "0.1.0"
+default_mode = "confirm"
+
+[logging]
+log_dir = ""
+log_level = "INFO"
+
+[execution]
+timeout_seconds = 120
+max_retries = 3
+max_tokens = 4000
+max_history = 100
+enable_dangerous_command_validation = true
+max_iterations = 100
+request_interval_seconds = 0
+
+[modes.confirm]
+description = "Test"
+auto_execute = false
+
+[modes.yolo]
+description = "Test"
+auto_execute = true
+
+[modes.human]
+description = "Test"
+auto_execute = false
+
+[tools]
+enabled_tools = []
+"#;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        fs::write(temp_file.path(), toml_content).unwrap();
+
+        let loader = ConfigurationLoader::new(Some(temp_file.path())).unwrap();
+
+        // Empty allowlist = zero tools (locked down)
+        assert_eq!(loader.config.tools.enabled_tools, Some(vec![]));
+    }
 }
