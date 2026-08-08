@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.7] - 2026-08-08
+
+### Added
+- **feat(cli): `should_generate_title()` guard function** — Checks existing session metadata to determine if LLM title generation is needed. Returns `false` if the description was already LLM-generated or user-set, preventing title overwrite on subsequent commands in the same session.
+
+### Fixed
+- **fix(cli): improved reasoning title extraction** — Better extraction from thinking model reasoning content. Now searches for quoted strings first, then falls back to clean lines with improved filtering of analysis/meta-language patterns.
+
 ## [0.12.6] - 2026-08-08
 
 ### Fixed
