@@ -342,6 +342,63 @@ pub async fn generate_session_title(
     Ok(title)
 }
 
+/// Persist a session title (description) directly to `session_metadata.json` on disk.
+///
+/// This is a standalone function that does NOT require an active `SessionManager`.
+/// It constructs the path `{home_dir}/projects/{project_id}/sessions/{session_id}/session_metadata.json`,
+/// reads the existing metadata, updates the `description` field, and writes it back atomically.
+///
+/// This is used by trustee-core after LLM title generation (Solution B) to persist
+/// the generated title when the ABK SessionManager has already been dropped.
+///
+/// # Arguments
+/// * `ctx` - RunContext (for home_dir resolution)
+/// * `session_id` - The session ID to update
+/// * `description` - The new description/title
+///
+/// # Returns
+/// Ok(()) on success, Err on I/O or parse errors.
+pub async fn persist_session_title(
+    ctx: &crate::context::RunContext,
+    session_id: &str,
+    description: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::checkpoint::{SessionMetadata, AtomicOps};
+
+    // Resolve home_dir from RunContext (falls back to ~/.{agent_name}/)
+    let home_dir = ctx.resolve_home_dir()
+        .map_err(|e| format!("Failed to resolve home_dir: {}", e))?;
+
+    // Resolve project_id from RunContext
+    let project_id = ctx.project.as_ref().map(|p| p.id.clone())
+        .unwrap_or_else(|| {
+            // Fallback: hash of working directory (same as ABK's project_id_from_path)
+            let cwd = std::env::current_dir().unwrap_or_default();
+            format!("{}", crate::checkpoint::project_id_from_path(&cwd).unwrap_or_else(|_| "default".to_string()))
+        });
+
+    // Construct path: {home_dir}/projects/{project_id}/sessions/{session_id}/session_metadata.json
+    let metadata_path = home_dir
+        .join("projects")
+        .join(&project_id)
+        .join("sessions")
+        .join(session_id)
+        .join("session_metadata.json");
+
+    // Read existing metadata
+    let mut metadata: SessionMetadata = AtomicOps::read_json(&metadata_path)
+        .map_err(|e| format!("Failed to read session_metadata.json at {}: {}", metadata_path.display(), e))?;
+
+    // Update description
+    metadata.description = Some(description.to_string());
+
+    // Write back atomically
+    AtomicOps::write_json(&metadata_path, &metadata)
+        .map_err(|e| format!("Failed to write session_metadata.json at {}: {}", metadata_path.display(), e))?;
+
+    Ok(())
+}
+
 /// Command context that uses pre-parsed configuration (no file reading)
 pub struct RawConfigCommandContext {
     config: crate::config::Configuration,
