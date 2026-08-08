@@ -258,6 +258,90 @@ pub async fn run_task_from_raw_config(
     Ok(result)
 }
 
+/// Generate a concise session title from the user's command using a lightweight LLM call.
+///
+/// Creates a provider via `ProviderFactory`, makes a single non-streaming `generate()`
+/// call with a title-generation system prompt, and returns the generated title.
+///
+/// When `[llm.utility]` is configured in the TOML, uses the utility model/max_tokens/temperature.
+/// Otherwise falls back to the main provider defaults.
+///
+/// # Arguments
+/// * `config_toml` - The full config TOML (used to create provider and read utility config)
+/// * `secrets` - Secrets HashMap (API keys etc.)
+/// * `user_command` - The user's original command/task text
+///
+/// # Returns
+/// `Ok(Some(title))` on success, `Ok(None)` if generation produced empty result,
+/// `Err(...)` on provider/LLM errors.
+pub async fn generate_session_title(
+    config_toml: &str,
+    secrets: std::collections::HashMap<String, String>,
+    user_command: &str,
+) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    // Parse config to check for [llm.utility] settings
+    let config: crate::config::Configuration = toml::from_str(config_toml)
+        .map_err(|e| format!("Failed to parse config TOML for title generation: {}", e))?;
+
+    // Extract utility config if present
+    let utility = config.llm.as_ref().and_then(|l| l.utility.as_ref());
+
+    // Create provider via factory
+    let env = crate::config::EnvironmentLoader::default();
+    let provider = crate::provider::ProviderFactory::create(&env).await?;
+
+    // Build generate config
+    let mut gen_config = crate::provider::GenerateConfig::new();
+    if let Some(util) = utility {
+        if let Some(ref model) = util.model {
+            gen_config = gen_config.with_model(model);
+        }
+        gen_config = gen_config
+            .with_max_tokens(util.max_tokens)
+            .with_temperature(util.temperature);
+    } else {
+        // Sensible defaults for title generation
+        gen_config = gen_config
+            .with_max_tokens(100)
+            .with_temperature(0.3);
+    }
+    gen_config.enable_streaming = false;
+
+    // Build messages
+    let system_prompt = "You are a title generator. Generate a concise, descriptive title \
+        (maximum 50 characters) that summarizes the user's task. Output ONLY the title text \
+        — no quotes, no preamble, no explanation. The title should be actionable and specific.";
+    let messages = vec![
+        crate::provider::InternalMessage::system(system_prompt),
+        crate::provider::InternalMessage::user(user_command),
+    ];
+
+    let response = provider.generate(messages, &gen_config).await?;
+
+    let title = match response {
+        crate::provider::GenerateResponse::Content { text, .. } => {
+            let trimmed = text.trim().trim_matches('"').trim_matches('\'').to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                // Enforce 50 char limit
+                let title = if trimmed.len() > 50 {
+                    format!("{}...", &trimmed[..47])
+                } else {
+                    trimmed
+                };
+                Some(title)
+            }
+        }
+        crate::provider::GenerateResponse::ToolCalls { .. } => {
+            // Unexpected — title generation should never produce tool calls
+            None
+        }
+    };
+
+    Ok(title)
+}
+
 /// Command context that uses pre-parsed configuration (no file reading)
 pub struct RawConfigCommandContext {
     config: crate::config::Configuration,

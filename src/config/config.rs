@@ -298,6 +298,10 @@ pub struct ToolsConfig {
 pub struct LlmConfig {
     pub endpoint: String,
     pub enable_streaming: bool,
+    /// Optional utility LLM configuration for lightweight background calls
+    /// (e.g., session title generation). Falls back to main provider if absent.
+    #[serde(default)]
+    pub utility: Option<UtilityLlmConfig>,
 }
 
 impl Default for LlmConfig {
@@ -305,8 +309,35 @@ impl Default for LlmConfig {
         Self {
             endpoint: "chat/completions".to_string(),
             enable_streaming: true,
+            utility: None,
         }
     }
+}
+
+/// Configuration for utility LLM calls (session titles, summaries, etc.)
+///
+/// When present in `[llm.utility]`, these settings override the main provider's
+/// defaults for lightweight background tasks. When absent, the main provider is used.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UtilityLlmConfig {
+    /// Model override for utility calls (e.g., "gpt-4o-mini").
+    /// None = use provider default model.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Max tokens for utility calls. Default: 100.
+    #[serde(default = "default_utility_max_tokens")]
+    pub max_tokens: u32,
+    /// Temperature for utility calls. Default: 0.3 (deterministic-ish).
+    #[serde(default = "default_utility_temperature")]
+    pub temperature: f32,
+}
+
+fn default_utility_max_tokens() -> u32 {
+    100
+}
+
+fn default_utility_temperature() -> f32 {
+    0.3
 }
 
 /// Search filtering configuration

@@ -666,11 +666,47 @@ impl SessionManager {
         // Save the checkpoint
         if let Some(ref mut session_storage) = self.current_session {
             session_storage.save_checkpoint(&checkpoint).await?;
+
+            // Solution A: On first checkpoint, persist the session description so
+            // the session title is available in session_metadata.json.
+            // After this initial write, the description can be updated by
+            // update_session_description() (e.g. LLM-generated title in Solution B).
+            if session_storage.checkpoint_count() == 1 {
+                let task_desc = context.get_task_description();
+                let description: String = if task_desc.len() > 80 {
+                    format!("{}...", &task_desc[..77])
+                } else {
+                    task_desc.clone()
+                };
+                if let Err(e) = session_storage.update_session_description(description).await {
+                    crate::observability::tee_eprintln(
+                        &format!("[checkpoint] Warning: Failed to update session description: {}", e)
+                    );
+                }
+            }
         } else {
             return Err(anyhow::anyhow!("No active session for checkpointing"));
         }
 
         Ok(())
+    }
+
+    /// Update the session description (title) on the current session.
+    ///
+    /// This persists a new description to session_metadata.json, overwriting
+    /// the initial truncated-command title. Used by Solution B (LLM title
+    /// generation) to store a better session title.
+    pub async fn update_session_description(&mut self, description: String) -> Result<()> {
+        if let Some(ref mut session_storage) = self.current_session {
+            session_storage.update_session_description(description).await
+                .map_err(|e| anyhow::anyhow!("Failed to update session description: {}", e))?;
+        }
+        Ok(())
+    }
+
+    /// Get the current session ID, if any.
+    pub fn current_session_id(&self) -> Option<&str> {
+        self.current_session.as_ref().map(|s| s.session_id())
     }
 
     /// Build a complete checkpoint with all state data.
