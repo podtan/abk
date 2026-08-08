@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.6] - 2026-08-08
+
+### Fixed
+- **fix(cli): `persist_session_title()` now supports remote backends** — The standalone title persistence function was local-filesystem-only. Now accepts `config_toml`, parses `[checkpointing.storage_backend]`, and when a remote backend (DocumentDB/MongoDB) is configured, constructs a backend and writes the updated metadata to remote storage in addition to local. Works with `Mirror` and `Remote` storage modes.
+
 ## [0.12.5] - 2026-08-08
 
 ### Fixed

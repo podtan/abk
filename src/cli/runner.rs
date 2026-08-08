@@ -412,6 +412,7 @@ pub async fn generate_session_title(
 /// Ok(()) on success, Err on I/O or parse errors.
 pub async fn persist_session_title(
     ctx: &crate::context::RunContext,
+    config_toml: &str,
     session_id: &str,
     description: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -424,12 +425,12 @@ pub async fn persist_session_title(
     // Resolve project_id from RunContext
     let project_id = ctx.project.as_ref().map(|p| p.id.clone())
         .unwrap_or_else(|| {
-            // Fallback: hash of working directory (same as ABK's project_id_from_path)
             let cwd = std::env::current_dir().unwrap_or_default();
-            format!("{}", crate::checkpoint::project_id_from_path(&cwd).unwrap_or_else(|_| "default".to_string()))
+            crate::checkpoint::project_id_from_path(&cwd)
+                .unwrap_or_else(|_| "default".to_string())
         });
 
-    // Construct path: {home_dir}/projects/{project_id}/sessions/{session_id}/session_metadata.json
+    // Construct local path: {home_dir}/projects/{project_id}/sessions/{session_id}/session_metadata.json
     let metadata_path = home_dir
         .join("projects")
         .join(&project_id)
@@ -439,20 +440,58 @@ pub async fn persist_session_title(
 
     log_debug(&format!("[title] persist path: {}", metadata_path.display()));
 
-    // Read existing metadata
+    // --- LOCAL write ---
+    // Read existing metadata from local file
     let mut metadata: SessionMetadata = AtomicOps::read_json(&metadata_path)
         .map_err(|e| format!("Failed to read session_metadata.json at {}: {}", metadata_path.display(), e))?;
 
     log_debug(&format!("[title] old description: {:?}", metadata.description));
 
-    // Update description
     metadata.description = Some(description.to_string());
 
-    // Write back atomically
+    // Write back to local atomically
     AtomicOps::write_json(&metadata_path, &metadata)
         .map_err(|e| format!("Failed to write session_metadata.json at {}: {}", metadata_path.display(), e))?;
 
-    log_debug("[title] persisted to disk OK");
+    log_debug("[title] local persist OK");
+
+    // --- REMOTE write (if configured) ---
+    #[cfg(feature = "storage-documentdb")]
+    {
+        // Parse checkpointing config from TOML to check for remote backend
+        let config: crate::config::Configuration = toml::from_str(config_toml)
+            .map_err(|e| format!("Failed to parse config TOML for remote backend: {}", e))?;
+
+        if let Some(ref ckpt_config) = config.checkpointing {
+            let backend_config = &ckpt_config.storage_backend;
+            if backend_config.should_use_remote() {
+                log_debug("[title] remote backend configured, attempting remote write...");
+
+                // Construct the remote backend
+                let connection_string = backend_config.build_connection_string()
+                    .ok_or_else(|| "Missing DocumentDB connection URL".to_string())?;
+                let database = backend_config.get_database()
+                    .ok_or_else(|| "Missing DocumentDB database name".to_string())?;
+                let collection = &backend_config.collection;
+
+                use crate::checkpoint::backend::{StorageBackend, StorageBackendExt, DocumentDBStorageBackend};
+                match DocumentDBStorageBackend::new(&connection_string, &database, collection).await {
+                    Ok(backend) => {
+                        let remote_key = format!("projects/{}/sessions/{}/metadata.json", project_id, session_id);
+                        match backend.write_json(&remote_key, &metadata).await {
+                            Ok(()) => log_debug("[title] remote persist OK"),
+                            Err(e) => log_debug(&format!("[title] remote write failed (non-fatal): {}", e)),
+                        }
+                    }
+                    Err(e) => {
+                        log_debug(&format!("[title] failed to connect to remote backend (non-fatal): {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    log_debug("[title] persist complete");
     Ok(())
 }
 
