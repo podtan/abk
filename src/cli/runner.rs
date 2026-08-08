@@ -265,6 +265,65 @@ fn log_debug(msg: &str) {
     }
 }
 
+/// Check whether a session needs LLM title generation.
+///
+/// Returns `true` only if the session's description has NOT been set by the
+/// LLM or a user. Specifically:
+/// - `description = None` → needs title (never set)
+/// - `description` matches the truncated command text (Solution A wrote it,
+///   LLM hasn't run yet) → needs title
+/// - `description` is anything else (LLM title, user-named, etc.) → skip
+///
+/// # Arguments
+/// * `ctx` - RunContext (for home_dir/project_id resolution)
+/// * `session_id` - The session ID to check
+/// * `user_command` - The original command text (to compare against Solution A's truncation)
+pub async fn should_generate_title(
+    ctx: &crate::context::RunContext,
+    session_id: &str,
+    user_command: &str,
+) -> bool {
+    use crate::checkpoint::{SessionMetadata, AtomicOps};
+
+    let home_dir = match ctx.resolve_home_dir() {
+        Ok(d) => d,
+        Err(_) => return true, // can't check, assume yes
+    };
+
+    let project_id = ctx.project.as_ref().map(|p| p.id.clone())
+        .unwrap_or_else(|| {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            crate::checkpoint::project_id_from_path(&cwd)
+                .unwrap_or_else(|_| "default".to_string())
+        });
+
+    let metadata_path = home_dir
+        .join("projects")
+        .join(&project_id)
+        .join("sessions")
+        .join(session_id)
+        .join("session_metadata.json");
+
+    let metadata: SessionMetadata = match AtomicOps::read_json(&metadata_path) {
+        Ok(m) => m,
+        Err(_) => return true, // can't read, assume yes
+    };
+
+    match &metadata.description {
+        None => true, // never set
+        Some(desc) => {
+            // Compute what Solution A would have written (truncated command)
+            let solution_a_desc = if user_command.len() > 80 {
+                format!("{}...", &user_command[..77])
+            } else {
+                user_command.to_string()
+            };
+            // If description matches the truncated command, LLM hasn't run yet
+            desc == &solution_a_desc
+        }
+    }
+}
+
 /// Generate a concise session title from the user's command using a lightweight LLM call.
 ///
 /// Creates a provider via `ProviderFactory`, makes a single non-streaming `generate()`
@@ -352,24 +411,58 @@ pub async fn generate_session_title(
             let raw = if !text.trim().is_empty() {
                 text.clone()
             } else if let Some(ref r) = reasoning {
-                // For thinking models, extract the last meaningful line from reasoning
-                let candidate = r.lines()
-                    .rev()
-                    .find_map(|line| {
-                        let t = line.trim()
-                            .trim_start_matches('*')
-                            .trim_start_matches('#')
-                            .trim_start_matches("- ")
-                            .trim_start_matches("> ")
-                            .trim()
-                            .trim_matches('"')
-                            .trim_matches('\'');
-                        if !t.is_empty() && !t.starts_with("Final") && t.len() <= 60 {
-                            Some(t.to_string())
-                        } else {
-                            None
+                // For thinking models, the reasoning contains chain-of-thought.
+                // Try to find an actual title in the reasoning.
+                // Strategy 1: Look for quoted strings (models often draft titles in quotes)
+                // Strategy 2: Fall back to last short clean line
+                let skip_prefixes = [
+                    "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.",
+                    "**", "Final", "The title", "A title", "Title:", "Here's",
+                    "Option", "Select", "Choose", "Let me", "I'll", "I will",
+                    "This is", "The user", "The task", "Step", "Draft",
+                    "Review", "Analysis", "Looking", "Checking", "Hmm",
+                    "Wait", "Actually", "Okay", "So ", "But ",
+                ];
+                // Strategy 1: Find quoted strings in the reasoning
+                let mut quoted_candidate: Option<String> = None;
+                for line in r.lines().rev() {
+                    // Look for patterns like: "Some Title" or 'Some Title'
+                    let trimmed = line.trim();
+                    if let Some(start) = trimmed.find('"') {
+                        if let Some(end) = trimmed[start+1..].find('"') {
+                            let extracted = trimmed[start+1..start+1+end].trim();
+                            if !extracted.is_empty() && extracted.len() <= 50 {
+                                quoted_candidate = Some(extracted.to_string());
+                                break;
+                            }
                         }
-                    });
+                    }
+                }
+                let candidate = if let Some(qc) = quoted_candidate {
+                    log_debug(&format!("[title] extracted quoted title from reasoning: {:?}", qc));
+                    Some(qc)
+                } else {
+                    // Strategy 2: last short clean line
+                    r.lines()
+                        .rev()
+                        .find_map(|line| {
+                            let t = line.trim()
+                                .trim_matches('"')
+                                .trim_matches('\'')
+                                .trim();
+                            if t.is_empty() || t.len() > 50 {
+                                return None;
+                            }
+                            if skip_prefixes.iter().any(|p| t.starts_with(p)) {
+                                return None;
+                            }
+                            if t.contains("**") || t.starts_with('#') || t.starts_with('-') || t.contains('(') {
+                                return None;
+                            }
+                            Some(t.to_string())
+                        })
+                        .inspect(|c| log_debug(&format!("[title] extracted line from reasoning: {:?}", c)))
+                };
                 log_debug(&format!("[title] extracted from reasoning: {:?}", candidate));
                 candidate.unwrap_or_default()
             } else {
