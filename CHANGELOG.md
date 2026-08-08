@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.5] - 2026-08-08
+
+### Fixed
+- **fix(cli): title generation works with thinking models** — GLM-5.2 and other thinking models return content in `reasoning_content` with empty `content`. Now falls back to reasoning, extracts last meaningful line. Increased default max_tokens from 100 to 500 to accommodate thinking overhead.
+
+### Added
+- **feat(cli): `persist_session_title()` standalone function** — Persists a session title directly to `session_metadata.json` on disk without requiring an active `SessionManager`.
+
 ## [0.12.4] - 2026-08-08
 
 ### Added
