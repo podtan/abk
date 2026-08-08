@@ -1663,9 +1663,47 @@ impl SessionStorage {
         Ok(&self.metadata)
     }
 
+    /// Update the session description (title) in metadata and persist to disk.
+    ///
+    /// This is used to update session titles after initial creation — for example,
+    /// after generating a better title from the LLM after workflow completion.
+    pub async fn update_session_description(&mut self, description: String) -> CheckpointResult<()> {
+        use super::config::StorageMode;
+
+        let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
+        let should_write_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+
+        self.metadata.description = Some(description);
+
+        if should_write_local {
+            self.save_metadata().await?;
+        }
+
+        #[cfg(feature = "storage-documentdb")]
+        if should_write_remote {
+            if let Some(ref backend) = self.remote_backend {
+                let project_hash = &self.metadata.project_hash;
+                let session_id = &self.metadata.session_id;
+                let session_metadata_key = format!("projects/{}/sessions/{}/metadata.json", project_hash, session_id);
+                if let Err(e) = backend.write_json(&session_metadata_key, &self.metadata).await {
+                    crate::observability::tee_eprintln(
+                        &format!("[checkpoint] Warning: Failed to update session description in remote: {}", e)
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get the session ID
     pub fn session_id(&self) -> &str {
         &self.metadata.session_id
+    }
+
+    /// Get the current checkpoint count from metadata.
+    pub fn checkpoint_count(&self) -> u32 {
+        self.metadata.checkpoint_count
     }
 
     /// Get the latest checkpoint ID (most recent by creation time)

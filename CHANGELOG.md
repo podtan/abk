@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] - 2026-08-03
+
+### Added
+- **feat(config): `[llm.utility]` config section** — New optional `UtilityLlmConfig` struct under `[llm.utility]` for configuring lightweight background LLM calls (session title generation, summaries). Fields: `model: Option<String>`, `max_tokens: u32` (default 100), `temperature: f32` (default 0.3). Falls back to main provider when absent.
+- **feat(cli): `generate_session_title()` public function** — Lightweight LLM call that generates a concise (≤50 chars) session title from the user's command. Uses `ProviderFactory` to create a provider, makes a single non-streaming `generate()` call. Reads `[llm.utility]` settings when available.
+- **feat(checkpoint): `update_session_description()` on SessionStorage** — Persists a new description/title to `session_metadata.json` on disk (and remote backend if configured). Used by SessionManager for Solution A (persist title after first checkpoint) and Solution B (LLM-generated titles).
+- **feat(checkpoint): `update_session_description()` + `current_session_id()` on SessionManager** — Public API for updating session titles post-creation and querying the active session ID.
+- **feat(checkpoint): `checkpoint_count()` getter on SessionStorage** — Exposes metadata checkpoint count for external callers without requiring `synchronize_metadata()`.
+
+### Fixed
+- **fix(checkpoint): persist session description after first checkpoint** — Session descriptions were only written at session creation time and never updated. Now after the first checkpoint, the task description is persisted to `session_metadata.json`, ensuring the title is available immediately rather than only at creation time.
+
 ## [0.8.3] - 2026-07-23
 
 ### Added
