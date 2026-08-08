@@ -258,6 +258,13 @@ pub async fn run_task_from_raw_config(
     Ok(result)
 }
 
+/// Debug logging helper — only prints when RUST_LOG contains "debug".
+fn log_debug(msg: &str) {
+    if std::env::var("RUST_LOG").map(|v| v.to_lowercase().contains("debug")).unwrap_or(false) {
+        crate::observability::tee_eprintln(msg);
+    }
+}
+
 /// Generate a concise session title from the user's command using a lightweight LLM call.
 ///
 /// Creates a provider via `ProviderFactory`, makes a single non-streaming `generate()`
@@ -279,16 +286,29 @@ pub async fn generate_session_title(
     secrets: std::collections::HashMap<String, String>,
     user_command: &str,
 ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    log_debug("[title] generate_session_title() started");
+
     // Parse config to check for [llm.utility] settings
     let config: crate::config::Configuration = toml::from_str(config_toml)
         .map_err(|e| format!("Failed to parse config TOML for title generation: {}", e))?;
 
     // Extract utility config if present
     let utility = config.llm.as_ref().and_then(|l| l.utility.as_ref());
+    log_debug(&format!("[title] utility config present: {}", utility.is_some()));
 
     // Create provider via factory
     let env = crate::config::EnvironmentLoader::default();
-    let provider = crate::provider::ProviderFactory::create(&env).await?;
+    log_debug("[title] creating provider...");
+    let provider = match crate::provider::ProviderFactory::create(&env).await {
+        Ok(p) => {
+            log_debug(&format!("[title] provider: {}", p.provider_name()));
+            p
+        }
+        Err(e) => {
+            log_debug(&format!("[title] provider creation FAILED: {}", e));
+            return Err(e.to_string().into());
+        }
+    };
 
     // Build generate config
     let mut gen_config = crate::provider::GenerateConfig::new();
@@ -300,12 +320,13 @@ pub async fn generate_session_title(
             .with_max_tokens(util.max_tokens)
             .with_temperature(util.temperature);
     } else {
-        // Sensible defaults for title generation
+        // Defaults for title generation — higher max_tokens for thinking models
         gen_config = gen_config
-            .with_max_tokens(100)
+            .with_max_tokens(500)
             .with_temperature(0.3);
     }
     gen_config.enable_streaming = false;
+    log_debug(&format!("[title] calling generate() max_tokens={:?}", gen_config.max_tokens));
 
     // Build messages
     let system_prompt = "You are a title generator. Generate a concise, descriptive title \
@@ -316,15 +337,49 @@ pub async fn generate_session_title(
         crate::provider::InternalMessage::user(user_command),
     ];
 
-    let response = provider.generate(messages, &gen_config).await?;
+    let response = match provider.generate(messages, &gen_config).await {
+        Ok(r) => r,
+        Err(e) => {
+            log_debug(&format!("[title] generate() FAILED: {}", e));
+            return Err(e.to_string().into());
+        }
+    };
 
     let title = match response {
-        crate::provider::GenerateResponse::Content { text, .. } => {
-            let trimmed = text.trim().trim_matches('"').trim_matches('\'').to_string();
+        crate::provider::GenerateResponse::Content { text, reasoning } => {
+            // Some thinking models (GLM, DeepSeek) return content in `reasoning`
+            // and leave `text` empty. Fall back to reasoning if text is empty.
+            let raw = if !text.trim().is_empty() {
+                text.clone()
+            } else if let Some(ref r) = reasoning {
+                // For thinking models, extract the last meaningful line from reasoning
+                let candidate = r.lines()
+                    .rev()
+                    .find_map(|line| {
+                        let t = line.trim()
+                            .trim_start_matches('*')
+                            .trim_start_matches('#')
+                            .trim_start_matches("- ")
+                            .trim_start_matches("> ")
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'');
+                        if !t.is_empty() && !t.starts_with("Final") && t.len() <= 60 {
+                            Some(t.to_string())
+                        } else {
+                            None
+                        }
+                    });
+                log_debug(&format!("[title] extracted from reasoning: {:?}", candidate));
+                candidate.unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let trimmed = raw.trim().trim_matches('"').trim_matches('\'').to_string();
+            log_debug(&format!("[title] final title: {:?}", trimmed));
             if trimmed.is_empty() {
                 None
             } else {
-                // Enforce 50 char limit
                 let title = if trimmed.len() > 50 {
                     format!("{}...", &trimmed[..47])
                 } else {
@@ -333,10 +388,7 @@ pub async fn generate_session_title(
                 Some(title)
             }
         }
-        crate::provider::GenerateResponse::ToolCalls { .. } => {
-            // Unexpected — title generation should never produce tool calls
-            None
-        }
+        crate::provider::GenerateResponse::ToolCalls { .. } => None,
     };
 
     Ok(title)
@@ -385,9 +437,13 @@ pub async fn persist_session_title(
         .join(session_id)
         .join("session_metadata.json");
 
+    log_debug(&format!("[title] persist path: {}", metadata_path.display()));
+
     // Read existing metadata
     let mut metadata: SessionMetadata = AtomicOps::read_json(&metadata_path)
         .map_err(|e| format!("Failed to read session_metadata.json at {}: {}", metadata_path.display(), e))?;
+
+    log_debug(&format!("[title] old description: {:?}", metadata.description));
 
     // Update description
     metadata.description = Some(description.to_string());
@@ -396,6 +452,7 @@ pub async fn persist_session_title(
     AtomicOps::write_json(&metadata_path, &metadata)
         .map_err(|e| format!("Failed to write session_metadata.json at {}: {}", metadata_path.display(), e))?;
 
+    log_debug("[title] persisted to disk OK");
     Ok(())
 }
 
