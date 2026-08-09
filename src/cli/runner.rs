@@ -553,6 +553,169 @@ pub async fn generate_session_title(
     Ok(title)
 }
 
+/// Generate a session handoff briefing with a SINGLE direct LLM call.
+///
+/// This is the correct tool for handoff briefing generation — unlike
+/// [`run_task_from_raw_config`], it does NOT run the agentic workflow loop.
+/// That loop hands the model tools, iterates Analyze→…→Verify, and (with a
+/// large checkpoint history) can loop for many minutes or indefinitely,
+/// bricking the session. A briefing is pure text generation.
+///
+/// This function:
+/// 1. Loads the conversation history from the last checkpoint
+///    (`SessionStorage::load_checkpoint`) — full context preserved.
+/// 2. Makes ONE `provider.generate()` call using the MAIN model (not the
+///    `[llm.utility]` model) with the briefing prompt as system + the
+///    conversation transcript as context.
+/// 3. Returns the briefing text. No tools, no workflow loop, no checkpointing.
+///
+/// # Arguments
+/// * `config_toml` - Merged config TOML (for provider factory + path resolution)
+/// * `ctx` - RunContext (for home_dir / project_id / agent_name)
+/// * `resume_info` - ResumeInfo pointing at the checkpoint to summarize
+/// * `briefing_prompt` - The system prompt instructing the model to write
+///   the briefing (e.g. "Output a session handoff briefing in at most 300 lines...")
+///
+/// # Returns
+/// The generated briefing text, or an error if the checkpoint cannot be
+/// loaded or the LLM returns no content.
+pub async fn generate_handoff_briefing(
+    config_toml: &str,
+    ctx: &crate::context::RunContext,
+    resume_info: &super::ResumeInfo,
+    briefing_prompt: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    log_debug("[handoff] generate_handoff_briefing() started");
+
+    // Parse config (needed for provider factory + remote backend resolution)
+    let _config: crate::config::Configuration = toml::from_str(config_toml)
+        .map_err(|e| format!("Failed to parse config TOML for handoff briefing: {}", e))?;
+
+    // Resolve home_dir + agent_name from RunContext (per-user isolation)
+    let home_dir = ctx
+        .resolve_home_dir()
+        .map_err(|e| format!("Failed to resolve home_dir for handoff: {}", e))?;
+    let agent_name = ctx.resolve_agent_name("trustee");
+
+    // Resolve project_id from RunContext
+    let project_id = ctx
+        .project()
+        .map(|p| p.id.clone())
+        .unwrap_or_else(|| {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            crate::checkpoint::project_id_from_path(&cwd)
+                .unwrap_or_else(|_| "default".to_string())
+        });
+
+    // Determine the project path (from resume_info for cross-project resume)
+    let project_path = resume_info
+        .project_path
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    // Load the checkpoint conversation history
+    log_debug(&format!(
+        "[handoff] loading checkpoint session={} checkpoint={}",
+        resume_info.session_id, resume_info.checkpoint_id
+    ));
+    let storage_manager = crate::checkpoint::CheckpointStorageManager::with_home_dir(
+        home_dir,
+        &agent_name,
+    )?;
+    let project_storage = storage_manager
+        .get_project_storage_with_id(&project_path, &project_id)
+        .await?;
+    let session_storage = project_storage
+        .create_session(&resume_info.session_id)
+        .await?;
+    let checkpoint = session_storage
+        .load_checkpoint(&resume_info.checkpoint_id)
+        .await?;
+
+    // Build a text transcript of the conversation for the single LLM call.
+    // We flatten all roles into readable text (including tool results) to
+    // avoid provider tool-call schema issues — the model only needs to
+    // summarize the history, not continue the tool conversation.
+    let mut transcript = String::new();
+    for msg in &checkpoint.conversation_state.messages {
+        match msg.role.as_str() {
+            "system" => continue, // skip original system prompt; we use our own
+            "user" => transcript.push_str(&format!("[user] {}\n", msg.content)),
+            "assistant" => {
+                transcript.push_str(&format!("[assistant] {}\n", msg.content));
+                if let Some(tc) = &msg.tool_calls {
+                    for call in tc {
+                        transcript.push_str(&format!(
+                            "[assistant tool call: {}]\n",
+                            call.function.name
+                        ));
+                    }
+                }
+            }
+            "tool" => transcript.push_str(&format!("[tool result] {}\n", msg.content)),
+            _ => {}
+        }
+    }
+
+    if transcript.trim().is_empty() {
+        return Err("Checkpoint contains no conversation history to summarize".into());
+    }
+
+    log_debug(&format!(
+        "[handoff] transcript {} chars, {} messages",
+        transcript.len(),
+        checkpoint.conversation_state.messages.len()
+    ));
+
+    // Create provider via factory (MAIN model — not [llm.utility])
+    let env = crate::config::EnvironmentLoader::default();
+    let provider = crate::provider::ProviderFactory::create(&env)
+        .await
+        .map_err(|e| format!("Failed to create provider for handoff: {}", e))?;
+    log_debug(&format!("[handoff] provider: {}", provider.provider_name()));
+
+    // Build messages: briefing system prompt + conversation transcript
+    let messages = vec![
+        crate::provider::InternalMessage::system(briefing_prompt),
+        crate::provider::InternalMessage::user(transcript),
+    ];
+
+    // Generate config — high max_tokens for thinking models + 300-line briefing.
+    // No model override → provider default (main) model.
+    let mut gen_config = crate::provider::GenerateConfig::new();
+    gen_config = gen_config.with_max_tokens(8000).with_temperature(0.3);
+    gen_config.enable_streaming = false;
+
+    log_debug(&format!(
+        "[handoff] calling generate() model={:?} max_tokens={:?}",
+        gen_config.model, gen_config.max_tokens
+    ));
+
+    let response = provider
+        .generate(messages, &gen_config)
+        .await
+        .map_err(|e| format!("Handoff briefing LLM call failed: {}", e))?;
+
+    match response {
+        crate::provider::GenerateResponse::Content { text, reasoning } => {
+            if !text.trim().is_empty() {
+                Ok(text.trim().to_string())
+            } else if let Some(r) = reasoning {
+                if !r.trim().is_empty() {
+                    Ok(r.trim().to_string())
+                } else {
+                    Err("Empty briefing response (no text or reasoning)".into())
+                }
+            } else {
+                Err("Empty briefing response".into())
+            }
+        }
+        crate::provider::GenerateResponse::ToolCalls { .. } => {
+            Err("Model attempted tool calls during briefing (should be text-only)".into())
+        }
+    }
+}
+
 /// Persist a session title (description) directly to `session_metadata.json` on disk.
 ///
 /// This is a standalone function that does NOT require an active `SessionManager`.

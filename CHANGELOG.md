@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.12] - 2026-08-09
+
+### Added
+- **feat(cli): `generate_handoff_briefing()`** — Generates a session handoff briefing with a SINGLE direct LLM call. Loads conversation history from the last checkpoint (`SessionStorage::load_checkpoint`), then makes one `provider.generate()` call with the MAIN model (not `[llm.utility]`), briefing prompt as system + conversation transcript as context. No tools, no workflow loop, no checkpointing. This replaces the full `run_task_from_raw_config` workflow approach which could loop indefinitely and brick sessions.
+
 ## [0.12.11] - 2026-08-09
 
 ### Fixed
