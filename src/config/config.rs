@@ -333,8 +333,8 @@ pub struct UtilityLlmConfig {
 }
 
 fn default_utility_max_tokens() -> u32 {
-    100
-}
+    1000
+    }
 
 fn default_utility_temperature() -> f32 {
     0.3

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.10] - 2026-08-09
+
+### Fixed
+- **fix(cli): thinking model title generation with insufficient max_tokens** — GLM-4.7-Flash and similar thinking models consume 500-600+ reasoning tokens before producing a title. With `max_tokens=300` (or the old default of 100), the response was truncated mid-reasoning with empty `content`. Now: (1) default `max_tokens` raised from 100 to 1000, (2) added `extract_title_from_response()` helper with improved extraction strategies including GLM "Idea N:" brainstorming patterns, (3) automatic retry with doubled tokens then 3000 tokens if extraction fails.
+- **fix(config): default `UtilityLlmConfig.max_tokens` raised from 100 to 1000** — Old default was far too low for thinking models.
+
 ## [0.12.9] - 2026-08-09
 
 ### Fixed

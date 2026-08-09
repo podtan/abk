@@ -323,6 +323,98 @@ pub async fn should_generate_title(
     }
 }
 
+/// Extract a clean session title from the LLM response.
+///
+/// Thinking models (GLM, DeepSeek) often return empty `text` with the actual
+/// title buried in `reasoning_content`. This function tries multiple strategies:
+///
+/// 1. Use `text` directly if non-empty (non-thinking models, or thinking model done)
+/// 2. Extract from quoted strings in reasoning (models often draft titles in quotes)
+/// 3. Extract from "Idea N:" brainstorming patterns (GLM-specific)
+/// 4. Fall back to last short clean line that looks like a title
+fn extract_title_from_response(text: &str, reasoning: Option<&str>) -> Option<String> {
+    // Strategy 0: text is non-empty (normal models, or thinking model completed)
+    let raw = if !text.trim().is_empty() {
+        text.trim().to_string()
+    } else if let Some(r) = reasoning {
+        // Thinking model — extract title from reasoning
+        let skip_prefixes = [
+            "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.",
+            "**", "Final", "The title", "A title", "Title:", "Here's",
+            "Option", "Select", "Choose", "Let me", "I'll", "I will",
+            "This is", "The user", "The task", "Step", "Draft",
+            "Review", "Analysis", "Looking", "Checking", "Hmm",
+            "Wait", "Actually", "Okay", "So ", "But ",
+        ];
+
+        // Strategy 1: Find quoted strings (reverse search — latest drafts are best)
+        for line in r.lines().rev() {
+            let trimmed = line.trim();
+            if let Some(start) = trimmed.find('"') {
+                if let Some(end) = trimmed[start+1..].find('"') {
+                    let extracted = trimmed[start+1..start+1+end].trim();
+                    if !extracted.is_empty() && extracted.len() <= 50 {
+                        log_debug(&format!("[title] extracted quoted title from reasoning: {:?}", extracted));
+                        return Some(extracted.to_string());
+                    }
+                }
+            }
+        }
+
+        // Strategy 2: "Idea N: Title (N chars)" or "Idea N: Title" (GLM brainstorming pattern)
+        for line in r.lines().rev() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("*Idea ").or_else(|| trimmed.strip_prefix("Idea ")) {
+                if let Some(colon_pos) = rest.find(':') {
+                    let after_colon = rest[colon_pos+1..].trim().trim_matches('*').trim();
+                    let title = after_colon.split('(').next().unwrap_or(after_colon).trim();
+                    if !title.is_empty() && title.len() <= 50 {
+                        log_debug(&format!("[title] extracted Idea-pattern title from reasoning: {:?}", title));
+                        return Some(title.to_string());
+                    }
+                }
+            }
+        }
+
+        // Strategy 3: last short clean line
+        let candidate = r
+            .lines()
+            .rev()
+            .find_map(|line| {
+                let t = line
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim();
+                if t.is_empty() || t.len() > 50 {
+                    return None;
+                }
+                if skip_prefixes.iter().any(|p| t.starts_with(p)) {
+                    return None;
+                }
+                if t.contains("**") || t.starts_with('#') || t.starts_with('-') || t.contains('(') {
+                    return None;
+                }
+                Some(t.to_string())
+            })
+            .inspect(|c| log_debug(&format!("[title] extracted line from reasoning: {:?}", c)));
+
+        candidate.unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let trimmed = raw.trim().trim_matches('"').trim_matches('\'').to_string();
+    log_debug(&format!("[title] final title: {:?}", trimmed));
+    if trimmed.is_empty() {
+        None
+    } else if trimmed.len() > 50 {
+        Some(format!("{}...", &trimmed[..47]))
+    } else {
+        Some(trimmed)
+    }
+}
+
 /// Generate a concise session title from the user's command using a lightweight LLM call.
 ///
 /// Creates a provider via `ProviderFactory`, makes a single non-streaming `generate()`
@@ -378,9 +470,9 @@ pub async fn generate_session_title(
             .with_max_tokens(util.max_tokens)
             .with_temperature(util.temperature);
     } else {
-        // Defaults for title generation — higher max_tokens for thinking models
+        // Defaults for title generation — high enough for thinking models
         gen_config = gen_config
-            .with_max_tokens(500)
+            .with_max_tokens(1000)
             .with_temperature(0.3);
     }
     gen_config.enable_streaming = false;
@@ -395,7 +487,7 @@ pub async fn generate_session_title(
         crate::provider::InternalMessage::user(user_command),
     ];
 
-    let response = match provider.generate(messages, &gen_config).await {
+    let response = match provider.generate(messages.clone(), &gen_config).await {
         Ok(r) => r,
         Err(e) => {
             log_debug(&format!("[title] generate() FAILED: {}", e));
@@ -405,83 +497,58 @@ pub async fn generate_session_title(
 
     let title = match response {
         crate::provider::GenerateResponse::Content { text, reasoning } => {
-            // Some thinking models (GLM, DeepSeek) return content in `reasoning`
-            // and leave `text` empty. Fall back to reasoning if text is empty.
-            let raw = if !text.trim().is_empty() {
-                text.clone()
-            } else if let Some(ref r) = reasoning {
-                // For thinking models, the reasoning contains chain-of-thought.
-                // Try to find an actual title in the reasoning.
-                // Strategy 1: Look for quoted strings (models often draft titles in quotes)
-                // Strategy 2: Fall back to last short clean line
-                let skip_prefixes = [
-                    "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.",
-                    "**", "Final", "The title", "A title", "Title:", "Here's",
-                    "Option", "Select", "Choose", "Let me", "I'll", "I will",
-                    "This is", "The user", "The task", "Step", "Draft",
-                    "Review", "Analysis", "Looking", "Checking", "Hmm",
-                    "Wait", "Actually", "Okay", "So ", "But ",
-                ];
-                // Strategy 1: Find quoted strings in the reasoning
-                let mut quoted_candidate: Option<String> = None;
-                for line in r.lines().rev() {
-                    // Look for patterns like: "Some Title" or 'Some Title'
-                    let trimmed = line.trim();
-                    if let Some(start) = trimmed.find('"') {
-                        if let Some(end) = trimmed[start+1..].find('"') {
-                            let extracted = trimmed[start+1..start+1+end].trim();
-                            if !extracted.is_empty() && extracted.len() <= 50 {
-                                quoted_candidate = Some(extracted.to_string());
-                                break;
-                            }
-                        }
-                    }
-                }
-                let candidate = if let Some(qc) = quoted_candidate {
-                    log_debug(&format!("[title] extracted quoted title from reasoning: {:?}", qc));
-                    Some(qc)
-                } else {
-                    // Strategy 2: last short clean line
-                    r.lines()
-                        .rev()
-                        .find_map(|line| {
-                            let t = line.trim()
-                                .trim_matches('"')
-                                .trim_matches('\'')
-                                .trim();
-                            if t.is_empty() || t.len() > 50 {
-                                return None;
-                            }
-                            if skip_prefixes.iter().any(|p| t.starts_with(p)) {
-                                return None;
-                            }
-                            if t.contains("**") || t.starts_with('#') || t.starts_with('-') || t.contains('(') {
-                                return None;
-                            }
-                            Some(t.to_string())
-                        })
-                        .inspect(|c| log_debug(&format!("[title] extracted line from reasoning: {:?}", c)))
-                };
-                log_debug(&format!("[title] extracted from reasoning: {:?}", candidate));
-                candidate.unwrap_or_default()
-            } else {
-                String::new()
-            };
-            let trimmed = raw.trim().trim_matches('"').trim_matches('\'').to_string();
-            log_debug(&format!("[title] final title: {:?}", trimmed));
-            if trimmed.is_empty() {
-                None
-            } else {
-                let title = if trimmed.len() > 50 {
-                    format!("{}...", &trimmed[..47])
-                } else {
-                    trimmed
-                };
-                Some(title)
-            }
+            extract_title_from_response(&text, reasoning.as_deref())
         }
         crate::provider::GenerateResponse::ToolCalls { .. } => None,
     };
+
+    // If extraction failed and we're using a thinking model with limited tokens,
+    // retry once with doubled max_tokens (truncated reasoning recovery).
+    if title.is_none() {
+        if let Some(util) = utility {
+            let retry_tokens = util.max_tokens.saturating_mul(2).max(2000);
+            if retry_tokens > gen_config.max_tokens.unwrap_or(0) {
+                log_debug(&format!("[title] retrying with max_tokens={}", retry_tokens));
+                let mut retry_config = crate::provider::GenerateConfig::new();
+                if let Some(ref model) = util.model {
+                    retry_config = retry_config.with_model(model);
+                }
+                retry_config = retry_config
+                    .with_max_tokens(retry_tokens)
+                    .with_temperature(util.temperature);
+                retry_config.enable_streaming = false;
+
+                if let Ok(retry_response) = provider.generate(messages.clone(), &retry_config).await {
+                    if let crate::provider::GenerateResponse::Content { text, reasoning } = retry_response {
+                        let retry_title = extract_title_from_response(&text, reasoning.as_deref());
+                        if retry_title.is_some() {
+                            return Ok(retry_title);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If we still don't have a title, try a final attempt with 3000 tokens
+    // (thinking models like GLM-4.7-Flash can use 2000+ reasoning tokens)
+    if title.is_none() {
+        log_debug("[title] final retry with max_tokens=3000");
+        let mut final_config = crate::provider::GenerateConfig::new();
+        if let Some(util) = utility {
+            if let Some(ref model) = util.model {
+                final_config = final_config.with_model(model);
+            }
+        }
+        final_config = final_config.with_max_tokens(3000).with_temperature(0.3);
+        final_config.enable_streaming = false;
+
+        if let Ok(final_response) = provider.generate(messages.clone(), &final_config).await {
+            if let crate::provider::GenerateResponse::Content { text, reasoning } = final_response {
+                return Ok(extract_title_from_response(&text, reasoning.as_deref()));
+            }
+        }
+    }
 
     Ok(title)
 }
