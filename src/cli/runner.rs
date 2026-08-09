@@ -287,7 +287,7 @@ pub async fn should_generate_title(
 
     let home_dir = match ctx.resolve_home_dir() {
         Ok(d) => d,
-        Err(_) => return true, // can't check, assume yes
+        Err(_) => return true,
     };
 
     let project_id = ctx.project.as_ref().map(|p| p.id.clone())
@@ -306,19 +306,24 @@ pub async fn should_generate_title(
 
     let metadata: SessionMetadata = match AtomicOps::read_json(&metadata_path) {
         Ok(m) => m,
-        Err(_) => return true, // can't read, assume yes
+        Err(_) => return true,
     };
 
+    // If the session already has many checkpoints, it's a resumed session — skip.
+    // A fresh session's first command produces at most 2-3 checkpoints.
+    // Use a generous threshold to avoid false positives.
+    if metadata.checkpoint_count > 5 {
+        return false;
+    }
+
     match &metadata.description {
-        None => true, // never set
+        None => true,
         Some(desc) => {
-            // Compute what Solution A would have written (truncated command)
             let solution_a_desc = if user_command.len() > 80 {
                 format!("{}...", &user_command[..77])
             } else {
                 user_command.to_string()
             };
-            // If description matches the truncated command, LLM hasn't run yet
             desc == &solution_a_desc
         }
     }

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.8] - 2026-08-09
+
+### Fixed
+- **fix(cli): should_generate_title now checks checkpoint count** — Sessions with >5 checkpoints are treated as resumed and skip title generation, regardless of `resume_info` state. This prevents title corruption when trustee web restarts on a session with existing history.
+
 ## [0.12.7] - 2026-08-08
 
 ### Added
