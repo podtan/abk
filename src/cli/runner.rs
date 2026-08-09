@@ -309,16 +309,10 @@ pub async fn should_generate_title(
         Err(_) => return true,
     };
 
-    // If the session already has many checkpoints, it's a resumed session — skip.
-    // A fresh session's first command produces at most 2-3 checkpoints.
-    // Use a generous threshold to avoid false positives.
-    if metadata.checkpoint_count > 5 {
-        return false;
-    }
-
     match &metadata.description {
         None => true,
         Some(desc) => {
+            // If description matches the truncated command, LLM hasn't run yet
             let solution_a_desc = if user_command.len() > 80 {
                 format!("{}...", &user_command[..77])
             } else {

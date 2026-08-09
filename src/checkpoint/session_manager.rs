@@ -630,7 +630,15 @@ impl SessionManager {
         // Determine session ID and description: use identity if provided,
         // otherwise auto-generate using timestamp + UUID (no slug from command text).
         let (session_id, description) = if let Some(identity) = context.get_session_identity() {
-            (identity.id.clone(), identity.name.clone())
+            // Use identity name if provided; fall back to task description
+            let desc = identity.name.clone()
+                .or_else(|| {
+                    let task = task_description.to_string();
+                    if task.is_empty() { None } else {
+                        Some(if task.len() > 80 { format!("{}...", &task[..77]) } else { task })
+                    }
+                });
+            (identity.id.clone(), desc)
         } else {
             // Generate unique session ID: session_YYYY_MM_DD_HH_MM_{uuid8}
             let timestamp = chrono::Utc::now().format("%Y_%m_%d_%H_%M");
@@ -666,24 +674,6 @@ impl SessionManager {
         // Save the checkpoint
         if let Some(ref mut session_storage) = self.current_session {
             session_storage.save_checkpoint(&checkpoint).await?;
-
-            // Solution A: On first checkpoint, persist the session description so
-            // the session title is available in session_metadata.json.
-            // After this initial write, the description can be updated by
-            // update_session_description() (e.g. LLM-generated title in Solution B).
-            if session_storage.checkpoint_count() == 1 {
-                let task_desc = context.get_task_description();
-                let description: String = if task_desc.len() > 80 {
-                    format!("{}...", &task_desc[..77])
-                } else {
-                    task_desc.clone()
-                };
-                if let Err(e) = session_storage.update_session_description(description).await {
-                    crate::observability::tee_eprintln(
-                        &format!("[checkpoint] Warning: Failed to update session description: {}", e)
-                    );
-                }
-            }
         } else {
             return Err(anyhow::anyhow!("No active session for checkpointing"));
         }

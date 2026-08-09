@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.9] - 2026-08-09
+
+### Fixed
+- **fix(checkpoint): preserve description on session resume** — `create_session_with_description` was always creating brand-new metadata, overwriting the existing description with null when resuming. Now reads existing `session_metadata.json` and preserves description/tags.
+- **fix(checkpoint): fallback to task_description when identity.name is None** — Web sessions pass `SessionIdentity { name: None }`, causing description to be null. Now falls back to truncated task description.
+- **fix(checkpoint): removed Solution A from create_checkpoint** — Was causing race condition where `save_checkpoint` overwrote Solution A's description on subsequent checkpoints.
+- **fix(cli): removed checkpoint_count > 5 guard** — Was blocking legitimate title generation on fresh sessions with many tool calls.
+
 ## [0.12.8] - 2026-08-09
 
 ### Fixed

@@ -661,27 +661,75 @@ impl ProjectStorage {
         description: Option<String>,
     ) -> CheckpointResult<SessionStorage> {
         use super::config::StorageMode;
-        
+
         let session_path = self.storage_path.join("sessions").join(session_id);
-        
+
         let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
-        
+
+        // If the session directory already exists (resume scenario), read the
+        // existing metadata to preserve description/tags rather than overwriting with null.
+        let metadata = if should_write_local {
+            let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
+            if metadata_path.exists() {
+                // Session already exists — load and update, don't overwrite
+                match AtomicOps::read_json::<SessionMetadata>(&metadata_path) {
+                    Ok(mut existing) => {
+                        // Only update description if a new one is explicitly provided
+                        if description.is_some() {
+                            existing.description = description;
+                        }
+                        existing.last_accessed = Utc::now();
+                        existing.status = SessionStatus::Active;
+                        existing
+                    }
+                    Err(_) => {
+                        // File exists but corrupt — create fresh
+                        SessionMetadata {
+                            session_id: session_id.to_string(),
+                            project_hash: self.project_id.clone(),
+                            created_at: Utc::now(),
+                            last_accessed: Utc::now(),
+                            checkpoint_count: 0,
+                            status: SessionStatus::Active,
+                            description,
+                            tags: Vec::new(),
+                            size_bytes: 0,
+                        }
+                    }
+                }
+            } else {
+                // Fresh session — create new metadata
+                SessionMetadata {
+                    session_id: session_id.to_string(),
+                    project_hash: self.project_id.clone(),
+                    created_at: Utc::now(),
+                    last_accessed: Utc::now(),
+                    checkpoint_count: 0,
+                    status: SessionStatus::Active,
+                    description,
+                    tags: Vec::new(),
+                    size_bytes: 0,
+                }
+            }
+        } else {
+            // Remote-only mode — always create fresh
+            SessionMetadata {
+                session_id: session_id.to_string(),
+                project_hash: self.project_id.clone(),
+                created_at: Utc::now(),
+                last_accessed: Utc::now(),
+                checkpoint_count: 0,
+                status: SessionStatus::Active,
+                description,
+                tags: Vec::new(),
+                size_bytes: 0,
+            }
+        };
+
         // Create local directories only if using local storage
         if should_write_local {
             fs::create_dir_all(&session_path).await?;
         }
-
-        let metadata = SessionMetadata {
-            session_id: session_id.to_string(),
-            project_hash: self.project_id.clone(),
-            created_at: Utc::now(),
-            last_accessed: Utc::now(),
-            checkpoint_count: 0,
-            status: SessionStatus::Active,
-            description,
-            tags: Vec::new(),
-            size_bytes: 0,
-        };
 
         // Save session metadata using atomic operations (local)
         if should_write_local {
