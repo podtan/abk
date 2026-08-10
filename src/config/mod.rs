@@ -28,6 +28,6 @@ pub mod environment;
 pub use self::config::{
     AgentConfig, Configuration, ConfigurationLoader, ExecutionConfig, ExchangeConfig, LlmConfig, LoggingConfig,
     McpConfig, McpCredentialConfig, McpServerConfig, ModeConfig, ModesConfig,
-    SearchFilteringConfig, ToolSourceConfig, ToolsConfig,
+    RetryStrategy, SearchFilteringConfig, ToolSourceConfig, ToolsConfig,
 };
 pub use self::environment::EnvironmentLoader;

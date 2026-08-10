@@ -29,6 +29,21 @@ impl AgentContext for super::Agent {
     fn request_interval_seconds(&self) -> Option<u64> {
         self.config.get_u64("execution.request_interval_seconds")
     }
+    fn retry_base_delay_seconds(&self) -> u64 {
+        self.config.get_u64("execution.retry_base_delay_seconds").unwrap_or(1)
+    }
+    fn retry_strategy(&self) -> crate::config::RetryStrategy {
+        self.config
+            .get_string("execution.retry_strategy")
+            .as_deref()
+            .and_then(|s| match s {
+                "fixed" => Some(crate::config::RetryStrategy::Fixed),
+                "exponential" => Some(crate::config::RetryStrategy::Exponential),
+                "linear" => Some(crate::config::RetryStrategy::Linear),
+                _ => None,
+            })
+            .unwrap_or(crate::config::RetryStrategy::Exponential)
+    }
     fn enable_task_classification(&self) -> bool {
         self.config.config.agent.enable_task_classification.unwrap_or(true)
     }

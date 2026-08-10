@@ -416,6 +416,35 @@ pub struct LoggingConfig {
     pub log_level: String,
 }
 
+/// Retry delay strategy
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryStrategy {
+    /// Fixed delay: `retry_base_delay_seconds` between every attempt.
+    Fixed,
+    /// Exponential backoff: base * 2^attempt (1x, 2x, 4x, 8x, ...).
+    Exponential,
+    /// Linear backoff: base * (attempt+1) (1x, 2x, 3x, 4x, ...).
+    Linear,
+}
+
+impl Default for RetryStrategy {
+    fn default() -> Self {
+        RetryStrategy::Exponential
+    }
+}
+
+impl RetryStrategy {
+    /// Calculate the delay for a given attempt (0-indexed).
+    pub fn delay_secs(&self, attempt: u32, base: u64) -> u64 {
+        match self {
+            RetryStrategy::Fixed => base,
+            RetryStrategy::Exponential => base.saturating_mul(2u64.saturating_pow(attempt)),
+            RetryStrategy::Linear => base.saturating_mul(attempt as u64 + 1),
+        }
+    }
+}
+
 /// Execution configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionConfig {
@@ -426,6 +455,16 @@ pub struct ExecutionConfig {
     pub max_history: u32,
     pub request_interval_seconds: u64,
     pub enable_dangerous_command_validation: bool,
+    /// Base delay in seconds between retries (default: 1).
+    #[serde(default = "default_retry_base_delay")]
+    pub retry_base_delay_seconds: u64,
+    /// Delay strategy for retries: fixed, exponential, or linear.
+    #[serde(default)]
+    pub retry_strategy: RetryStrategy,
+}
+
+fn default_retry_base_delay() -> u64 {
+    1
 }
 
 /// Modes configuration
@@ -535,6 +574,8 @@ impl ConfigurationLoader {
                 enable_dangerous_command_validation: true,
                 max_iterations: 100,
                 request_interval_seconds: 0,
+                retry_base_delay_seconds: 1,
+                retry_strategy: RetryStrategy::Exponential,
             },
             tools: ToolsConfig {
                 open_file_window_size: Some(1000),
@@ -596,6 +637,12 @@ impl ConfigurationLoader {
             "templates.format_error_template" => None,
             "logging.log_dir" => Some(self.config.logging.log_dir.clone()),
             "logging.log_level" => Some(self.config.logging.log_level.clone()),
+            "execution.retry_strategy" => Some(
+                serde_json::to_string(&self.config.execution.retry_strategy)
+                    .unwrap_or_else(|_| "\"exponential\"".to_string())
+                    .trim_matches('"')
+                    .to_string(),
+            ),
             "lifecycle.enabled" => Some(
                 self.config
                     .lifecycle
@@ -630,6 +677,9 @@ impl ConfigurationLoader {
             "execution.max_iterations" => Some(self.config.execution.max_iterations as u64),
             "execution.request_interval_seconds" => {
                 Some(self.config.execution.request_interval_seconds)
+            }
+            "execution.retry_base_delay_seconds" => {
+                Some(self.config.execution.retry_base_delay_seconds)
             }
             "tools.max_tool_result_size_bytes" => self.config.tools.max_tool_result_size_bytes,
             _ => None,

@@ -102,6 +102,8 @@ pub struct SessionConfig {
     pub enable_task_classification: bool,
     pub request_interval_seconds: Option<u64>,
     pub streaming_enabled: bool,
+    pub retry_base_delay_seconds: Option<u64>,
+    pub retry_strategy: Option<crate::config::RetryStrategy>,
 }
 
 impl Default for SessionConfig {
@@ -114,6 +116,8 @@ impl Default for SessionConfig {
             enable_task_classification: true,
             request_interval_seconds: None,
             streaming_enabled: false,
+            retry_base_delay_seconds: None,
+            retry_strategy: None,
         }
     }
 }
@@ -575,8 +579,10 @@ where
                 Err(e) => {
                     last_error = Some(e);
                     if attempt < self.config.max_retries {
-                        let wait_time = std::time::Duration::from_secs(2u64.pow(attempt));
-                        tokio::time::sleep(wait_time).await;
+                        let base = self.config.retry_base_delay_seconds.unwrap_or(1);
+                        let strategy = self.config.retry_strategy.unwrap_or_default();
+                        let delay = strategy.delay_secs(attempt, base);
+                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     }
                 }
             }

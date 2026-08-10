@@ -42,6 +42,14 @@ pub trait AgentContext {
     fn max_tokens(&self) -> u32;
     fn max_retries(&self) -> u32;
     fn request_interval_seconds(&self) -> Option<u64>;
+    /// Base delay in seconds for retry backoff (default: 1).
+    fn retry_base_delay_seconds(&self) -> u64 {
+        1
+    }
+    /// Retry strategy: "fixed", "exponential", or "linear" (default: "exponential").
+    fn retry_strategy(&self) -> crate::config::RetryStrategy {
+        crate::config::RetryStrategy::Exponential
+    }
     fn enable_task_classification(&self) -> bool;
     fn streaming_enabled(&self) -> bool;
     
@@ -272,6 +280,13 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
             tool_count
         ));
 
+        // Request interval throttle (same as non-streaming path)
+        if let Some(interval) = agent.request_interval_seconds() {
+            if interval > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+            }
+        }
+
         // Make streaming API call
         let max_tokens = agent.max_tokens();
         match agent.generate_with_provider(tools, max_tokens, true).await {
@@ -313,9 +328,9 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                     return stop_session(agent, &err_msg).await;
                 } else if err_msg.contains("Maximum iterations") {
                     return stop_session(agent, &format!("Maximum iterations ({}) reached", max_iterations)).await;
-                } else if err_msg.contains("API timeout") || err_msg.contains("rate limit")
-                    || err_msg.contains("finish_reason:") || err_msg.contains("network_error")
-                    || err_msg.contains("Stream error") {
+                } else {
+                    // Retry on any other error (connection refused, timeout, rate limit,
+                    // stream errors, etc.) — same behavior as the non-streaming path.
                     stream_retry_count += 1;
                     if stream_retry_count > max_stream_retries {
                         agent.log_error(&format!(
@@ -327,25 +342,20 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                             max_stream_retries, err_msg
                         )).context("Streaming workflow failed");
                     }
-                    // Exponential backoff: 2s, 4s, 8s
-                    let backoff = std::time::Duration::from_secs(2u64.pow(stream_retry_count - 1));
+                    // Use configurable retry strategy
+                    let delay = agent.retry_strategy()
+                        .delay_secs(stream_retry_count - 1, agent.retry_base_delay_seconds());
                     agent.output_sink().emit(OutputEvent::Error {
-                        message: format!("Streaming failed (retryable, attempt {}/{}): {}", stream_retry_count, max_stream_retries, err_msg),
+                        message: format!("Streaming failed (retryable, attempt {}/{}): {} — retrying in {}s", stream_retry_count, max_stream_retries, err_msg, delay),
                         context: None,
                     });
                     agent.log_error(&format!(
-                        "Streaming failed (retryable, attempt {}/{}): {}",
-                        stream_retry_count, max_stream_retries, err_msg
+                        "Streaming failed (retryable, attempt {}/{}): {} — retrying in {}s",
+                        stream_retry_count, max_stream_retries, err_msg, delay
                     ), None)?;
-                    tokio::time::sleep(backoff).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     continue;
                 }
-                agent.output_sink().emit(OutputEvent::Error {
-                    message: format!("Streaming failed: {}", err_msg),
-                    context: None,
-                });
-                agent.log_error(&format!("Streaming failed: {}", err_msg), None)?;
-                return Err(anyhow::anyhow!(err_msg)).context("Streaming workflow failed");
             }
         }
     }
@@ -389,7 +399,8 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
             Err(e) => {
                 last_error = Some(e);
                 if attempt < agent.max_retries() {
-                    tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
+                    let delay = agent.retry_strategy().delay_secs(attempt, agent.retry_base_delay_seconds());
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                 }
             }
         }
