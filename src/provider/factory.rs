@@ -9,6 +9,7 @@
 //! - Any other name → `ExtensionProvider` (WASM extension system)
 
 use crate::config::EnvironmentLoader;
+use crate::config::ProviderConfig;
 use crate::provider::LlmProvider;
 use crate::provider::openai::OpenAIProvider;
 #[cfg(feature = "extension")]
@@ -28,20 +29,56 @@ macro_rules! debug {
 pub struct ProviderFactory;
 
 impl ProviderFactory {
-    /// Create a provider based on environment configuration
+    /// Create a provider based on environment configuration (legacy, no TOML config).
     ///
     /// Dispatch:
     /// - `openai-unofficial` or unset → native Rust `OpenAIProvider`
     /// - `openai-unofficial-wasm` or any other → `ExtensionProvider` (WASM)
     pub async fn create(env: &EnvironmentLoader) -> Result<Box<dyn LlmProvider>> {
-        let provider_name = env.llm_provider().unwrap_or_else(|| "openai-unofficial".to_string());
+        Self::create_inner(env, None).await
+    }
+
+    /// Create a provider with optional TOML-provided `[llm.provider]` config.
+    ///
+    /// When `provider_config` is `Some`, the provider name is read from
+    /// `provider_config.name` (falling back to `LLM_PROVIDER` env var),
+    /// and the config values (model, base_url, api_key) are threaded into
+    /// the provider, taking priority over environment variables.
+    ///
+    /// Dispatch:
+    /// - `openai-unofficial` or unset → native Rust `OpenAIProvider`
+    /// - `openai-unofficial-wasm` or any other → `ExtensionProvider` (WASM)
+    pub async fn create_with_config(
+        env: &EnvironmentLoader,
+        provider_config: Option<ProviderConfig>,
+    ) -> Result<Box<dyn LlmProvider>> {
+        Self::create_inner(env, provider_config).await
+    }
+
+    /// Internal dispatch shared by both public entry points.
+    async fn create_inner(
+        env: &EnvironmentLoader,
+        provider_config: Option<ProviderConfig>,
+    ) -> Result<Box<dyn LlmProvider>> {
+        // Determine provider name: TOML config > env var > default
+        let provider_name = if let Some(ref cfg) = provider_config {
+            cfg.name.as_deref()
+                .unwrap_or("openai-unofficial")
+                .to_string()
+        } else {
+            env.llm_provider().unwrap_or_else(|| "openai-unofficial".to_string())
+        };
 
         debug!("Factory - provider_name: {}", provider_name);
 
         // Route to native Rust provider for the default / native case
         if provider_name == "openai-unofficial" {
             debug!("Factory - using native Rust OpenAIProvider");
-            let provider = OpenAIProvider::new()?;
+            let provider = if let Some(cfg) = provider_config {
+                OpenAIProvider::with_config(cfg)?
+            } else {
+                OpenAIProvider::new()?
+            };
             return Ok(Box::new(provider));
         }
 
@@ -54,6 +91,7 @@ impl ProviderFactory {
 
         #[cfg(not(feature = "extension"))]
         {
+            let _ = provider_config; // suppress unused warning
             anyhow::bail!(
                 "Provider '{}' requires the 'extension' feature (WASM), which is not enabled. \
                  Set LLM_PROVIDER=openai-unofficial for the native Rust provider.",

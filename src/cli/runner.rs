@@ -446,10 +446,13 @@ pub async fn generate_session_title(
     let utility = config.llm.as_ref().and_then(|l| l.utility.as_ref());
     log_debug(&format!("[title] utility config present: {}", utility.is_some()));
 
+    // Extract [llm.provider] config (if present)
+    let provider_config = config.llm.as_ref().and_then(|l| l.provider.clone());
+
     // Create provider via factory
     let env = crate::config::EnvironmentLoader::default();
     log_debug("[title] creating provider...");
-    let provider = match crate::provider::ProviderFactory::create(&env).await {
+    let provider = match crate::provider::ProviderFactory::create_with_config(&env, provider_config).await {
         Ok(p) => {
             log_debug(&format!("[title] provider: {}", p.provider_name()));
             p
@@ -588,7 +591,7 @@ pub async fn generate_handoff_briefing(
     log_debug("[handoff] generate_handoff_briefing() started");
 
     // Parse config (needed for provider factory + remote backend resolution)
-    let _config: crate::config::Configuration = toml::from_str(config_toml)
+    let config: crate::config::Configuration = toml::from_str(config_toml)
         .map_err(|e| format!("Failed to parse config TOML for handoff briefing: {}", e))?;
 
     // Resolve home_dir + agent_name from RunContext (per-user isolation)
@@ -668,8 +671,9 @@ pub async fn generate_handoff_briefing(
     ));
 
     // Create provider via factory (MAIN model — not [llm.utility])
+    let provider_config = config.llm.as_ref().and_then(|l| l.provider.clone());
     let env = crate::config::EnvironmentLoader::default();
-    let provider = crate::provider::ProviderFactory::create(&env)
+    let provider = crate::provider::ProviderFactory::create_with_config(&env, provider_config)
         .await
         .map_err(|e| format!("Failed to create provider for handoff: {}", e))?;
     log_debug(&format!("[handoff] provider: {}", provider.provider_name()));

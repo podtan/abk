@@ -141,7 +141,14 @@ impl Agent {
         let lifecycle = crate::lifecycle::find_lifecycle_plugin_with_config(lifecycle_enabled, system_template).await
             .context("Failed to load lifecycle")?;
 
-        let provider = ProviderFactory::create(&env).await
+        // Extract [llm.provider] config (if present) for the provider factory.
+        // This enables per-user LLM config (model, base_url, api_key) from TOML
+        // instead of relying solely on environment variables.
+        let provider_config = config_loader.config.llm
+            .as_ref()
+            .and_then(|l| l.provider.clone());
+
+        let provider = ProviderFactory::create_with_config(&env, provider_config).await
             .context("Failed to create LLM provider")?;
 
         let timeout_seconds = config_loader.get_u64("execution.timeout_seconds").unwrap_or(120);

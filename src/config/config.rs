@@ -298,6 +298,11 @@ pub struct ToolsConfig {
 pub struct LlmConfig {
     pub endpoint: String,
     pub enable_streaming: bool,
+    /// Optional provider configuration for model/base_url/api_key from TOML.
+    /// When present, these values override environment variables, enabling
+    /// per-user LLM configuration in multi-tenant (web) mode.
+    #[serde(default)]
+    pub provider: Option<ProviderConfig>,
     /// Optional utility LLM configuration for lightweight background calls
     /// (e.g., session title generation). Falls back to main provider if absent.
     #[serde(default)]
@@ -309,9 +314,50 @@ impl Default for LlmConfig {
         Self {
             endpoint: "chat/completions".to_string(),
             enable_streaming: true,
+            provider: None,
             utility: None,
         }
     }
+}
+
+/// Provider configuration for LLM connections (model, base_url, api_key).
+///
+/// When specified in `[llm.provider]`, these values take priority over the
+/// equivalent environment variables (`OPENAI_API_KEY`, `OPENAI_BASE_URL`,
+/// `OPENAI_DEFAULT_MODEL`, `LLM_PROVIDER`). This enables per-user LLM
+/// configuration in multi-tenant web mode.
+///
+/// The `api_key` field supports `${ENV_VAR}` substitution (resolved by the
+/// caller before parsing), so secrets can be referenced from `.env` without
+/// being hardcoded in the TOML.
+///
+/// # Example (TOML)
+///
+/// ```toml
+/// [llm.provider]
+/// name = "openai-unofficial"
+/// model = "gpt-4o"
+/// base_url = "https://api.openai.com/v1"
+/// api_key = "${OPENAI_API_KEY}"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    /// Provider name for factory dispatch (e.g. "openai-unofficial").
+    /// Falls back to `LLM_PROVIDER` env var, then "openai-unofficial".
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Model override (e.g. "gpt-4o", "gpt-4o-mini").
+    /// Falls back to `OPENAI_DEFAULT_MODEL` env var, then "gpt-4o-mini".
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Base URL for API requests.
+    /// Falls back to `OPENAI_BASE_URL` env var, then "https://api.openai.com/v1".
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// API key for authentication.
+    /// Falls back to `OPENAI_API_KEY` env var.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 /// Configuration for utility LLM calls (session titles, summaries, etc.)

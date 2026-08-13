@@ -14,6 +14,7 @@ pub use client::HttpClient;
 
 use crate::provider::traits::{GenerateResponse, LlmProvider, StreamingResponse};
 use crate::provider::types::{GenerateConfig, InternalMessage};
+use crate::config::ProviderConfig;
 use anyhow::{Context, Result};
 
 /// Conditional debug macro
@@ -27,30 +28,70 @@ macro_rules! debug {
 
 /// Native Rust OpenAI-compatible provider.
 ///
-/// Reads configuration from environment variables:
-/// - `OPENAI_API_KEY` (required)
+/// Reads configuration from `[llm.provider]` TOML config (if provided) with
+/// fallback to environment variables:
+/// - `OPENAI_API_KEY` (required if not in config)
 /// - `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
 /// - `OPENAI_DEFAULT_MODEL` (default: `gpt-4o-mini`)
 pub struct OpenAIProvider {
     http: HttpClient,
+    /// TOML-provided provider config (takes priority over env vars).
+    config: Option<ProviderConfig>,
 }
 
 impl OpenAIProvider {
-    /// Create a new native OpenAI provider.
+    /// Create a new native OpenAI provider reading from env vars (backward compat).
     pub fn new() -> Result<Self> {
         let http = HttpClient::new()?;
-        Ok(Self { http })
+        Ok(Self { http, config: None })
     }
 
-    /// Get the API key from env.
+    /// Create a new native OpenAI provider with TOML-provided config.
+    ///
+    /// When a field is present in `config`, it takes priority over the
+    /// equivalent environment variable. When absent, the env var is used
+    /// as fallback.
+    pub fn with_config(config: ProviderConfig) -> Result<Self> {
+        let http = HttpClient::new()?;
+        Ok(Self { http, config: Some(config) })
+    }
+
+    /// Get the API key from config or env.
     fn api_key(&self) -> Result<String> {
+        if let Some(ref cfg) = self.config {
+            if let Some(ref key) = cfg.api_key {
+                if !key.is_empty() {
+                    return Ok(key.clone());
+                }
+            }
+        }
         std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")
     }
 
-    /// Get the base URL from env (default: `https://api.openai.com/v1`).
+    /// Get the base URL from config or env (default: `https://api.openai.com/v1`).
     fn base_url(&self) -> String {
+        if let Some(ref cfg) = self.config {
+            if let Some(ref url) = cfg.base_url {
+                if !url.is_empty() {
+                    return url.clone();
+                }
+            }
+        }
         std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
+    }
+
+    /// Get the default model from config or env (default: `gpt-4o-mini`).
+    fn default_model_inner(&self) -> String {
+        if let Some(ref cfg) = self.config {
+            if let Some(ref model) = cfg.model {
+                if !model.is_empty() {
+                    return model.clone();
+                }
+            }
+        }
+        std::env::var("OPENAI_DEFAULT_MODEL")
+            .unwrap_or_else(|_| "gpt-4o-mini".to_string())
     }
 
     /// Build the chat-completions endpoint URL.
@@ -71,8 +112,7 @@ impl LlmProvider for OpenAIProvider {
     }
 
     fn default_model(&self) -> String {
-        std::env::var("OPENAI_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "gpt-4o-mini".to_string())
+        self.default_model_inner()
     }
 
     async fn generate(
