@@ -31,7 +31,7 @@ macro_rules! debug {
 /// Reads configuration from `[llm.provider]` TOML config (if provided) with
 /// fallback to environment variables:
 /// - `OPENAI_API_KEY` (required if not in config)
-/// - `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+/// - `BASE_URL` (preferred) or `OPENAI_BASE_URL` (legacy)
 /// - `OPENAI_DEFAULT_MODEL` (default: `gpt-4o-mini`)
 pub struct OpenAIProvider {
     http: HttpClient,
@@ -69,6 +69,9 @@ impl OpenAIProvider {
     }
 
     /// Get the base URL from config or env (default: `https://api.openai.com/v1`).
+    ///
+    /// Priority: TOML `base_url` > `BASE_URL` env > `OPENAI_BASE_URL` env (legacy)
+    /// > default.
     fn base_url(&self) -> String {
         if let Some(ref cfg) = self.config {
             if let Some(ref url) = cfg.base_url {
@@ -77,7 +80,8 @@ impl OpenAIProvider {
                 }
             }
         }
-        std::env::var("OPENAI_BASE_URL")
+        std::env::var("BASE_URL")
+            .or_else(|_| std::env::var("OPENAI_BASE_URL"))
             .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
     }
 

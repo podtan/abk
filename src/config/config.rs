@@ -342,44 +342,73 @@ impl Default for LlmConfig {
     }
 }
 
-/// Provider configuration for LLM connections (model, base_url, api_key).
+/// Provider configuration for LLM connections (base_url, api_key, models).
 ///
-/// When specified in `[llm.provider]`, these values take priority over the
-/// equivalent environment variables (`OPENAI_API_KEY`, `OPENAI_BASE_URL`,
-/// `OPENAI_DEFAULT_MODEL`, `LLM_PROVIDER`). This enables per-user LLM
-/// configuration in multi-tenant web mode.
+/// One provider = one endpoint (base_url + api_key) with one or more models.
+/// The `model` field is the default; `models` lists all selectable models
+/// for this endpoint (used by UIs to populate model pickers).
 ///
-/// The `api_key` field supports `${ENV_VAR}` substitution (resolved by the
-/// caller before parsing), so secrets can be referenced from `.env` without
-/// being hardcoded in the TOML.
+/// # Field semantics
+///
+/// - `name` — display label only. NEVER used for dispatch. Use
+///   `provider_type` to select the implementation.
+/// - `provider_type` — implementation selector. `"openai"` (default) uses
+///   the native Rust provider; `"wasm"` uses the WASM extension system.
+/// - `base_url` — endpoint URL. Not a secret; belongs in TOML. Falls back
+///   to `BASE_URL` then `OPENAI_BASE_URL` env var.
+/// - `api_key` — secret. Referenced via `${ENV_VAR}` from `.env`.
+/// - `model` — default model for this endpoint.
+/// - `models` — all selectable models (UI list). Falls back to `[model]`.
 ///
 /// # Example (TOML)
 ///
 /// ```toml
 /// [llm.provider]
-/// name = "openai-unofficial"
-/// model = "gpt-4o"
-/// base_url = "https://api.openai.com/v1"
+/// name = "glm-zai"
+/// base_url = "https://api.z.ai/api/coding/paas/v4"
 /// api_key = "${OPENAI_API_KEY}"
+/// model = "GLM-5.2"
+/// models = ["GLM-5.2", "GLM-5-Turbo", "GLM-4.7-Flash"]
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
-    /// Provider name for factory dispatch (e.g. "openai-unofficial").
-    /// Falls back to `LLM_PROVIDER` env var, then "openai-unofficial".
+    /// Display label (e.g. "glm-zai"). Not used for dispatch.
     #[serde(default)]
     pub name: Option<String>,
-    /// Model override (e.g. "gpt-4o", "gpt-4o-mini").
-    /// Falls back to `OPENAI_DEFAULT_MODEL` env var, then "gpt-4o-mini".
+    /// Implementation type: "openai" (native, default) or "wasm" (extension).
+    /// Falls back to `LLM_PROVIDER` env var, then "openai".
     #[serde(default)]
-    pub model: Option<String>,
-    /// Base URL for API requests.
-    /// Falls back to `OPENAI_BASE_URL` env var, then "https://api.openai.com/v1".
+    pub provider_type: Option<String>,
+    /// Base URL for API requests (not a secret — belongs in TOML).
+    /// Falls back to `BASE_URL`, then `OPENAI_BASE_URL` env var, then
+    /// "https://api.openai.com/v1".
     #[serde(default)]
     pub base_url: Option<String>,
-    /// API key for authentication.
+    /// API key for authentication (secret — reference via ${ENV_VAR}).
     /// Falls back to `OPENAI_API_KEY` env var.
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Default model (e.g. "GLM-5.2", "gpt-4o").
+    /// Falls back to `OPENAI_DEFAULT_MODEL` env var, then "gpt-4o-mini".
+    #[serde(default)]
+    pub model: Option<String>,
+    /// All selectable models for this endpoint (populates UI model pickers).
+    /// When absent, defaults to `[model]` (single entry).
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+impl ProviderConfig {
+    /// Effective list of selectable models: `models` if non-empty, else `[model]`.
+    pub fn effective_models(&self) -> Vec<String> {
+        if !self.models.is_empty() {
+            return self.models.clone();
+        }
+        self.model
+            .as_ref()
+            .map(|m| vec![m.clone()])
+            .unwrap_or_default()
+    }
 }
 
 /// Configuration for utility LLM calls (session titles, summaries, etc.)

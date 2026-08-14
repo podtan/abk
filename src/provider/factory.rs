@@ -60,19 +60,28 @@ impl ProviderFactory {
         env: &EnvironmentLoader,
         provider_config: Option<ProviderConfig>,
     ) -> Result<Box<dyn LlmProvider>> {
-        // Determine provider name: TOML config > env var > default
-        let provider_name = if let Some(ref cfg) = provider_config {
-            cfg.name.as_deref()
-                .unwrap_or("openai-unofficial")
-                .to_string()
-        } else {
-            env.llm_provider().unwrap_or_else(|| "openai-unofficial".to_string())
-        };
+        // Resolve implementation type: provider_type field > LLM_PROVIDER env > native.
+        //
+        // IMPORTANT: `name` is a display label and NEVER selects the implementation.
+        // This is a deliberate fix — configs with name="GLM-ZAI" (etc.) previously
+        // fell into the WASM-extension path and failed when the extension feature
+        // was disabled. Only `provider_type` (or LLM_PROVIDER env) can request WASM.
+        let provider_type = provider_config
+            .as_ref()
+            .and_then(|c| c.provider_type.as_deref())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                env.llm_provider().unwrap_or_else(|| "openai-unofficial".to_string())
+            });
 
-        debug!("Factory - provider_name: {}", provider_name);
+        debug!("Factory - provider_type: {} (name: {:?})",
+            provider_type,
+            provider_config.as_ref().and_then(|c| c.name.as_deref())
+        );
 
-        // Route to native Rust provider for the default / native case
-        if provider_name == "openai-unofficial" {
+        // Native Rust provider — the DEFAULT. Selected for "openai",
+        // "openai-unofficial", or unset.
+        if provider_type == "openai-unofficial" || provider_type == "openai" {
             debug!("Factory - using native Rust OpenAIProvider");
             let provider = if let Some(cfg) = provider_config {
                 OpenAIProvider::with_config(cfg)?
@@ -82,20 +91,21 @@ impl ProviderFactory {
             return Ok(Box::new(provider));
         }
 
-        // Everything else goes through the WASM extension system
+        // Everything else goes through the WASM extension system.
+        // The extension name is the provider_type (NOT the display name).
         #[cfg(feature = "extension")]
         {
-            debug!("Factory - using WASM ExtensionProvider for: {}", provider_name);
-            return Self::create_extension_provider(&provider_name, env).await;
+            debug!("Factory - using WASM ExtensionProvider for: {}", provider_type);
+            return Self::create_extension_provider(&provider_type, env).await;
         }
 
         #[cfg(not(feature = "extension"))]
         {
             let _ = provider_config; // suppress unused warning
             anyhow::bail!(
-                "Provider '{}' requires the 'extension' feature (WASM), which is not enabled. \
-                 Set LLM_PROVIDER=openai-unofficial for the native Rust provider.",
-                provider_name
+                "provider_type '{}' requires the 'extension' feature (WASM), which is not enabled. \
+                 Use provider_type = \"openai\" (or omit it) for the native Rust provider.",
+                provider_type
             );
         }
     }
