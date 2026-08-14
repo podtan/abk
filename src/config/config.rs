@@ -298,11 +298,32 @@ pub struct ToolsConfig {
 pub struct LlmConfig {
     pub endpoint: String,
     pub enable_streaming: bool,
-    /// Optional provider configuration for model/base_url/api_key from TOML.
+    /// Optional default provider configuration for model/base_url/api_key from TOML.
     /// When present, these values override environment variables, enabling
     /// per-user LLM configuration in multi-tenant (web) mode.
     #[serde(default)]
     pub provider: Option<ProviderConfig>,
+    /// Named alternative providers selectable per-command via `model` field.
+    ///
+    /// Each key is a short name (e.g. "gpt4o", "claude") that the caller
+    /// passes in the API request. The matching `ProviderConfig` is injected
+    /// into `[llm.provider]` before creating the agent, overriding the default.
+    ///
+    /// # Example (TOML)
+    ///
+    /// ```toml
+    /// [llm.providers.gpt4o]
+    /// model = "gpt-4o"
+    /// base_url = "https://api.openai.com/v1"
+    /// api_key = "${OPENAI_API_KEY}"
+    ///
+    /// [llm.providers.local]
+    /// model = "llama3"
+    /// base_url = "http://localhost:11434/v1"
+    /// api_key = "ollama"
+    /// ```
+    #[serde(default)]
+    pub providers: HashMap<String, ProviderConfig>,
     /// Optional utility LLM configuration for lightweight background calls
     /// (e.g., session title generation). Falls back to main provider if absent.
     #[serde(default)]
@@ -315,6 +336,7 @@ impl Default for LlmConfig {
             endpoint: "chat/completions".to_string(),
             enable_streaming: true,
             provider: None,
+            providers: HashMap::new(),
             utility: None,
         }
     }
