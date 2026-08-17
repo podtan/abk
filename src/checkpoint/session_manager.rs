@@ -735,6 +735,8 @@ impl SessionManager {
                 context.get_current_step().to_string(),
                 format!("iter_{}", iteration),
             ],
+            cursor_seq: 0,
+            message_count: 0,
         };
 
         // Capture agent state

@@ -57,6 +57,17 @@ pub struct CheckpointMetadata {
     pub uncompressed_size: u64, // Size of uncompressed checkpoint data
     pub description: Option<String>, // Optional user description
     pub tags: Vec<String>,     // User-defined tags
+    /// Cursor into the session's append-only `conversation.jsonl` log.
+    ///
+    /// The checkpoint's conversation is exactly the messages with
+    /// `seq <= cursor_seq` (1-based). Defaults to 0 for backward
+    /// compatibility with indexes written before this field existed.
+    #[serde(default)]
+    pub cursor_seq: u32,
+    /// Number of messages in the conversation at this checkpoint
+    /// (equal to `cursor_seq` for append-only sessions).
+    #[serde(default)]
+    pub message_count: u32,
 }
 
 /// Agent workflow steps

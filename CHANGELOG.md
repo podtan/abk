@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-17
+
+### Added
+- **feat(checkpoint): append-only `conversation.jsonl` + cursor-based checkpoints** — Replaces the per-checkpoint `{NNN}_conversation.json` full-history snapshots (O(N²) storage) with a single append-only JSON Lines log per session: one `ChatMessage` per line, written with `O_APPEND` + `fsync` (crash-safe, never rewritten). New `ConversationLog` handler (`src/checkpoint/conversation_log.rs`) harvested from the dead `v2::EventsLog` design. `save_checkpoint` diffs against the log's high-water mark and appends only NEW messages. `CheckpointMetadata` gains `cursor_seq` + `message_count` (serde default 0 → old indexes still deserialize). Read path rebuilds the conversation from the log up to the cursor. Remote (DocumentDB) mirrors the layout 1:1: per-message docs `projects/{hash}/sessions/{sid}/messages/{seq:05d}.json` as pure inserts, resume = range read `seq <= cursor`.
+- **feat(checkpoint): per-checkpoint `{NNN}_agent.json` agent state** — Agent state (iteration/step/mode) now written per checkpoint on every save, locally and remotely. Fixes the `session_agent.json` staleness bug where resume always restored iteration-1 state.
+
+### Fixed
+- **fix(checkpoint): mixed legacy/new session loading** — A session that has legacy checkpoints (cursor_seq=0, the serde default) plus a `conversation.jsonl` created after an upgrade+resume now loads old checkpoints from their legacy `{id}_conversation.json` files instead of reading the jsonl up to cursor 0 (which would yield no messages). Same guard on the remote path.
+
+### Kept-Compat
+- Legacy sessions (pre-0.13.0 layouts: `{NNN}_conversation.json`, `session_agent.json`, per-checkpoint `_metadata.json`, V1 single-file) still load unchanged via fallback readers. Deleting a checkpoint never truncates the shared `conversation.jsonl` (later checkpoints' cursors depend on earlier messages).
+
 ## [0.12.12] - 2026-08-09
 
 ### Added

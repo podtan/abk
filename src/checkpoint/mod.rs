@@ -38,6 +38,7 @@ pub mod atomic;
 pub mod backend;
 pub mod cleanup;
 pub mod config;
+pub mod conversation_log;
 pub mod errors;
 pub mod models;
 pub mod restoration;
@@ -77,6 +78,7 @@ pub use backend::{
     FileStorageBackend, ListOptions, ListResult, StorageBackend, StorageBackendBuilder,
     StorageBackendExt, StorageError, StorageItemMeta, StorageResult,
 };
+pub use conversation_log::{ConversationLog, ConversationLogEntry, CONVERSATION_LOG_FILENAME};
 
 // V2 re-exports for split-file checkpoint format
 pub use v2::{

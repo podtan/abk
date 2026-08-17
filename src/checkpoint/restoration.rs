@@ -674,6 +674,8 @@ impl CheckpointRestoration {
                     uncompressed_size: 0,
                     description: Some("Empty checkpoint due to restoration failure".to_string()),
                     tags: vec![],
+                    cursor_seq: 0,
+                    message_count: 0,
                 },
                 agent_state: AgentStateSnapshot {
                     current_mode: "confirm".to_string(),
@@ -1106,6 +1108,8 @@ mod tests {
                 uncompressed_size: 2048,
                 description: Some("Test checkpoint".to_string()),
                 tags: vec![],
+                cursor_seq: 0,
+                message_count: 0,
             },
             agent_state: AgentStateSnapshot {
                 current_mode: "confirm".to_string(),

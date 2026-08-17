@@ -2,13 +2,15 @@
 
 use super::{
     AgentStateSnapshot, AtomicOps, Checkpoint, CheckpointError, CheckpointMetadata,
-    CheckpointResult, CleanupManager, ConversationSnapshot, EnvironmentSnapshot,
-    FileSystemSnapshot, GlobalCheckpointConfig, MigrationReport, ProjectCheckpointConfig,
-    ProjectStats, RetentionPolicy, SessionMetadata, SessionStats, SessionStatus,
-    StorageBackendConfig, StorageBackendType, StorageStats, ToolStateSnapshot,
+    CheckpointResult, CleanupManager, ConversationSnapshot,
+    EnvironmentSnapshot, FileSystemSnapshot, GlobalCheckpointConfig, MigrationReport,
+    ProjectCheckpointConfig, ProjectStats, RetentionPolicy, SessionMetadata, SessionStats,
+    SessionStatus, StorageBackendConfig, StorageBackendType, StorageStats, ToolStateSnapshot,
     project_id_from_path,
 };
 use super::backend::{StorageBackend, StorageBackendExt};
+use super::conversation_log::ConversationLog;
+use super::models::{ChatMessage, ConversationStats, ModelConfig};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,6 +20,54 @@ use tokio::fs;
 /// Metadata filename constants
 const PROJECT_METADATA_FILENAME: &str = "project_metadata.json";
 const SESSION_METADATA_FILENAME: &str = "session_metadata.json";
+
+/// A single message stored as its own remote document.
+///
+/// Remote (DocumentDB) conversations use an append-only layout that mirrors
+/// the local `conversation.jsonl`: one document per message, keyed by a
+/// 1-based, zero-padded sequence number. Pure inserts — no history re-upload.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct RemoteMessageDoc {
+    /// 1-based sequence number (matches the local log's seq).
+    pub seq: u32,
+    /// The live V1 chat message.
+    pub message: ChatMessage,
+}
+
+/// Build the remote key for a single conversation message document.
+fn remote_message_key(session_key_prefix: &str, seq: u32) -> String {
+    format!("{}/messages/{:05}.json", session_key_prefix, seq)
+}
+
+/// Rebuild a `ConversationSnapshot` from a slice of messages.
+///
+/// Used by the append-only read path: messages are the source of truth and
+/// the rest of the snapshot is derived (the resume consumer only needs the
+/// messages; validation treats the derived values as informational).
+fn snapshot_from_messages(messages: Vec<ChatMessage>) -> ConversationSnapshot {
+    let total_messages = messages.len();
+    ConversationSnapshot {
+        messages,
+        // The system prompt is replayed from the first "system" message by the
+        // resume consumer; the field is informational for validation.
+        system_prompt: String::new(),
+        context_window_size: 0,
+        model_configuration: ModelConfig {
+            model_name: String::new(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        },
+        conversation_stats: ConversationStats {
+            total_tokens: 0,
+            total_messages,
+            estimated_cost: None,
+            api_calls: 0,
+        },
+    }
+}
 
 /// Global checkpoint storage manager
 pub struct CheckpointStorageManager {
@@ -1158,24 +1208,40 @@ impl SessionStorage {
 
         let checkpoint_id = &checkpoint.metadata.checkpoint_id;
         let session_id = &self.metadata.session_id;
+        let messages = &checkpoint.conversation_state.messages;
+        // Cursor = total message count at this checkpoint (linear history).
+        let total = messages.len();
+        let cursor_seq = total as u32;
 
         let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
         let should_write_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
 
+        // Stamp the cursor onto the metadata so the index (local + remote)
+        // records it. Old-format checkpoints deserialize with cursor_seq=0.
+        let mut metadata = checkpoint.metadata.clone();
+        metadata.cursor_seq = cursor_seq;
+        metadata.message_count = cursor_seq;
+
         // Write to local files if configured
         if should_write_local {
-            // 1. Write session_agent.json ONCE (first checkpoint or if file doesn't exist yet)
-            if !self.session_agent_written {
-                let agent_file = self.session_path.join("session_agent.json");
-                AtomicOps::write_json(&agent_file, &checkpoint.agent_state)?;
-                self.session_agent_written = true;
-            }
+            // 1. Per-checkpoint agent state (fixes session_agent.json staleness:
+            //    agent state changes every iteration, so it must be captured per
+            //    checkpoint, not written once).
+            let agent_file = self.session_path.join(format!("{}_agent.json", checkpoint_id));
+            AtomicOps::write_json(&agent_file, &checkpoint.agent_state)?;
 
-            // 2. Save conversation state file (per-checkpoint, legitimately unique)
-            let conversation_file = self
-                .session_path
-                .join(format!("{}_conversation.json", checkpoint_id));
-            AtomicOps::write_json(&conversation_file, &checkpoint.conversation_state)?;
+            // 2. Append-only conversation log: append only the NEW messages beyond
+            //    the current high-water mark. The log is never rewritten or truncated.
+            let log = ConversationLog::new(&self.session_path);
+            let hwm = log.count()?;
+            if total > hwm {
+                let entries: Vec<(u32, &ChatMessage)> = messages[hwm..total]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| (hwm as u32 + 1 + i as u32, m))
+                    .collect();
+                log.append_batch(&entries)?;
+            }
 
             crate::observability::tee_eprintln(
                 &format!("[checkpoint] ✅ Saved checkpoint {} to local storage", checkpoint_id)
@@ -1190,23 +1256,33 @@ impl SessionStorage {
                 let session_key_prefix = format!("projects/{}/sessions/{}", project_hash, session_id);
                 let ckpt_key_prefix = format!("{}/checkpoints/{}", session_key_prefix, checkpoint_id);
 
-                // 1. Write session_agent.json to remote ONCE
-                if !self.session_agent_remote_written {
-                    let agent_key = format!("{}/session_agent.json", session_key_prefix);
-                    if let Err(e) = backend.write_json(&agent_key, &checkpoint.agent_state).await {
-                        crate::observability::tee_eprintln(
-                            &format!("[checkpoint] Warning: Failed to write session agent state to remote backend: {}", e)
-                        );
-                    } else {
-                        self.session_agent_remote_written = true;
-                    }
+                // 1. Per-checkpoint agent state (mirrors local layout)
+                let agent_key = format!("{}_agent.json", ckpt_key_prefix);
+                if let Err(e) = backend.write_json(&agent_key, &checkpoint.agent_state).await {
+                    crate::observability::tee_eprintln(
+                        &format!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e)
+                    );
                 }
 
-                // 2. Write conversation state (per-checkpoint)
-                if let Err(e) = backend.write_json(&format!("{}_conversation.json", ckpt_key_prefix), &checkpoint.conversation_state).await {
-                    crate::observability::tee_eprintln(
-                        &format!("[checkpoint] Warning: Failed to write conversation to remote backend: {}", e)
-                    );
+                // 2. Append-only per-message docs: pure inserts beyond hwm.
+                //    The remote high-water mark is the max cursor already indexed.
+                let hwm = self
+                    .checkpoints
+                    .values()
+                    .map(|m| m.cursor_seq)
+                    .max()
+                    .unwrap_or(0) as usize;
+                if total > hwm {
+                    for (i, msg) in messages[hwm..total].iter().enumerate() {
+                        let seq = hwm as u32 + 1 + i as u32;
+                        let doc = RemoteMessageDoc { seq, message: msg.clone() };
+                        let key = remote_message_key(&session_key_prefix, seq);
+                        if let Err(e) = backend.write_json(&key, &doc).await {
+                            crate::observability::tee_eprintln(
+                                &format!("[checkpoint] Warning: Failed to write message doc {} to remote: {}", seq, e)
+                            );
+                        }
+                    }
                 }
 
                 let mode_str = if matches!(self.storage_mode, StorageMode::Mirror) { "mirrored" } else { "saved" };
@@ -1228,10 +1304,7 @@ impl SessionStorage {
         }
 
         // Update checkpoint index (always in memory, persist to local if using local storage)
-        self.checkpoints.insert(
-            checkpoint.metadata.checkpoint_id.clone(),
-            checkpoint.metadata.clone(),
-        );
+        self.checkpoints.insert(checkpoint_id.clone(), metadata);
         if should_write_local {
             self.save_checkpoint_index().await?;
         }
@@ -1301,12 +1374,56 @@ impl SessionStorage {
     
     /// Try to load checkpoint from local files
     ///
-    /// Supports three layouts:
-    /// 1. **Optimized (current)**: `session_agent.json` + `checkpoints.json` + `{id}_conversation.json`
-    /// 2. **Legacy per-checkpoint**: `{id}_metadata.json` + `{id}_agent.json` + `{id}_conversation.json`
-    /// 3. **V1 single-file**: `{id}.json`
+    /// Supports four layouts:
+    /// 1. **Append-only (current)**: `conversation.jsonl` + `checkpoints.json`
+    ///    (cursor) + `{id}_agent.json`
+    /// 2. **Optimized legacy**: `session_agent.json` + `checkpoints.json` + `{id}_conversation.json`
+    /// 3. **Legacy per-checkpoint**: `{id}_metadata.json` + `{id}_agent.json` + `{id}_conversation.json`
+    /// 4. **V1 single-file**: `{id}.json`
     async fn try_load_from_local(&self, checkpoint_id: &str) -> CheckpointResult<Option<Checkpoint>> {
-        // --- New optimized layout: conversation file exists ---
+        // --- New append-only layout: conversation.jsonl exists ---
+        let log = ConversationLog::new(&self.session_path);
+        if log.exists() {
+            // Metadata (with cursor) from index first, then per-checkpoint file
+            let metadata: CheckpointMetadata = if let Some(m) = self.checkpoints.get(checkpoint_id) {
+                m.clone()
+            } else {
+                let metadata_file =
+                    self.session_path.join(format!("{}_metadata.json", checkpoint_id));
+                if !metadata_file.exists() {
+                    return Ok(None);
+                }
+                load_json(&metadata_file).await?
+            };
+
+            // cursor_seq == 0 means this checkpoint was written before the
+            // append-only format existed (legacy metadata deserializes with
+            // the serde default). In a mixed session (legacy checkpoints plus
+            // a jsonl created after upgrade+resume), such checkpoints must be
+            // loaded from their legacy `{id}_conversation.json` file below —
+            // reading the jsonl up to cursor 0 would yield no messages.
+            if metadata.cursor_seq > 0 {
+                // Read messages up to the checkpoint's cursor from the append-only log.
+                let messages = log.read_up_to(metadata.cursor_seq)?;
+                let conversation_state = snapshot_from_messages(messages);
+
+                // Agent state: per-checkpoint file (new layout), fallback to session-level.
+                let agent_file = self.session_path.join(format!("{}_agent.json", checkpoint_id));
+                let agent_state: AgentStateSnapshot = if agent_file.exists() {
+                    load_json(&agent_file).await?
+                } else {
+                    let session_agent_path = self.session_path.join("session_agent.json");
+                    if !session_agent_path.exists() {
+                        return Ok(None); // Missing agent state — not found
+                    }
+                    load_json(&session_agent_path).await?
+                };
+
+                return Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)));
+            }
+        }
+
+        // --- Legacy optimized layout: conversation file exists ---
         let conversation_file = self
             .session_path
             .join(format!("{}_conversation.json", checkpoint_id));
@@ -1385,41 +1502,7 @@ impl SessionStorage {
         let session_key_prefix = format!("projects/{}/sessions/{}", project_hash, session_id);
         let ckpt_key_prefix = format!("{}/checkpoints/{}", session_key_prefix, checkpoint_id);
 
-        // Load conversation (per-checkpoint — same key format in both old and new)
-        let conversation_state: ConversationSnapshot = match backend.read_json(&format!("{}_conversation.json", ckpt_key_prefix)).await {
-            Ok(c) => c,
-            Err(StorageError::NotFound(_)) => return Ok(None),
-            Err(e) => {
-                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read conversation from remote: {}", e));
-                return Ok(None);
-            }
-        };
-
-        // Load agent state: session_agent.json first, fallback to per-checkpoint
-        let session_agent_key = format!("{}/session_agent.json", session_key_prefix);
-        let agent_state: AgentStateSnapshot = match backend.read_json(&session_agent_key).await {
-            Ok(a) => a,
-            Err(StorageError::NotFound(_)) => {
-                // Legacy: try per-checkpoint agent file
-                match backend.read_json(&format!("{}_agent.json", ckpt_key_prefix)).await {
-                    Ok(a) => a,
-                    Err(StorageError::NotFound(_)) => {
-                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}", checkpoint_id));
-                        return Ok(None);
-                    }
-                    Err(e) => {
-                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read agent state from remote: {}", e));
-                        return Ok(None);
-                    }
-                }
-            }
-            Err(e) => {
-                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read session agent state from remote: {}", e));
-                return Ok(None);
-            }
-        };
-
-        // Load metadata: in-memory index first, then checkpoints.json key, then legacy per-checkpoint
+        // Load metadata (in-memory index → checkpoints.json → legacy per-checkpoint).
         let metadata: CheckpointMetadata = if let Some(m) = self.checkpoints.get(checkpoint_id) {
             m.clone()
         } else {
@@ -1463,6 +1546,88 @@ impl SessionStorage {
                     return Ok(None);
                 }
             }
+        };
+
+        // New append-only layout: per-message docs. Present when the message doc
+        // at the checkpoint's cursor exists. Fall back to legacy per-checkpoint
+        // conversation file otherwise.
+        let cursor = metadata.cursor_seq;
+        let new_layout = cursor > 0
+            && backend
+                .exists(&remote_message_key(&session_key_prefix, cursor))
+                .await
+                .unwrap_or(false);
+
+        let (conversation_state, agent_state) = if new_layout {
+            // Range read: messages with seq <= cursor (pure inserts, no re-upload).
+            let mut messages = Vec::with_capacity(cursor as usize);
+            for seq in 1..=cursor {
+                match backend.read_json::<RemoteMessageDoc>(&remote_message_key(&session_key_prefix, seq)).await {
+                    Ok(doc) => messages.push(doc.message),
+                    Err(StorageError::NotFound(_)) => break, // gap — stop
+                    Err(e) => {
+                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read message doc {} from remote: {}", seq, e));
+                        return Ok(None);
+                    }
+                }
+            }
+            let conversation_state = snapshot_from_messages(messages);
+
+            // Agent state: per-checkpoint file (new layout), fallback to session-level.
+            let agent_state: AgentStateSnapshot =
+                match backend.read_json(&format!("{}_agent.json", ckpt_key_prefix)).await {
+                    Ok(a) => a,
+                    Err(StorageError::NotFound(_)) => {
+                        // Fallback: session-level agent (legacy)
+                        match backend.read_json(&format!("{}/session_agent.json", session_key_prefix)).await {
+                            Ok(a) => a,
+                            Err(e) => {
+                                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}: {}", checkpoint_id, e));
+                                return Ok(None);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read agent state from remote: {}", e));
+                        return Ok(None);
+                    }
+                };
+            (conversation_state, agent_state)
+        } else {
+            // Legacy per-checkpoint conversation file.
+            let conversation_state: ConversationSnapshot =
+                match backend.read_json(&format!("{}_conversation.json", ckpt_key_prefix)).await {
+                    Ok(c) => c,
+                    Err(StorageError::NotFound(_)) => return Ok(None),
+                    Err(e) => {
+                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read conversation from remote: {}", e));
+                        return Ok(None);
+                    }
+                };
+
+            // Agent state: session_agent.json first, fallback to per-checkpoint.
+            let agent_state: AgentStateSnapshot =
+                match backend.read_json(&format!("{}/session_agent.json", session_key_prefix)).await {
+                    Ok(a) => a,
+                    Err(StorageError::NotFound(_)) => {
+                        match backend.read_json(&format!("{}_agent.json", ckpt_key_prefix)).await {
+                            Ok(a) => a,
+                            Err(StorageError::NotFound(_)) => {
+                                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}", checkpoint_id));
+                                return Ok(None);
+                            }
+                            Err(e) => {
+                                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read agent state from remote: {}", e));
+                                return Ok(None);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read session agent state from remote: {}", e));
+                        return Ok(None);
+                    }
+                };
+            (conversation_state, agent_state)
         };
 
         crate::observability::tee_eprintln(&format!("[checkpoint] ✅ Loaded checkpoint {} from remote storage", checkpoint_id));
@@ -1539,11 +1704,12 @@ impl SessionStorage {
 
     /// Delete a checkpoint
     ///
-    /// Deletes only the per-checkpoint conversation file. Session-level files
-    /// (`session_agent.json`, `session_metadata.json`, `checkpoints.json`)
-    /// are preserved since they may be needed by other checkpoints.
+    /// Deletes only the per-checkpoint files. The shared append-only
+    /// `conversation.jsonl` is NEVER truncated — later checkpoints' cursors
+    /// depend on earlier messages, so a per-checkpoint deletion only removes
+    /// the per-checkpoint agent file + index entry, never the shared log.
     pub async fn delete_checkpoint(&mut self, checkpoint_id: &str) -> CheckpointResult<()> {
-        // Delete conversation file (new optimized format)
+        // Delete conversation file (legacy optimized format)
         let conv_file = self.session_path.join(format!("{}_conversation.json", checkpoint_id));
         if conv_file.exists() {
             fs::remove_file(&conv_file).await?;
@@ -1965,6 +2131,8 @@ mod tests {
                 uncompressed_size: 2048,
                 description: Some("Test checkpoint".to_string()),
                 tags: vec![],
+                cursor_seq: 0,
+                message_count: 0,
             },
             agent_state: AgentStateSnapshot {
                 current_mode: "confirm".to_string(),
