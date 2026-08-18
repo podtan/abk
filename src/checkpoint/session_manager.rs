@@ -528,7 +528,14 @@ impl SessionManager {
         context.set_current_step(
             context.checkpoint_step_to_agent_step(&checkpoint.agent_state.current_step),
         );
-        self.current_iteration = checkpoint.agent_state.current_iteration + 1;
+        // Resume from the TRUE max iteration across index + on-disk files +
+        // state log, not the resumed checkpoint's own iteration. The resumed
+        // checkpoint may be mid-history (e.g. resuming 001 in a session that
+        // already has 002–003) — numbering must continue past the true max,
+        // or the next save would collide and overwrite existing checkpoints.
+        let true_max = session_storage.max_session_iteration().await?;
+        let resume_iteration = true_max.max(checkpoint.agent_state.current_iteration);
+        self.current_iteration = resume_iteration + 1;
         context.set_current_iteration(self.current_iteration);
         context.set_task_description(checkpoint.agent_state.task_description.clone());
 

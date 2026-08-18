@@ -2037,10 +2037,67 @@ impl SessionStorage {
         self.metadata.checkpoint_count
     }
 
-    /// Get the latest checkpoint ID (most recent by creation time)
+    /// Compute the **true** highest iteration used so far in this session.
+    ///
+    /// Takes the max across every source of truth, so the result is correct
+    /// even for legacy/mixed sessions resumed with a new binary:
+    /// 1. the checkpoints index (`self.checkpoints`) — each entry's `iteration`;
+    /// 2. the append-only `agent_state.jsonl` (new layout: one line per
+    ///    checkpoint, `seq` = iteration);
+    /// 3. any on-disk checkpoint files (`{NNN}_*.json` legacy, `{NNN}.json` V1)
+    ///    — the zero-padded prefix is the iteration (via `checkpoint_iteration`).
+    ///
+    /// The next checkpoint's iteration is this value + 1, which guarantees a
+    /// fresh, collision-free number. The `conversation.jsonl` message count is
+    /// deliberately **not** a source: it is a message count (cursor), not an
+    /// iteration, and mixing the two would cause a numbering skip.
+    pub async fn max_session_iteration(&self) -> CheckpointResult<u32> {
+        let mut max = 0u32;
+
+        // 1. Index iterations (authoritative in-memory state).
+        for cp in self.checkpoints.values() {
+            max = max.max(cp.iteration);
+        }
+
+        // 2. Append-only agent state log (new layout).
+        let state_log = AgentStateLog::new(&self.session_path);
+        if state_log.exists() {
+            for entry in state_log.read_all()? {
+                max = max.max(entry.iteration);
+            }
+        }
+
+        // 3. On-disk checkpoint files (legacy / V1 layouts). Best-effort: a
+        //    failed directory read is skipped rather than fatal, since the
+        //    index and state log already cover the new layout.
+        if let Ok(entries) = std::fs::read_dir(&self.session_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                // Strip the `.json` suffix so `checkpoint_iteration` sees the
+                // stem (`001_conversation`, `001`, ...). `.jsonl` files are not
+                // stripped and fail to parse as an iteration, so they're skipped.
+                let stem = name.strip_suffix(".json").unwrap_or(&name);
+                if let Some(iter) = checkpoint_iteration(stem) {
+                    max = max.max(iter);
+                }
+            }
+        }
+
+        Ok(max)
+    }
+
+    /// Get the latest checkpoint ID (highest iteration — the most recent
+    /// checkpoint in the session's linear history).
+    ///
+    /// Previously picked by max `created_at`, which was wrong for legacy/mixed
+    /// sessions: a stale entry carrying a newer timestamp could win, causing
+    /// the resume to restart numbering and collide with existing checkpoints.
+    /// In a linear session the iteration is the true ordering, so the highest
+    /// iteration is the latest checkpoint.
     pub fn latest_checkpoint_id(&self) -> Option<String> {
-        self.checkpoints.values()
-            .max_by_key(|cp| cp.created_at)
+        self.checkpoints
+            .values()
+            .max_by_key(|cp| cp.iteration)
             .map(|cp| cp.checkpoint_id.clone())
     }
 }
@@ -2343,6 +2400,110 @@ mod tests {
             working_directory: None,
             max_iterations: 0,
         }
+    }
+
+    // --- FIX A: max_session_iteration / latest_checkpoint_id ---
+
+    /// A minimal in-memory checkpoint index entry.
+    fn meta(iteration: u32, created_at: DateTime<Utc>) -> CheckpointMetadata {
+        CheckpointMetadata {
+            checkpoint_id: format!("{:03}_analyze", iteration),
+            session_id: "test_session".to_string(),
+            project_hash: "test_project_hash".to_string(),
+            created_at,
+            iteration,
+            workflow_step: WorkflowStep::Analyze,
+            checkpoint_version: "1.0".to_string(),
+            compressed_size: 0,
+            uncompressed_size: 0,
+            description: None,
+            tags: vec![],
+            cursor_seq: iteration * 2,
+            message_count: iteration * 2,
+        }
+    }
+
+    async fn session_with_index(temp: &Path, index: HashMap<String, CheckpointMetadata>) -> SessionStorage {
+        // Build a real session on disk (so `session_path` exists for the scan)
+        // with an empty index, then swap in the test index.
+        let mut session =
+            SessionStorage::new(temp.to_path_buf(), create_test_session_metadata("test_session"))
+                .await
+                .expect("session storage");
+        session.checkpoints = index;
+        session
+    }
+
+    #[tokio::test]
+    async fn test_max_session_iteration_index_only() {
+        let temp = TempDir::new().unwrap();
+        let index = HashMap::from([
+            ("001_analyze".to_string(), meta(1, Utc::now())),
+            ("002_analyze".to_string(), meta(2, Utc::now())),
+            ("003_analyze".to_string(), meta(3, Utc::now())),
+        ]);
+        let session = session_with_index(temp.path(), index).await;
+        assert_eq!(session.max_session_iteration().await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_max_session_iteration_on_disk_legacy_files() {
+        let temp = TempDir::new().unwrap();
+        let index = HashMap::from([("001_analyze".to_string(), meta(1, Utc::now()))]);
+        // Legacy per-checkpoint files for iterations 2 and 3 exist on disk
+        // (not in the index) — the scan must find them.
+        std::fs::write(temp.path().join("002_conversation.json"), "{}").unwrap();
+        std::fs::write(temp.path().join("003_conversation.json"), "{}").unwrap();
+        std::fs::write(temp.path().join("003_agent.json"), "{}").unwrap();
+        let session = session_with_index(temp.path(), index).await;
+        assert_eq!(session.max_session_iteration().await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_max_session_iteration_state_log() {
+        let temp = TempDir::new().unwrap();
+        let index = HashMap::from([("001_analyze".to_string(), meta(1, Utc::now()))]);
+        // New layout: agent_state.jsonl has a line for iteration 3.
+        let line = serde_json::to_string(&AgentStateEntry {
+            seq: 3,
+            checkpoint_id: "003_analyze".to_string(),
+            iteration: 3,
+            step: "analyze".to_string(),
+            mode: "confirm".to_string(),
+            ts: Utc::now(),
+        })
+        .unwrap();
+        std::fs::write(temp.path().join("agent_state.jsonl"), line).unwrap();
+        let session = session_with_index(temp.path(), index).await;
+        assert_eq!(session.max_session_iteration().await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_max_session_iteration_empty_session() {
+        let temp = TempDir::new().unwrap();
+        let session = session_with_index(temp.path(), HashMap::new()).await;
+        assert_eq!(session.max_session_iteration().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_latest_checkpoint_id_by_iteration_not_created_at() {
+        let temp = TempDir::new().unwrap();
+        // The iteration-1 entry has the NEWEST created_at, but iteration 3 is
+        // the true latest. The old max-by-created_at logic would return 001.
+        let index = HashMap::from([
+            ("001_analyze".to_string(), meta(1, Utc::now())),
+            ("002_analyze".to_string(), meta(2, Utc::now() - chrono::Duration::minutes(5))),
+            ("003_analyze".to_string(), meta(3, Utc::now() - chrono::Duration::minutes(10))),
+        ]);
+        let session = session_with_index(temp.path(), index).await;
+        assert_eq!(session.latest_checkpoint_id(), Some("003_analyze".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_latest_checkpoint_id_empty() {
+        let temp = TempDir::new().unwrap();
+        let session = session_with_index(temp.path(), HashMap::new()).await;
+        assert_eq!(session.latest_checkpoint_id(), None);
     }
 
     #[tokio::test]
