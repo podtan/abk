@@ -34,6 +34,7 @@
 //! ```
 
 pub mod agent_context;
+pub mod agent_state_log;
 pub mod atomic;
 pub mod backend;
 pub mod cleanup;
@@ -61,7 +62,7 @@ pub use config::{
 pub use errors::{CheckpointError, CheckpointResult};
 pub use models::{
     AgentStateSnapshot, Checkpoint, CheckpointMetadata, CheckpointSummary, ConversationSnapshot,
-    EnvironmentSnapshot, FileSystemSnapshot, SessionMetadata, SessionStatus,
+    EnvironmentSnapshot, FileSystemSnapshot, SessionConstants, SessionMetadata, SessionStatus,
     ToolStateSnapshot, project_id_from_path,
 };
 pub use restoration::{
@@ -79,6 +80,7 @@ pub use backend::{
     StorageBackendExt, StorageError, StorageItemMeta, StorageResult,
 };
 pub use conversation_log::{ConversationLog, ConversationLogEntry, CONVERSATION_LOG_FILENAME};
+pub use agent_state_log::{AgentStateEntry, AgentStateLog, AGENT_STATE_LOG_FILENAME};
 
 // V2 re-exports for split-file checkpoint format
 pub use v2::{

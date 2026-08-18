@@ -31,7 +31,7 @@ use crate::checkpoint::{
 use crate::checkpoint::models::{
     AgentStateSnapshot, Checkpoint, CheckpointMetadata, ConversationSnapshot,
     ConversationStats, EnvironmentSnapshot, ExecutionContext, FileSystemSnapshot, ModelConfig,
-    ProcessInfo, ResourceUsage, ToolStateSnapshot,
+    ProcessInfo, ResourceUsage, SessionConstants, ToolStateSnapshot,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -649,7 +649,12 @@ impl SessionManager {
 
         // Create the session with description
         let session_storage = project_storage
-            .create_session_with_description(&session_id, description)
+            .create_session_with_description(&session_id, description, Some(SessionConstants {
+                task_description: Some(task_description.to_string()),
+                configuration: context.get_checkpoint_config(),
+                working_directory: Some(context.get_working_directory().display().to_string()),
+                max_iterations: 2000, // TODO: get from config
+            }))
             .await?;
 
         Ok(session_storage)

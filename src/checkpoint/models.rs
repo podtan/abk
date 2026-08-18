@@ -84,7 +84,7 @@ pub enum WorkflowStep {
 }
 
 impl std::fmt::Display for WorkflowStep {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         match self {
             WorkflowStep::Analyze => write!(f, "analyze"),
             WorkflowStep::Reproduce => write!(f, "reproduce"),
@@ -94,6 +94,24 @@ impl std::fmt::Display for WorkflowStep {
             WorkflowStep::Complete => write!(f, "complete"),
             WorkflowStep::Error => write!(f, "error"),
             WorkflowStep::Paused => write!(f, "paused"),
+        }
+    }
+}
+
+impl WorkflowStep {
+    /// Parse a step from its display name (the form used in checkpoint IDs,
+    /// e.g. `003_analyze` → `WorkflowStep::Analyze`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "analyze" => Some(WorkflowStep::Analyze),
+            "reproduce" => Some(WorkflowStep::Reproduce),
+            "propose" => Some(WorkflowStep::Propose),
+            "apply" => Some(WorkflowStep::Apply),
+            "verify" => Some(WorkflowStep::Verify),
+            "complete" => Some(WorkflowStep::Complete),
+            "error" => Some(WorkflowStep::Error),
+            "paused" => Some(WorkflowStep::Paused),
+            _ => None,
         }
     }
 }
@@ -336,6 +354,34 @@ pub struct SessionMetadata {
     pub description: Option<String>,  // Optional description
     pub tags: Vec<String>,            // User-defined tags
     pub size_bytes: u64,              // Total session size
+    /// Session-constant agent fields (written once at session start).
+    ///
+    /// These belong here — not in the append-only `agent_state.jsonl` log —
+    /// because they never change within a session, and a write-once file has
+    /// no staleness. Legacy sessions deserialize with the serde defaults.
+    #[serde(default)]
+    pub task_description: Option<String>,
+    #[serde(default)]
+    pub configuration: std::collections::HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub working_directory: Option<String>,
+    #[serde(default)]
+    pub max_iterations: u32,
+}
+
+/// Session-constant agent fields.
+///
+/// Written once to `session_metadata.json` at session creation. These are
+/// the parts of the legacy `AgentStateSnapshot` that never change within a
+/// session; a write-once file has no staleness. The mutable fields
+/// (`iteration`, `step`, `mode`) live in the append-only
+/// `agent_state.jsonl` log and the `checkpoints.json` index instead.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct SessionConstants {
+    pub task_description: Option<String>,
+    pub configuration: HashMap<String, serde_json::Value>,
+    pub working_directory: Option<String>,
+    pub max_iterations: u32,
 }
 
 /// Session status

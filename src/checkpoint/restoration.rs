@@ -761,6 +761,10 @@ impl CheckpointRestoration {
                 description: Some("Failed restoration".to_string()),
                 tags: vec![],
                 size_bytes: 0,
+                task_description: None,
+                configuration: std::collections::HashMap::new(),
+                working_directory: None,
+                max_iterations: 0,
             },
             restoration_metadata: RestorationMetadata {
                 restored_at: Utc::now(),

@@ -9,8 +9,9 @@ use super::{
     project_id_from_path,
 };
 use super::backend::{StorageBackend, StorageBackendExt};
+use super::agent_state_log::{AgentStateEntry, AgentStateLog};
 use super::conversation_log::ConversationLog;
-use super::models::{ChatMessage, ConversationStats, ModelConfig};
+use super::models::{ChatMessage, ConversationStats, ModelConfig, WorkflowStep};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,6 +38,26 @@ pub struct RemoteMessageDoc {
 /// Build the remote key for a single conversation message document.
 fn remote_message_key(session_key_prefix: &str, seq: u32) -> String {
     format!("{}/messages/{:05}.json", session_key_prefix, seq)
+}
+
+/// Build the remote key for a single agent state log entry.
+///
+/// Mirrors the local `agent_state.jsonl` one-doc-per-line layout under the
+/// session's `state/` prefix — a separate key space from `messages/`.
+fn remote_state_key(session_key_prefix: &str, seq: u32) -> String {
+    format!("{}/state/{:05}.json", session_key_prefix, seq)
+}
+
+/// Parse the iteration number from a checkpoint ID (`"{:03}_{step}"`).
+///
+/// Used to address the append-only agent-state doc for a checkpoint. Returns
+/// `None` for malformed IDs (the caller falls back to legacy sources).
+pub fn checkpoint_iteration(checkpoint_id: &str) -> Option<u32> {
+    checkpoint_id
+        .split('_')
+        .next()?
+        .parse::<u32>()
+        .ok()
 }
 
 /// Rebuild a `ConversationSnapshot` from a slice of messages.
@@ -696,19 +717,28 @@ impl ProjectStorage {
         &self.storage_mode
     }
 
-    /// Create a new session
+    /// Create a new session (no session-constant agent fields).
+    ///
+    /// Used by the resume path and other callers that do not own the session
+    /// constants (they are already recorded in `session_metadata.json`).
     pub async fn create_session(&self, session_id: &str) -> CheckpointResult<SessionStorage> {
-        self.create_session_with_description(session_id, None).await
+        self.create_session_with_description(session_id, None, None).await
     }
 
     /// Create a new session with an optional description.
     ///
     /// The description is stored in `SessionMetadata.description` and
     /// displayed in session browsers (TUI, Web UI).
+    ///
+    /// `constants` are the session-constant agent fields (task description,
+    /// configuration, working directory, max iterations). They are recorded
+    /// in `session_metadata.json` **once**, at session creation — a write-once
+    /// file has no staleness, so mutable state never lives here.
     pub async fn create_session_with_description(
         &self,
         session_id: &str,
         description: Option<String>,
+        constants: Option<super::models::SessionConstants>,
     ) -> CheckpointResult<SessionStorage> {
         use super::config::StorageMode;
 
@@ -717,7 +747,8 @@ impl ProjectStorage {
         let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
 
         // If the session directory already exists (resume scenario), read the
-        // existing metadata to preserve description/tags rather than overwriting with null.
+        // existing metadata to preserve description/tags/constants rather than
+        // overwriting with null.
         let metadata = if should_write_local {
             let metadata_path = session_path.join(SESSION_METADATA_FILENAME);
             if metadata_path.exists() {
@@ -734,46 +765,16 @@ impl ProjectStorage {
                     }
                     Err(_) => {
                         // File exists but corrupt — create fresh
-                        SessionMetadata {
-                            session_id: session_id.to_string(),
-                            project_hash: self.project_id.clone(),
-                            created_at: Utc::now(),
-                            last_accessed: Utc::now(),
-                            checkpoint_count: 0,
-                            status: SessionStatus::Active,
-                            description,
-                            tags: Vec::new(),
-                            size_bytes: 0,
-                        }
+                        Self::fresh_session_metadata(session_id, self.project_id.clone(), description, constants)
                     }
                 }
             } else {
                 // Fresh session — create new metadata
-                SessionMetadata {
-                    session_id: session_id.to_string(),
-                    project_hash: self.project_id.clone(),
-                    created_at: Utc::now(),
-                    last_accessed: Utc::now(),
-                    checkpoint_count: 0,
-                    status: SessionStatus::Active,
-                    description,
-                    tags: Vec::new(),
-                    size_bytes: 0,
-                }
+                Self::fresh_session_metadata(session_id, self.project_id.clone(), description, constants)
             }
         } else {
             // Remote-only mode — always create fresh
-            SessionMetadata {
-                session_id: session_id.to_string(),
-                project_hash: self.project_id.clone(),
-                created_at: Utc::now(),
-                last_accessed: Utc::now(),
-                checkpoint_count: 0,
-                status: SessionStatus::Active,
-                description,
-                tags: Vec::new(),
-                size_bytes: 0,
-            }
+            Self::fresh_session_metadata(session_id, self.project_id.clone(), description, constants)
         };
 
         // Create local directories only if using local storage
@@ -821,6 +822,38 @@ impl ProjectStorage {
         #[cfg(not(feature = "storage-documentdb"))]
         {
             SessionStorage::new(session_path, metadata).await
+        }
+    }
+
+    /// Build a fresh `SessionMetadata`, folding in the session-constant agent
+    /// fields (`constants`) when provided.
+    fn fresh_session_metadata(
+        session_id: &str,
+        project_id: String,
+        description: Option<String>,
+        constants: Option<super::models::SessionConstants>,
+    ) -> SessionMetadata {
+        SessionMetadata {
+            session_id: session_id.to_string(),
+            project_hash: project_id,
+            created_at: Utc::now(),
+            last_accessed: Utc::now(),
+            checkpoint_count: 0,
+            status: SessionStatus::Active,
+            description,
+            tags: Vec::new(),
+            size_bytes: 0,
+            task_description: constants
+                .as_ref()
+                .and_then(|c| c.task_description.clone()),
+            configuration: constants
+                .as_ref()
+                .map(|c| c.configuration.clone())
+                .unwrap_or_default(),
+            working_directory: constants
+                .as_ref()
+                .and_then(|c| c.working_directory.clone()),
+            max_iterations: constants.as_ref().map(|c| c.max_iterations).unwrap_or(0),
         }
     }
 
@@ -949,6 +982,10 @@ impl ProjectStorage {
                         description,
                         tags: Vec::new(),
                         size_bytes: 0,
+                        task_description: None,
+                        configuration: std::collections::HashMap::new(),
+                        working_directory: None,
+                        max_iterations: 0,
                     });
                 }
                 _ => {
@@ -968,6 +1005,10 @@ impl ProjectStorage {
                         description,
                         tags: Vec::new(),
                         size_bytes: 0,
+                        task_description: None,
+                        configuration: std::collections::HashMap::new(),
+                        working_directory: None,
+                        max_iterations: 0,
                     });
                 }
             }
@@ -1104,14 +1145,9 @@ pub struct SessionStorage {
     checkpoints: HashMap<String, CheckpointMetadata>,
     /// Storage mode: local, remote, or mirror
     storage_mode: super::config::StorageMode,
-    /// Tracks whether `session_agent.json` has been written to local disk
-    session_agent_written: bool,
     /// Optional remote storage backend for mirroring checkpoints
     #[cfg(feature = "storage-documentdb")]
     remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
-    /// Tracks whether `session_agent.json` has been written to remote backend
-    #[cfg(feature = "storage-documentdb")]
-    session_agent_remote_written: bool,
 }
 
 impl SessionStorage {
@@ -1119,20 +1155,13 @@ impl SessionStorage {
     pub async fn new(session_path: PathBuf, metadata: SessionMetadata) -> CheckpointResult<Self> {
         let checkpoints = load_checkpoint_index(&session_path).await?;
 
-        // Check if session_agent.json already exists (from prior runs)
-        let session_agent_path = session_path.join("session_agent.json");
-        let session_agent_written = session_agent_path.exists();
-
         Ok(Self {
             session_path,
             metadata,
             checkpoints,
             storage_mode: super::config::StorageMode::Local,
-            session_agent_written,
             #[cfg(feature = "storage-documentdb")]
             remote_backend: None,
-            #[cfg(feature = "storage-documentdb")]
-            session_agent_remote_written: false,
         })
     }
     
@@ -1152,18 +1181,12 @@ impl SessionStorage {
             load_checkpoint_index(&session_path).await?
         };
 
-        // Check if session_agent.json already exists on local disk
-        let session_agent_path = session_path.join("session_agent.json");
-        let session_agent_written = session_agent_path.exists();
-
         Ok(Self {
             session_path,
             metadata,
             checkpoints,
             storage_mode,
-            session_agent_written,
             remote_backend,
-            session_agent_remote_written: false,
         })
     }
     
@@ -1224,11 +1247,21 @@ impl SessionStorage {
 
         // Write to local files if configured
         if should_write_local {
-            // 1. Per-checkpoint agent state (fixes session_agent.json staleness:
-            //    agent state changes every iteration, so it must be captured per
-            //    checkpoint, not written once).
-            let agent_file = self.session_path.join(format!("{}_agent.json", checkpoint_id));
-            AtomicOps::write_json(&agent_file, &checkpoint.agent_state)?;
+            // 1. Append-only agent state log: one compact line per checkpoint.
+            //    Replaces the per-checkpoint `{NNN}_agent.json` files, which
+            //    were ~95% redundant: the mutable fields (iteration/step/mode)
+            //    are also in the checkpoints index, and the session constants
+            //    (task/config/working dir) live in session_metadata.json.
+            let state_log = AgentStateLog::new(&self.session_path);
+            let state_entry = AgentStateEntry {
+                seq: checkpoint.agent_state.current_iteration,
+                checkpoint_id: checkpoint_id.clone(),
+                iteration: checkpoint.agent_state.current_iteration,
+                step: checkpoint.agent_state.current_step.to_string(),
+                mode: checkpoint.agent_state.current_mode.clone(),
+                ts: Utc::now(),
+            };
+            state_log.append(&state_entry)?;
 
             // 2. Append-only conversation log: append only the NEW messages beyond
             //    the current high-water mark. The log is never rewritten or truncated.
@@ -1254,13 +1287,21 @@ impl SessionStorage {
             if let Some(ref backend) = self.remote_backend {
                 let project_hash = &self.metadata.project_hash;
                 let session_key_prefix = format!("projects/{}/sessions/{}", project_hash, session_id);
-                let ckpt_key_prefix = format!("{}/checkpoints/{}", session_key_prefix, checkpoint_id);
 
-                // 1. Per-checkpoint agent state (mirrors local layout)
-                let agent_key = format!("{}_agent.json", ckpt_key_prefix);
-                if let Err(e) = backend.write_json(&agent_key, &checkpoint.agent_state).await {
+                // 1. Append-only agent state docs: pure inserts (mirrors the
+                //    local `agent_state.jsonl`), one doc per checkpoint.
+                let state_entry = AgentStateEntry {
+                    seq: checkpoint.agent_state.current_iteration,
+                    checkpoint_id: checkpoint_id.clone(),
+                    iteration: checkpoint.agent_state.current_iteration,
+                    step: checkpoint.agent_state.current_step.to_string(),
+                    mode: checkpoint.agent_state.current_mode.clone(),
+                    ts: Utc::now(),
+                };
+                let state_key = remote_state_key(&session_key_prefix, state_entry.seq);
+                if let Err(e) = backend.write_json(&state_key, &state_entry).await {
                     crate::observability::tee_eprintln(
-                        &format!("[checkpoint] Warning: Failed to write agent state to remote backend: {}", e)
+                        &format!("[checkpoint] Warning: Failed to write agent state doc to remote backend: {}", e)
                     );
                 }
 
@@ -1372,6 +1413,56 @@ impl SessionStorage {
         })
     }
     
+    /// Load agent state from local files for a checkpoint.
+    ///
+    /// Resolution order (newest → oldest):
+    /// 1. **Append-only state log** — the `agent_state.jsonl` line whose
+    ///    `checkpoint_id` matches (the current layout).
+    /// 2. **Legacy per-checkpoint** — `{id}_agent.json`.
+    /// 3. **Legacy session-level** — `session_agent.json`.
+    ///
+    /// Returns `Ok(None)` if no source has agent state for this checkpoint.
+    async fn load_agent_state_local(&self, checkpoint_id: &str) -> CheckpointResult<Option<AgentStateSnapshot>> {
+        // 1. Append-only state log (new layout).
+        let state_log = AgentStateLog::new(&self.session_path);
+        if state_log.exists() {
+            if let Some(entry) = state_log.read_all()?.iter().find(|e| e.checkpoint_id == checkpoint_id) {
+                let step = WorkflowStep::from_name(&entry.step).unwrap_or(WorkflowStep::Analyze);
+                return Ok(Some(AgentStateSnapshot {
+                    current_mode: entry.mode.clone(),
+                    current_iteration: entry.iteration,
+                    current_step: step,
+                    // Session constants live in session_metadata.json (write-once).
+                    max_iterations: self.metadata.max_iterations,
+                    task_description: self.metadata.task_description.clone().unwrap_or_default(),
+                    configuration: self.metadata.configuration.clone(),
+                    working_directory: self
+                        .metadata
+                        .working_directory
+                        .as_ref()
+                        .map(PathBuf::from)
+                        .unwrap_or_default(),
+                    session_start_time: self.metadata.created_at,
+                    last_activity: entry.ts,
+                }));
+            }
+        }
+
+        // 2. Legacy per-checkpoint agent file.
+        let agent_file = self.session_path.join(format!("{}_agent.json", checkpoint_id));
+        if agent_file.exists() {
+            return Ok(Some(load_json(&agent_file).await?));
+        }
+
+        // 3. Legacy session-level agent file.
+        let session_agent_path = self.session_path.join("session_agent.json");
+        if session_agent_path.exists() {
+            return Ok(Some(load_json(&session_agent_path).await?));
+        }
+
+        Ok(None)
+    }
+
     /// Try to load checkpoint from local files
     ///
     /// Supports four layouts:
@@ -1396,31 +1487,25 @@ impl SessionStorage {
                 load_json(&metadata_file).await?
             };
 
-            // cursor_seq == 0 means this checkpoint was written before the
-            // append-only format existed (legacy metadata deserializes with
-            // the serde default). In a mixed session (legacy checkpoints plus
-            // a jsonl created after upgrade+resume), such checkpoints must be
-            // loaded from their legacy `{id}_conversation.json` file below —
-            // reading the jsonl up to cursor 0 would yield no messages.
-            if metadata.cursor_seq > 0 {
-                // Read messages up to the checkpoint's cursor from the append-only log.
-                let messages = log.read_up_to(metadata.cursor_seq)?;
-                let conversation_state = snapshot_from_messages(messages);
+             // cursor_seq == 0 means this checkpoint was written before the
+             // append-only format existed (legacy metadata deserializes with
+             // the serde default). In a mixed session (legacy checkpoints plus
+             // a jsonl created after upgrade+resume), such checkpoints must be
+             // loaded from their legacy `{id}_conversation.json` file below —
+             // reading the jsonl up to cursor 0 would yield no messages.
+             if metadata.cursor_seq > 0 {
+                 // Read messages up to the checkpoint's cursor from the append-only log.
+                 let messages = log.read_up_to(metadata.cursor_seq)?;
+                 let conversation_state = snapshot_from_messages(messages);
 
-                // Agent state: per-checkpoint file (new layout), fallback to session-level.
-                let agent_file = self.session_path.join(format!("{}_agent.json", checkpoint_id));
-                let agent_state: AgentStateSnapshot = if agent_file.exists() {
-                    load_json(&agent_file).await?
-                } else {
-                    let session_agent_path = self.session_path.join("session_agent.json");
-                    if !session_agent_path.exists() {
-                        return Ok(None); // Missing agent state — not found
-                    }
-                    load_json(&session_agent_path).await?
-                };
-
-                return Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)));
-            }
+                  // Agent state: append-only state log line for this checkpoint
+                  // (new layout), falling back to the legacy per-checkpoint and
+                  // session-level files for sessions created before this layout.
+                  let agent_state = self.load_agent_state_local(checkpoint_id).await?;
+                 if let Some(agent_state) = agent_state {
+                     return Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)));
+                 }
+             }
         }
 
         // --- Legacy optimized layout: conversation file exists ---
@@ -1431,46 +1516,38 @@ impl SessionStorage {
         if conversation_file.exists() {
             let conversation_state: ConversationSnapshot = load_json(&conversation_file).await?;
 
-            // Load agent state: session_agent.json first, fallback to per-checkpoint
-            let session_agent_path = self.session_path.join("session_agent.json");
-            let agent_state: AgentStateSnapshot = if session_agent_path.exists() {
-                load_json(&session_agent_path).await?
-            } else {
-                // Legacy: per-checkpoint agent file
-                let agent_file = self
-                    .session_path
-                    .join(format!("{}_agent.json", checkpoint_id));
-                if !agent_file.exists() {
-                    return Ok(None); // Missing agent state — not found
-                }
-                load_json(&agent_file).await?
-            };
-
-            // Load metadata: in-memory index first, fallback to per-checkpoint file
-            let metadata: CheckpointMetadata = if let Some(m) = self.checkpoints.get(checkpoint_id) {
-                m.clone()
-            } else {
-                // Legacy: per-checkpoint metadata file
-                let metadata_file = self
-                    .session_path
-                    .join(format!("{}_metadata.json", checkpoint_id));
-                if !metadata_file.exists() {
-                    // Last resort: try checkpoints.json
-                    if let Ok(index) = load_checkpoint_index(&self.session_path).await {
-                        if let Some(m) = index.get(checkpoint_id) {
-                            m.clone()
+            // Load agent state (legacy sources): session_agent.json first,
+            // then the per-checkpoint file.
+            let agent_state = self.load_agent_state_local(checkpoint_id).await?;
+            if let Some(agent_state) = agent_state {
+                // Load metadata: in-memory index first, fallback to per-checkpoint file
+                let metadata: CheckpointMetadata = if let Some(m) = self.checkpoints.get(checkpoint_id) {
+                    m.clone()
+                } else {
+                    // Legacy: per-checkpoint metadata file
+                    let metadata_file = self
+                        .session_path
+                        .join(format!("{}_metadata.json", checkpoint_id));
+                    if !metadata_file.exists() {
+                        // Last resort: try checkpoints.json
+                        if let Ok(index) = load_checkpoint_index(&self.session_path).await {
+                            if let Some(m) = index.get(checkpoint_id) {
+                                m.clone()
+                            } else {
+                                return Ok(None);
+                            }
                         } else {
                             return Ok(None);
                         }
                     } else {
-                        return Ok(None);
+                        load_json(&metadata_file).await?
                     }
-                } else {
-                    load_json(&metadata_file).await?
-                }
-            };
+                };
 
-            return Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)));
+                return Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)));
+            }
+            // No agent state found in legacy sources
+            return Ok(None);
         }
 
         // Fall back to V1 single-file format
@@ -1558,7 +1635,7 @@ impl SessionStorage {
                 .await
                 .unwrap_or(false);
 
-        let (conversation_state, agent_state) = if new_layout {
+        let conversation_state: ConversationSnapshot = if new_layout {
             // Range read: messages with seq <= cursor (pure inserts, no re-upload).
             let mut messages = Vec::with_capacity(cursor as usize);
             for seq in 1..=cursor {
@@ -1571,28 +1648,7 @@ impl SessionStorage {
                     }
                 }
             }
-            let conversation_state = snapshot_from_messages(messages);
-
-            // Agent state: per-checkpoint file (new layout), fallback to session-level.
-            let agent_state: AgentStateSnapshot =
-                match backend.read_json(&format!("{}_agent.json", ckpt_key_prefix)).await {
-                    Ok(a) => a,
-                    Err(StorageError::NotFound(_)) => {
-                        // Fallback: session-level agent (legacy)
-                        match backend.read_json(&format!("{}/session_agent.json", session_key_prefix)).await {
-                            Ok(a) => a,
-                            Err(e) => {
-                                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}: {}", checkpoint_id, e));
-                                return Ok(None);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read agent state from remote: {}", e));
-                        return Ok(None);
-                    }
-                };
-            (conversation_state, agent_state)
+            snapshot_from_messages(messages)
         } else {
             // Legacy per-checkpoint conversation file.
             let conversation_state: ConversationSnapshot =
@@ -1604,36 +1660,87 @@ impl SessionStorage {
                         return Ok(None);
                     }
                 };
+            conversation_state
+        };
 
-            // Agent state: session_agent.json first, fallback to per-checkpoint.
-            let agent_state: AgentStateSnapshot =
-                match backend.read_json(&format!("{}/session_agent.json", session_key_prefix)).await {
-                    Ok(a) => a,
-                    Err(StorageError::NotFound(_)) => {
-                        match backend.read_json(&format!("{}_agent.json", ckpt_key_prefix)).await {
-                            Ok(a) => a,
-                            Err(StorageError::NotFound(_)) => {
-                                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}", checkpoint_id));
-                                return Ok(None);
-                            }
-                            Err(e) => {
-                                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read agent state from remote: {}", e));
-                                return Ok(None);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read session agent state from remote: {}", e));
-                        return Ok(None);
-                    }
-                };
-            (conversation_state, agent_state)
+        // Agent state: append-only state docs (new layout) → legacy per-checkpoint
+        // `{id}_agent.json` → legacy session-level `session_agent.json`.
+        let agent_state: AgentStateSnapshot = match self
+            .load_agent_state_remote(backend, &session_key_prefix, &ckpt_key_prefix, checkpoint_id)
+            .await?
+        {
+            Some(a) => a,
+            None => return Ok(None),
         };
 
         crate::observability::tee_eprintln(&format!("[checkpoint] ✅ Loaded checkpoint {} from remote storage", checkpoint_id));
         Ok(Some(Self::build_checkpoint(metadata, agent_state, conversation_state)))
     }
-    
+
+    /// Load agent state from the remote backend for a checkpoint.
+    ///
+    /// Resolution order (newest → oldest):
+    /// 1. **Append-only state docs** — `state/{seq:05}.json` whose
+    ///    `checkpoint_id` matches (the current layout).
+    /// 2. **Legacy per-checkpoint** — `{id}_agent.json`.
+    /// 3. **Legacy session-level** — `session_agent.json`.
+    ///
+    /// Returns `Ok(None)` when no source has agent state (mirrors the
+    /// existing remote read behavior of treating read failures as "not found").
+    #[cfg(feature = "storage-documentdb")]
+    async fn load_agent_state_remote(
+        &self,
+        backend: &Arc<dyn StorageBackend + Send + Sync>,
+        session_key_prefix: &str,
+        ckpt_key_prefix: &str,
+        checkpoint_id: &str,
+    ) -> CheckpointResult<Option<AgentStateSnapshot>> {
+        use crate::checkpoint::backend::StorageError;
+
+        // 1. Append-only state docs (new layout).
+        let state_key = remote_state_key(session_key_prefix, checkpoint_iteration(checkpoint_id).unwrap_or(0));
+        if let Ok(entry) = backend.read_json::<AgentStateEntry>(&state_key).await {
+            if entry.checkpoint_id == checkpoint_id {
+                let step = WorkflowStep::from_name(&entry.step).unwrap_or(WorkflowStep::Analyze);
+                return Ok(Some(AgentStateSnapshot {
+                    current_mode: entry.mode.clone(),
+                    current_iteration: entry.iteration,
+                    current_step: step,
+                    max_iterations: self.metadata.max_iterations,
+                    task_description: self.metadata.task_description.clone().unwrap_or_default(),
+                    configuration: self.metadata.configuration.clone(),
+                    working_directory: self
+                        .metadata
+                        .working_directory
+                        .as_ref()
+                        .map(PathBuf::from)
+                        .unwrap_or_default(),
+                    session_start_time: self.metadata.created_at,
+                    last_activity: entry.ts,
+                }));
+            }
+        }
+
+        // 2. Legacy per-checkpoint agent file.
+        match backend.read_json(&format!("{}_agent.json", ckpt_key_prefix)).await {
+            Ok(a) => return Ok(Some(a)),
+            Err(StorageError::NotFound(_)) => {}
+            Err(e) => {
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to read per-checkpoint agent state from remote: {}", e));
+                return Ok(None);
+            }
+        }
+
+        // 3. Legacy session-level agent file.
+        match backend.read_json(&format!("{}/session_agent.json", session_key_prefix)).await {
+            Ok(a) => Ok(Some(a)),
+            Err(e) => {
+                crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Agent state missing in remote for checkpoint {}: {}", checkpoint_id, e));
+                Ok(None)
+            }
+        }
+    }
+
     /// Build a Checkpoint with default values for optional fields
     fn build_checkpoint(metadata: CheckpointMetadata, agent_state: AgentStateSnapshot, conversation_state: ConversationSnapshot) -> Checkpoint {
         use super::models::{
@@ -2221,6 +2328,10 @@ mod tests {
             description: Some("Test session".to_string()),
             tags: vec![],
             size_bytes: 1024,
+            task_description: None,
+            configuration: std::collections::HashMap::new(),
+            working_directory: None,
+            max_iterations: 0,
         }
     }
 
@@ -2433,6 +2544,10 @@ mod tests {
             size_bytes: 1024,
             description: Some("Old session".to_string()),
             tags: vec![],
+            task_description: None,
+            configuration: std::collections::HashMap::new(),
+            working_directory: None,
+            max_iterations: 0,
         };
 
         let active_session = SessionMetadata {
@@ -2445,6 +2560,10 @@ mod tests {
             size_bytes: 512,
             description: Some("Active session".to_string()),
             tags: vec![],
+            task_description: None,
+            configuration: std::collections::HashMap::new(),
+            working_directory: None,
+            max_iterations: 0,
         };
 
         let tagged_session = SessionMetadata {
@@ -2457,6 +2576,10 @@ mod tests {
             size_bytes: 256,
             description: Some("Tagged session".to_string()),
             tags: vec!["important".to_string()],
+            task_description: None,
+            configuration: std::collections::HashMap::new(),
+            working_directory: None,
+            max_iterations: 0,
         };
 
         let retention_policy = RetentionPolicy {
