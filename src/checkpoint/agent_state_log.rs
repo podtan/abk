@@ -113,6 +113,22 @@ impl AgentStateLog {
         self.write_lines(&[entry.to_json_line()?])
     }
 
+    /// Append a state entry **only if** no line with the same `checkpoint_id`
+    /// already exists.
+    ///
+    /// A checkpoint's state is fixed by its id (`{NNN}_{step}`), so re-saving
+    /// the same checkpoint must be a no-op — otherwise the append-only log
+    /// would accumulate a second line for the same checkpoint (non-unique seq,
+    /// and a line count that no longer matches the checkpoint index). This
+    /// makes the log **one line per distinct checkpoint**, parallel to
+    /// `checkpoints.json`.
+    pub fn append_if_absent(&self, entry: &AgentStateEntry) -> CheckpointResult<()> {
+        if self.read_all()?.iter().any(|e| e.checkpoint_id == entry.checkpoint_id) {
+            return Ok(()); // already present — idempotent no-op
+        }
+        self.append(entry)
+    }
+
     /// Low-level append of pre-serialized lines with a single sync.
     fn write_lines(&self, lines: &[String]) -> CheckpointResult<()> {
         let mut file = std::fs::OpenOptions::new()
@@ -267,6 +283,33 @@ mod tests {
         // latest is still the first complete entry.
         let latest = log.read_latest().unwrap().unwrap();
         assert_eq!(latest.seq, 1);
+    }
+
+    #[test]
+    fn test_append_if_absent_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        let log = AgentStateLog::new(tmp.path());
+
+        // First append writes the line.
+        log.append_if_absent(&make_entry(1, 1)).unwrap();
+        assert_eq!(log.count().unwrap(), 1);
+
+        // Re-saving the SAME checkpoint (same checkpoint_id) is a no-op —
+        // even if the caller recomputes a different seq.
+        let duplicate = AgentStateEntry {
+            seq: 99,
+            checkpoint_id: "001_analyze".to_string(),
+            iteration: 1,
+            step: "analyze".to_string(),
+            mode: "confirm".to_string(),
+            ts: Utc::now(),
+        };
+        log.append_if_absent(&duplicate).unwrap();
+        assert_eq!(log.count().unwrap(), 1, "re-saving a checkpoint must not add a line");
+
+        // A DIFFERENT checkpoint still appends.
+        log.append_if_absent(&make_entry(2, 2)).unwrap();
+        assert_eq!(log.count().unwrap(), 2);
     }
 
     #[test]

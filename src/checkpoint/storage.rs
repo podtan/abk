@@ -1247,11 +1247,19 @@ impl SessionStorage {
 
         // Write to local files if configured
         if should_write_local {
-            // 1. Append-only agent state log: one compact line per checkpoint.
-            //    Replaces the per-checkpoint `{NNN}_agent.json` files, which
-            //    were ~95% redundant: the mutable fields (iteration/step/mode)
-            //    are also in the checkpoints index, and the session constants
-            //    (task/config/working dir) live in session_metadata.json.
+            // 1. Append-only agent state log: one compact line per DISTINCT
+            //    checkpoint. Replaces the per-checkpoint `{NNN}_agent.json`
+            //    files, which were ~95% redundant: the mutable fields
+            //    (iteration/step/mode) are also in the checkpoints index, and
+            //    the session constants (task/config/working dir) live in
+            //    session_metadata.json.
+            //
+            //    `seq` = the checkpoint's iteration (unique per distinct
+            //    checkpoint — one checkpoint per iteration), matching the
+            //    remote doc key. The append is idempotent per `checkpoint_id`,
+            //    so re-saving a checkpoint never adds a second line (the log
+            //    stays parallel to the checkpoints index). Addressing is by
+            //    `checkpoint_id`, never by seq.
             let state_log = AgentStateLog::new(&self.session_path);
             let state_entry = AgentStateEntry {
                 seq: checkpoint.agent_state.current_iteration,
@@ -1261,7 +1269,7 @@ impl SessionStorage {
                 mode: checkpoint.agent_state.current_mode.clone(),
                 ts: Utc::now(),
             };
-            state_log.append(&state_entry)?;
+            state_log.append_if_absent(&state_entry)?;
 
             // 2. Append-only conversation log: append only the NEW messages beyond
             //    the current high-water mark. The log is never rewritten or truncated.
@@ -1288,8 +1296,10 @@ impl SessionStorage {
                 let project_hash = &self.metadata.project_hash;
                 let session_key_prefix = format!("projects/{}/sessions/{}", project_hash, session_id);
 
-                // 1. Append-only agent state docs: pure inserts (mirrors the
-                //    local `agent_state.jsonl`), one doc per checkpoint.
+                // 1. Agent state doc (one per DISTINCT checkpoint), keyed by
+                //    `seq` = iteration — idempotent: re-saving a checkpoint
+                //    overwrites the same doc (no duplicates). Mirrors the
+                //    local `agent_state.jsonl` line.
                 let state_entry = AgentStateEntry {
                     seq: checkpoint.agent_state.current_iteration,
                     checkpoint_id: checkpoint_id.clone(),
