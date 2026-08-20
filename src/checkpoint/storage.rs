@@ -1232,18 +1232,53 @@ impl SessionStorage {
         let checkpoint_id = &checkpoint.metadata.checkpoint_id;
         let session_id = &self.metadata.session_id;
         let messages = &checkpoint.conversation_state.messages;
-        // Cursor = total message count at this checkpoint (linear history).
+        // Number of messages this checkpoint carries (its own branch length).
         let total = messages.len();
-        let cursor_seq = total as u32;
 
         let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
         let should_write_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+
+        // --- Fork detection -------------------------------------------------
+        // The session's append-only `conversation.jsonl` is a SHARED mainline
+        // log. A checkpoint is on the mainline iff it EXTENDS the log: its
+        // message count (`total`) is at least the mainline high-water mark
+        // (`hwm`).
+        //
+        // A checkpoint resumed from a NON-latest checkpoint and continued from
+        // there holds a diverged branch — its messages do NOT extend the log
+        // (`total < hwm`). Appending such a fork to the shared log would write
+        // the branch into the mainline at the wrong sequence numbers (silent
+        // corruption); instead the fork is persisted as a full
+        // `{NNN}_conversation.json` snapshot with `cursor_seq = 0`, which the
+        // existing legacy fallback reader loads. Linear sessions are unchanged.
+        //
+        // The mainline hwm comes from the local `conversation.jsonl` in
+        // Local/Mirror mode (the authoritative shared log). In Remote-only mode
+        // there is no local log, so the mainline is the set of message docs
+        // already indexed — the max `cursor_seq` across the index.
+        let log = ConversationLog::new(&self.session_path);
+        let local_hwm = log.count()?;
+        let remote_hwm = self
+            .checkpoints
+            .values()
+            .map(|m| m.cursor_seq)
+            .max()
+            .unwrap_or(0) as usize;
+        let hwm = if should_write_remote && !should_write_local {
+            remote_hwm
+        } else {
+            local_hwm
+        };
+        let is_fork = total < hwm;
+        // Cursor = total message count for a linear checkpoint; a fork has no
+        // mainline cursor (0 → load from the `{NNN}_conversation.json` snapshot).
+        let cursor_seq = if is_fork { 0 } else { total as u32 };
 
         // Stamp the cursor onto the metadata so the index (local + remote)
         // records it. Old-format checkpoints deserialize with cursor_seq=0.
         let mut metadata = checkpoint.metadata.clone();
         metadata.cursor_seq = cursor_seq;
-        metadata.message_count = cursor_seq;
+        metadata.message_count = total as u32;
 
         // Write to local files if configured
         if should_write_local {
@@ -1271,11 +1306,28 @@ impl SessionStorage {
             };
             state_log.append_if_absent(&state_entry)?;
 
-            // 2. Append-only conversation log: append only the NEW messages beyond
-            //    the current high-water mark. The log is never rewritten or truncated.
-            let log = ConversationLog::new(&self.session_path);
-            let hwm = log.count()?;
-            if total > hwm {
+            // 2. Conversation persistence.
+            //
+            // - **Linear** (`total >= hwm`): append only the NEW messages
+            //   beyond the current high-water mark. The log is never rewritten
+            //   or truncated.
+            // - **Fork** (`total < hwm`): the checkpoint's messages diverge
+            //   from the mainline, so they must NOT be appended to the shared
+            //   log (that would corrupt the mainline at the wrong seq). Instead
+            //   write a full `{NNN}_conversation.json` snapshot; the loader
+            //   reads it via the legacy fallback (cursor_seq = 0).
+            if is_fork {
+                AtomicOps::write_json(
+                    &self.get_checkpoint_path(checkpoint_id),
+                    &checkpoint.conversation_state,
+                )?;
+                crate::observability::tee_eprintln(
+                    &format!(
+                        "[checkpoint] 🍴 Forked checkpoint {} saved as full conversation snapshot (not appended to mainline)",
+                        checkpoint_id
+                    )
+                );
+            } else if total > hwm {
                 let entries: Vec<(u32, &ChatMessage)> = messages[hwm..total]
                     .iter()
                     .enumerate()
@@ -1315,17 +1367,26 @@ impl SessionStorage {
                     );
                 }
 
-                // 2. Append-only per-message docs: pure inserts beyond hwm.
-                //    The remote high-water mark is the max cursor already indexed.
-                let hwm = self
-                    .checkpoints
-                    .values()
-                    .map(|m| m.cursor_seq)
-                    .max()
-                    .unwrap_or(0) as usize;
-                if total > hwm {
-                    for (i, msg) in messages[hwm..total].iter().enumerate() {
-                        let seq = hwm as u32 + 1 + i as u32;
+                // 2. Conversation persistence (mirrors the local logic).
+                //    - **Linear** (`total >= remote hwm`): pure inserts of the
+                //      NEW message docs beyond the mainline high-water mark
+                //      (the max cursor already indexed).
+                //    - **Fork** (`total < remote hwm`): the branch diverges, so
+                //      it is written as a full `{NNN}_conversation.json` snapshot
+                //      (the legacy per-checkpoint remote key the loader reads).
+                let ckpt_key_prefix = format!("{}/checkpoints/{}", session_key_prefix, checkpoint_id);
+                if is_fork {
+                    if let Err(e) = backend
+                        .write_json(&format!("{}_conversation.json", ckpt_key_prefix), &checkpoint.conversation_state)
+                        .await
+                    {
+                        crate::observability::tee_eprintln(
+                            &format!("[checkpoint] Warning: Failed to write fork conversation snapshot to remote: {}", e)
+                        );
+                    }
+                } else if total > remote_hwm {
+                    for (i, msg) in messages[remote_hwm..total].iter().enumerate() {
+                        let seq = remote_hwm as u32 + 1 + i as u32;
                         let doc = RemoteMessageDoc { seq, message: msg.clone() };
                         let key = remote_message_key(&session_key_prefix, seq);
                         if let Err(e) = backend.write_json(&key, &doc).await {

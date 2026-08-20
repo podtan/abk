@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-08-20
+
+### Fixed
+- **fix(checkpoint): divergent-resume fork silently corrupted the shared conversation log** — Resuming a **non-latest** checkpoint and continuing from it forks the conversation: the new branch's messages do **not** extend the session's append-only `conversation.jsonl` (they diverged from the mainline). `save_checkpoint` only appended when `total > hwm`, so a forked checkpoint (`total < hwm`) indexed a cursor pointing at the **mainline** messages and the branch was silently lost on reload — a fresh `load_checkpoint` returned the first `total` mainline lines instead of the diverged branch, with no error. The fix detects a fork (`total < hwm`) and, instead of appending the branch to the shared log (which would corrupt the mainline at the wrong sequence numbers), persists it as a full `{NNN}_conversation.json` snapshot with `cursor_seq = 0` — exactly the layout the existing legacy fallback reader loads. The shared `conversation.jsonl` is never rewritten or truncated, and linear sessions (`total >= hwm`) are unchanged. Applied to **both** the local path and the remote (DocumentDB) path: the remote fork writes the full snapshot to the legacy per-checkpoint key (`{prefix}/checkpoints/{id}_conversation.json`) instead of inserting the branch as per-message docs. `message_count` now records the checkpoint's own message count (the branch length) even when `cursor_seq = 0`. New E2E test `tests/divergent_resume.rs`: a linear-history baseline (green), the divergent-resume repro (was failing, proving the bug), and a shared-log integrity check (the fork must not append to the mainline).
+
 ## [0.13.0] - 2026-08-17
 
 ### Added
