@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2026-08-20
+
+### Fixed
+- **fix(checkpoint): lineage check — forks that outgrow the mainline no longer pollute the shared log** — The 0.13.1 fork detection was a **length-only** heuristic (`is_fork = total < hwm`), which was wrong in two ways: (A) a fork resumed from an earlier checkpoint keeps appending on its branch and can **outgrow** the mainline (`total >= hwm`) — the length check then classified it as linear and appended the branch's messages at `seq = hwm+1`, **overwriting the mainline's own messages** at those sequence numbers (silent corruption of the shared `conversation.jsonl`); (B) the **tie** case `total == hwm` defaulted to linear, so a diverged branch of exactly the mainline length indexed `cursor_seq = hwm` and reloaded the **mainline prefix** instead of the branch. The fix compares **lineage**: a checkpoint is linear only if `total >= hwm` **AND** its first `hwm` messages are identical to the mainline's first `hwm` messages (new `messages_same_lineage()` helper — compares `role` + `content` + `tool_call_id` + `name`; volatile fields `timestamp`/`token_count`/`reasoning` are ignored). The mainline prefix is read from the local `conversation.jsonl` (`ConversationLog::read_up_to(hwm)`) in Local/Mirror mode, or from the remote per-message docs (range read `seq = 1..=hwm`) in Remote-only mode; any gap or read failure is treated as a fork (conservative — never corrupts the mainline). Fork semantics from 0.13.1 are unchanged: full `{NNN}_conversation.json` snapshot with `cursor_seq = 0` (remote: legacy per-checkpoint key). Linear checkpoints (`total == hwm` with matching content) still append nothing and keep their cursor. Known limitation: a long-lived fork re-saves the **full** branch snapshot on every checkpoint (O(N²) within the branch); per-branch logs are a future enhancement. New tests in `tests/divergent_resume.rs`: fork-outgrows-mainline (was failing), exact-length tie (was failing), and a same-content equal-length control (must stay linear).
+
 ## [0.13.1] - 2026-08-20
 
 ### Fixed

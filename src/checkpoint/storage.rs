@@ -90,6 +90,25 @@ fn snapshot_from_messages(messages: Vec<ChatMessage>) -> ConversationSnapshot {
     }
 }
 
+/// Compare two message slices by their stable identity fields (role, content,
+/// tool_call_id, name). Volatile fields (timestamp, token_count, reasoning)
+/// are ignored — they are not part of lineage identity and differ across
+/// re-saves of the same conversation.
+///
+/// Used by the lineage check in `save_checkpoint` to decide whether a
+/// checkpoint EXTENDS the mainline (linear) or diverges from it (fork).
+fn messages_same_lineage(a: &[ChatMessage], b: &[ChatMessage]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).all(|(x, y)| {
+        x.role == y.role
+            && x.content == y.content
+            && x.tool_call_id == y.tool_call_id
+            && x.name == y.name
+    })
+}
+
 /// Global checkpoint storage manager
 pub struct CheckpointStorageManager {
     home_dir: PathBuf, // ~/.{agent_name}/
@@ -1269,10 +1288,67 @@ impl SessionStorage {
         } else {
             local_hwm
         };
-        let is_fork = total < hwm;
+        // A checkpoint is on the mainline only if it EXTENDS the log AND its
+        // first `hwm` messages are IDENTICAL to the mainline's first `hwm`
+        // messages (lineage check). Length alone is insufficient:
+        //   - a fork resumed from an earlier checkpoint keeps appending and can
+        //     OUTGROW the mainline (`total >= hwm` but different content) —
+        //     appending it at seq `hwm+1` would overwrite the mainline's own
+        //     messages (silent corruption);
+        //   - the `total == hwm` tie is decided by content, not by length.
+        // We read the mainline prefix from the local log in Local/Mirror mode
+        // (the authoritative shared log) or from the remote message docs in
+        // Remote-only mode. Any gap or read failure → treated as a fork
+        // (conservative: never corrupts the mainline).
+        let is_fork = if total < hwm {
+            true
+        } else {
+            let mainline_prefix = if should_write_remote && !should_write_local {
+                #[cfg(feature = "storage-documentdb")]
+                {
+                    if let Some(ref backend) = self.remote_backend {
+                        let project_hash = &self.metadata.project_hash;
+                        let session_key_prefix =
+                            format!("projects/{}/sessions/{}", project_hash, session_id);
+                        let mut prefix = Vec::with_capacity(hwm);
+                        let mut intact = true;
+                        for seq in 1..=hwm as u32 {
+                            match backend
+                                .read_json::<RemoteMessageDoc>(&remote_message_key(
+                                    &session_key_prefix,
+                                    seq,
+                                ))
+                                .await
+                            {
+                                Ok(doc) => prefix.push(doc.message),
+                                Err(_) => {
+                                    intact = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if intact {
+                            prefix
+                        } else {
+                            Vec::new() // gap/failure → mismatch → fork
+                        }
+                    } else {
+                        Vec::new() // no backend → errors out later; fork meanwhile
+                    }
+                }
+                #[cfg(not(feature = "storage-documentdb"))]
+                { Vec::new() }
+            } else {
+                log.read_up_to(hwm as u32).unwrap_or_default()
+            };
+            mainline_prefix.len() != hwm
+                || !messages_same_lineage(&messages[..hwm], &mainline_prefix)
+        };
         // Cursor = total message count for a linear checkpoint; a fork has no
         // mainline cursor (0 → load from the `{NNN}_conversation.json` snapshot).
         let cursor_seq = if is_fork { 0 } else { total as u32 };
+        // (Lineage check above: `is_fork` is true both for shorter branches and
+        // for branches that outgrow the mainline with different content.)
 
         // Stamp the cursor onto the metadata so the index (local + remote)
         // records it. Old-format checkpoints deserialize with cursor_seq=0.

@@ -11,7 +11,8 @@
 //! `total > hwm`, so a forked checkpoint indexed a cursor pointing at the
 //! WRONG (mainline) messages and the branch was silently lost on reload.
 //!
-//! Run with: cargo test --features checkpoint --test divergent_resume
+//! Run with:
+//! cargo test --features "cli,orchestration,agent,observability,checkpoint,storage-documentdb" --test divergent_resume
 
 use std::path::PathBuf;
 
@@ -360,4 +361,193 @@ async fn fork_from_earlier_checkpoint_does_not_corrupt_shared_log() {
     // The shared log is still exactly the 6 mainline messages.
     let log = abk::checkpoint::conversation_log::ConversationLog::new(temp.path());
     assert_eq!(log.count().unwrap(), 6);
+}
+
+/// BUG A repro: a fork that OUTGROWS the mainline (total > hwm) is classified
+/// as LINEAR by the length-only heuristic and its content is appended to the
+/// shared log — permanently polluting the mainline with fork messages.
+#[tokio::test]
+async fn fork_that_outgrows_mainline_does_not_corrupt_shared_log() {
+    let temp = TempDir::new().unwrap();
+    let mut session = open_session(temp.path()).await;
+
+    // Mainline: 001 (2 msgs) → 002 (4 msgs) → 003 (6 msgs).
+    let c1 = checkpoint(1, vec![msg("user", "m1"), msg("assistant", "a1")]);
+    session.save_checkpoint(&c1).await.unwrap();
+    let c2 = checkpoint(
+        2,
+        vec![
+            msg("user", "m1"),
+            msg("assistant", "a1"),
+            msg("user", "m2"),
+            msg("assistant", "a2"),
+        ],
+    );
+    session.save_checkpoint(&c2).await.unwrap();
+    let c3 = checkpoint(
+        3,
+        vec![
+            msg("user", "m1"),
+            msg("assistant", "a1"),
+            msg("user", "m2"),
+            msg("assistant", "a2"),
+            msg("user", "m3"),
+            msg("assistant", "a3"),
+        ],
+    );
+    session.save_checkpoint(&c3).await.unwrap();
+
+    // Resume 001 and keep working on the FORK branch (diverged from msg 3).
+    // The branch grows: 4 msgs (snapshot), then 7, then 9.
+    let fork4 = vec!["m1", "a1", "m2-fork", "a2-fork"];
+    let fork7 = vec![
+        "m1", "a1", "m2-fork", "a2-fork", "m3-fork", "a3-fork", "m4-fork",
+    ];
+    let fork9 = vec![
+        "m1", "a1", "m2-fork", "a2-fork", "m3-fork", "a3-fork", "m4-fork", "m5-fork", "a5-fork",
+    ];
+    let c4 = checkpoint(4, fork_messages(&fork4));
+    session.save_checkpoint(&c4).await.unwrap();
+    let c5 = checkpoint(5, fork_messages(&fork7));
+    session.save_checkpoint(&c5).await.unwrap();
+    let c6 = checkpoint(6, fork_messages(&fork9));
+    session.save_checkpoint(&c6).await.unwrap();
+
+    // The shared log must STILL contain only the 6 mainline lines — no fork
+    // content may ever be appended. (Fails on the length-only heuristic: the
+    // 7th/8th/9th fork messages get appended at seq 7/8/9.)
+    let log = abk::checkpoint::conversation_log::ConversationLog::new(temp.path());
+    let log_contents: Vec<String> = log
+        .read_all()
+        .unwrap()
+        .iter()
+        .map(|m| m.content.clone())
+        .collect();
+    assert_eq!(
+        log_contents,
+        to_strings(&["m1", "a1", "m2", "a2", "m3", "a3"]),
+        "shared conversation.jsonl must never be polluted with fork content"
+    );
+
+    // Each fork checkpoint must reload its EXACT branch (not the mainline
+    // prefix that the cursor would point at).
+    let mut session = open_session(temp.path()).await;
+    let l4 = session.load_checkpoint("004_analyze").await.unwrap();
+    let l5 = session.load_checkpoint("005_analyze").await.unwrap();
+    let l6 = session.load_checkpoint("006_analyze").await.unwrap();
+    assert_eq!(contents(&l4), to_strings(&fork4));
+    assert_eq!(contents(&l5), to_strings(&fork7));
+    assert_eq!(contents(&l6), to_strings(&fork9));
+
+    // The mainline checkpoints still reload correctly alongside the fork.
+    let l3 = session.load_checkpoint("003_analyze").await.unwrap();
+    assert_eq!(contents(&l3), vec!["m1", "a1", "m2", "a2", "m3", "a3"]);
+}
+
+/// BUG B repro: a diverged branch that reaches EXACTLY the mainline length
+/// (total == hwm) is classified LINEAR by the length-only heuristic; it
+/// appends nothing but indexes cursor_seq = hwm, so it reloads the MAINLINE
+/// prefix instead of the branch.
+#[tokio::test]
+async fn fork_at_exact_mainline_length_is_treated_as_fork() {
+    let temp = TempDir::new().unwrap();
+    let mut session = open_session(temp.path()).await;
+
+    // Mainline: 001 (2 msgs) → 002 (4 msgs). hwm = 4.
+    let c1 = checkpoint(1, vec![msg("user", "m1"), msg("assistant", "a1")]);
+    session.save_checkpoint(&c1).await.unwrap();
+    let c2 = checkpoint(
+        2,
+        vec![
+            msg("user", "m1"),
+            msg("assistant", "a1"),
+            msg("user", "m2"),
+            msg("assistant", "a2"),
+        ],
+    );
+    session.save_checkpoint(&c2).await.unwrap();
+
+    // Resume 001 → diverged branch of EXACTLY 4 messages (same length as hwm).
+    let branch: Vec<&str> = vec!["m1", "a1", "m2-fork", "a2-fork"];
+    let c3 = checkpoint(3, fork_messages(&branch));
+    session.save_checkpoint(&c3).await.unwrap();
+
+    // It must be treated as a FORK: a full snapshot is written, and the index
+    // records cursor_seq = 0 (so the loader uses the snapshot).
+    let snapshot_file = temp.path().join("003_analyze_conversation.json");
+    assert!(
+        snapshot_file.exists(),
+        "a diverged branch at exactly the mainline length must be persisted as a snapshot"
+    );
+
+    let mut session = open_session(temp.path()).await;
+    let index = session.list_checkpoints().await.unwrap();
+    let c3_meta = index.iter().find(|m| m.checkpoint_id == "003_analyze").unwrap();
+    assert_eq!(
+        c3_meta.cursor_seq, 0,
+        "a fork must index cursor_seq = 0 (load from snapshot), not the mainline cursor"
+    );
+
+    // And a reload must return the BRANCH, not the mainline prefix.
+    let loaded = session.load_checkpoint("003_analyze").await.unwrap();
+    assert_eq!(
+        contents(&loaded),
+        to_strings(&branch),
+        "equal-length diverged branch must reload the branch, not the mainline prefix"
+    );
+}
+
+/// CONTROL: consecutive LINEAR saves where total == hwm (no growth, same
+/// content) must NOT create a snapshot and must keep the correct cursor. This
+/// distinguishes the legitimate equal-length linear case (same content) from
+/// BUG B's equal-length diverged branch (different content).
+#[tokio::test]
+async fn linear_checkpoints_with_equal_length_do_not_snapshot() {
+    let temp = TempDir::new().unwrap();
+    let mut session = open_session(temp.path()).await;
+
+    // 001: 2 messages (appended, hwm = 2, cursor = 2).
+    let c1 = checkpoint(1, vec![msg("user", "m1"), msg("assistant", "a1")]);
+    session.save_checkpoint(&c1).await.unwrap();
+
+    // 002: the SAME 2 messages (total == hwm, no growth). Linear, no append.
+    let c2 = checkpoint(2, vec![msg("user", "m1"), msg("assistant", "a1")]);
+    session.save_checkpoint(&c2).await.unwrap();
+
+    // No per-checkpoint snapshot file may be created for a linear checkpoint.
+    let snapshot_file = temp.path().join("002_analyze_conversation.json");
+    assert!(
+        !snapshot_file.exists(),
+        "a linear checkpoint at total == hwm must not write a snapshot"
+    );
+
+    let mut session = open_session(temp.path()).await;
+    let index = session.list_checkpoints().await.unwrap();
+    let c2_meta = index.iter().find(|m| m.checkpoint_id == "002_analyze").unwrap();
+    assert_eq!(
+        c2_meta.cursor_seq, 2,
+        "a linear checkpoint keeps its mainline cursor (hwm)"
+    );
+
+    // Reload is correct.
+    let loaded = session.load_checkpoint("002_analyze").await.unwrap();
+    assert_eq!(contents(&loaded), vec!["m1", "a1"]);
+}
+
+/// Build fork-branch ChatMessages from a list of contents (alternating roles).
+fn fork_messages(contents: &[&str]) -> Vec<ChatMessage> {
+    contents
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let role = if i % 2 == 0 { "user" } else { "assistant" };
+            msg(role, c)
+        })
+        .collect()
+}
+
+/// Convert a `&[&str]` of expected contents to `Vec<String>` for comparison
+/// against `contents()` (which returns owned `String`s).
+fn to_strings(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
 }
