@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-21
+
+### Removed
+- **refactor(checkpoint): delete the dead `v2` split-file module** — `src/checkpoint/v2/` (`storage_v2.rs` 599 LOC, `schemas.rs` 468, `events_log.rs` 373, `mod.rs` 22 — ~1.4k LOC total) and its re-exports (`SessionStorageV2`, `ProjectStorageV2`, `EventsLog`, `EventEnvelope`, `ConversationFileV2`, `AgentStateV2`, `CheckpointMetadataV2`, `CheckpointRefs`, `CheckpointsIndex`, `SessionMetadataV2`, `SessionStatusV2`, `WorkflowStepV2`, `EventType`, `CHECKPOINT_VERSION_V2`) are removed. The module was never wired into the production write path — its append-only ideas were already harvested into the live V1 code: `ConversationLog` (`0.13.0`), `AgentStateLog` (0.13.0), and the forked-branch snapshots (0.13.1/0.13.2). No runtime behavior changes; only the unused module and its public names disappear. Anyone who imported `abk::checkpoint::v2::…` directly should switch to the V1 append-only types (`ConversationLog`, `AgentStateLog`, `SessionStorage`, `ProjectStorage`).
+
+### Fixed
+- **docs(checkpoint): `checkpoint` module docs and `save_checkpoint` no longer advertise the removed/never-shipped formats** — The `checkpoint` module header described a "V2 Storage Format" (`{NNN}_metadata.json` / `{NNN}_agent.json` / `events.jsonl`) that no such production code ever wrote. It now documents the **actual** append-only layout: local `session_metadata.json` (write-once) + `conversation.jsonl` (shared mainline) + `agent_state.jsonl` + `checkpoints/checkpoints.json` (cursor index) + fork-only `{checkpoint_id}_conversation.json` snapshots; remote `messages/{seq:05}.json` / `state/{seq:05}.json` / `checkpoints/checkpoints.json` / `metadata.json` path-keyed in a single collection. `SessionStorage::save_checkpoint`'s doc comment (previously advertising `session_agent.json` + per-checkpoint `{checkpoint_id}_conversation.json`, which stopped being written in 0.13.0) now describes the append-only layout and fork semantics. `conversation_log.rs`'s header note no longer references the deleted `v2::events_log::EventsLog`. README: fixed duplicated title block, stale `0.1.24` version examples, and the checkpoint section now shows the real format.
+
 ## [0.13.2] - 2026-08-20
 
 ### Fixed

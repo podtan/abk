@@ -1,11 +1,5 @@
 # ABK (Agent Builder Kit)
 
-**Modular utilities for building LLM agents**
-
-ABK is a feature-gated Rust crate providing essential utilities for building LLM-based agents. Choose only the components you need via Cargo features.
-
-# ABK (Agent Builder Kit)
-
 **Complete modular agent building blocks with feature-gated modules**
 
 ABK is a comprehensive Rust crate providing feature-gated modules for building LLM-based agents. Choose only the components you need via Cargo features to keep your builds lean and focused.
@@ -39,13 +33,13 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # Enable only the features you need:
-abk = { version = "0.1.24", features = ["config"] }
+abk = { version = "0.14", features = ["config"] }
 
 # Or enable multiple features:
-abk = { version = "0.1.24", features = ["config", "observability", "executor"] }
+abk = { version = "0.14", features = ["config", "observability", "executor"] }
 
 # Or enable everything:
-abk = { version = "0.1.24", features = ["all"] }
+abk = { version = "0.14", features = ["all"] }
 ```
 
 ## Usage
@@ -117,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Provider Feature
+### Checkpoint Feature
 
 ```rust
 use abk::checkpoint::{get_storage_manager, CheckpointResult};
@@ -130,6 +124,21 @@ let project_storage = manager.get_project_storage(project_path).await?;
 // Create a new session
 let session_storage = project_storage.create_session("my-task").await?;
 ```
+
+Sessions are persisted in an append-only layout (no per-checkpoint copies of
+the conversation on the mainline path):
+
+- `session_metadata.json` — session metadata (write-once)
+- `conversation.jsonl` — append-only shared conversation log, one message per line
+- `agent_state.jsonl` — append-only log, one agent-state entry per checkpoint
+- `checkpoints/checkpoints.json` — checkpoint index with `cursor_seq` cursors into the log
+- `checkpoints/{checkpoint_id}_conversation.json` — full snapshot, diverged (forked) branches only
+
+When a remote storage backend (e.g. DocumentDB) is configured, the same shape
+is mirrored under path-like keys — `messages/{seq:05}.json` (one document per
+message), `state/{seq:05}.json`, `checkpoints/checkpoints.json`, and
+`metadata.json` — stored in a single path-keyed collection. Storage modes:
+`local`, `remote`, or `mirror`.
 
 ### Provider Feature
 

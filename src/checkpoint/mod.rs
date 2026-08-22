@@ -11,13 +11,46 @@
 //!
 //! All data is stored centrally in `~/.{agent_name}/` to avoid project directory pollution.
 //!
-//! ## V2 Storage Format
+//! ## Storage Format (append-only)
 //!
-//! The v2 module provides a new split-file checkpoint format:
-//! - `{NNN}_metadata.json` - Checkpoint metadata (small, queryable)
-//! - `{NNN}_agent.json` - Agent state snapshot
-//! - `{NNN}_conversation.json` - Conversation events
-//! - `events.jsonl` - Append-only event log
+//! A session's durable state lives in a small set of append-only logs and
+//! indexes — one shared "mainline" conversation log per session, plus a
+//! per-checkpoint agent-state log. There are no per-checkpoint copies of the
+//! conversation on the mainline path.
+//!
+//! **Local layout** (`projects/{project_hash}/sessions/{session_id}/`):
+//! - `session_metadata.json` — session metadata (write-once, at session creation)
+//! - `conversation.jsonl` — append-only conversation log, one
+//!   [`crate::checkpoint::models::ChatMessage`] per line, shared by all
+//!   checkpoints of the session (the mainline)
+//! - `agent_state.jsonl` — append-only log, one agent-state entry per
+//!   checkpoint iteration
+//! - `checkpoints/checkpoints.json` — index of all `CheckpointMetadata`
+//!   entries, each recording a `cursor_seq` into the conversation log
+//! - `checkpoints/{checkpoint_id}_conversation.json` — full conversation
+//!   snapshot, written only for diverged (forked) branches that cannot be
+//!   safely appended to the shared mainline log
+//!
+//! **Remote layout** (when a storage backend such as DocumentDB is
+//! configured) mirrors the same shape under path-like keys
+//! (`projects/{project_hash}/...`):
+//! - `messages/{seq:05}.json` — one document per conversation message (O(N)
+//!   total documents, one per message)
+//! - `state/{seq:05}.json` — one document per agent-state log entry
+//! - `checkpoints/checkpoints.json` — the checkpoint index (with cursors)
+//! - `metadata.json` — session metadata
+//!
+//! The DocumentDB backend stores these path-keyed documents in a single
+//! collection, with the path as the document `_id`.
+//!
+//! **Fork semantics:** a checkpoint resumed from a non-latest checkpoint and
+//! continued from there is a diverged branch; it is written as a full
+//! `{checkpoint_id}_conversation.json` snapshot with `cursor_seq = 0` instead
+//! of being appended to the shared log. Older sessions written in per-checkpoint
+//! split-file formats remain readable via fallback loading.
+//!
+//! **Storage modes:** `local` (files only), `remote` (backend only), and
+//! `mirror` (both — local files are the authoritative shared log).
 //!
 //! ## Usage
 //!
@@ -48,7 +81,6 @@ pub mod session_manager;
 pub mod size_calc;
 pub mod storage;
 pub mod utils;
-pub mod v2;
 
 // Re-export key types for convenience
 pub use agent_context::AgentContext;
@@ -81,18 +113,6 @@ pub use backend::{
 };
 pub use conversation_log::{ConversationLog, ConversationLogEntry, CONVERSATION_LOG_FILENAME};
 pub use agent_state_log::{AgentStateEntry, AgentStateLog, AGENT_STATE_LOG_FILENAME};
-
-// V2 re-exports for split-file checkpoint format
-pub use v2::{
-    // Schemas
-    AgentStateV2, CheckpointMetadataV2, CheckpointRefs, CheckpointsIndex,
-    ConversationFileV2, SessionMetadataV2, SessionStatusV2, WorkflowStepV2,
-    CHECKPOINT_VERSION_V2,
-    // Storage
-    ProjectStorageV2, SessionStorageV2,
-    // Events
-    EventEnvelope, EventType, EventsLog,
-};
 
 /// Initialize the checkpoint system
 pub fn initialize() -> CheckpointResult<()> {

@@ -22,9 +22,9 @@
 //! line; readers stop at the last *complete* line so earlier messages are
 //! never lost.
 //!
-//! Harvested from the (now-deleted) `v2::events_log::EventsLog` design —
-//! append / append_batch / read / sequence handling — but stores the live V1
-//! [`ChatMessage`] rather than an `EventEnvelope`.
+//! Design inherited from an earlier event-log prototype — append /
+//! append_batch / read / sequence handling — but stores the live V1
+//! [`ChatMessage`] directly rather than an event envelope.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};

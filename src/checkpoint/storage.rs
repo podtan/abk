@@ -1225,23 +1225,30 @@ impl SessionStorage {
         &self.storage_mode
     }
 
-    /// Save a checkpoint using optimized split-file format
+    /// Save a checkpoint using the append-only layout
     ///
     /// Storage behavior depends on storage_mode:
     /// - Local: Only write to local files
     /// - Remote: Only write to remote backend
     /// - Mirror: Write to both local and remote
     ///
-    /// ## Optimized layout (avoids per-iteration duplicates)
+    /// ## Append-only layout (mainline path)
     ///
-    /// **Session-level (written once):**
-    /// - `session_agent.json` — agent state snapshot, written on first checkpoint only
+    /// **Shared (append-only, per session):**
+    /// - `conversation.jsonl` — one line per message; a checkpoint on the
+    ///   mainline appends only its new messages (existing messages are never
+    ///   rewritten)
+    /// - `agent_state.jsonl` — one entry per checkpoint iteration
+    /// - `checkpoints/checkpoints.json` — index of all `CheckpointMetadata`
+    ///   entries; each records a `cursor_seq` pointing into the shared log
     ///
-    /// **Per-checkpoint:**
-    /// - `{checkpoint_id}_conversation.json` — conversation state (legitimately unique)
+    /// **Forked branches only:**
+    /// - `checkpoints/{checkpoint_id}_conversation.json` — full conversation
+    ///   snapshot written when a checkpoint is a diverged branch that cannot
+    ///   be safely appended to the shared log (`cursor_seq = 0`)
     ///
-    /// **Index:**
-    /// - `checkpoints.json` — contains all `CheckpointMetadata` entries (already existed)
+    /// Session constants live in `session_metadata.json` (written once, at
+    /// session creation).
     ///
     /// Old sessions with per-checkpoint `_agent.json` / `_metadata.json` files
     /// remain readable via fallback in `try_load_from_local` / `try_load_from_remote`.
