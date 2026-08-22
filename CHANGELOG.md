@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-08-22
+
+### Fixed
+- **fix(checkpoint): lineage identity now includes the tool_calls payload — tool-args-only forks are no longer classified linear** — `messages_same_lineage` (the shared helper behind BOTH the local and remote lineage checks in `save_checkpoint`) compared only `role`/`content`/`tool_call_id`/`name`, omitting `ChatMessage.tool_calls` entirely. A fork whose ONLY divergence is the tool-call `arguments` (same role/content/tool_call_id/name) was therefore classified LINEAR — the same silent-corruption family fixed in 0.13.1 (fork loses branch) and 0.13.2 (length-only heuristic): the tie (`total == hwm`) reloaded the mainline prefix instead of the branch, and the outgrow (`total > hwm`) appended the branch over the mainline's own sequence numbers. The new private `tool_calls_same_lineage()` compares the full payload — `id`, `r#type`, `function.name`, `function.arguments` (serialized JSON text) — and is wired into `messages_same_lineage`. Safety argument: strictly widening identity can only flip linear → fork (the conservative full-snapshot path with `cursor_seq = 0`), never fork → linear, so no existing correct behavior can regress. New test `tool_args_only_divergence_is_treated_as_fork` in `tests/divergent_resume.rs` (verified FAILING pre-fix: "args-only diverged branch at the mainline length must be a snapshot (tie)"; passing post-fix). It deliberately keeps the branch's first `hwm` messages content-identical to the mainline (only tool-call `arguments` differ) so the pre-existing content check cannot mask the gap.
+
 ## [0.14.0] - 2026-08-21
 
 ### Removed

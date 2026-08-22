@@ -90,10 +90,35 @@ fn snapshot_from_messages(messages: Vec<ChatMessage>) -> ConversationSnapshot {
     }
 }
 
+/// Compare two optional tool-call payloads by their FULL identity: `id`,
+/// `r#type`, `function.name`, and `function.arguments` (the serialized JSON
+/// arguments). Tool-call arguments are part of lineage identity — a fork may
+/// diverge ONLY in the arguments passed to a tool, and treating it as linear
+/// would silently lose (tie) or overwrite (outgrow) the mainline.
+///
+/// Safety: this is a STRICTLY WIDENING identity check — it can only flip a
+/// checkpoint from linear → fork (the conservative full-snapshot path), never
+/// fork → linear. It therefore cannot regress any currently-correct behavior.
+fn tool_calls_same_lineage(a: &Option<Vec<umf::ToolCall>>, b: &Option<Vec<umf::ToolCall>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => {
+            x.len() == y.len()
+                && x.iter().zip(y.iter()).all(|(p, q)| {
+                    p.id == q.id
+                        && p.r#type == q.r#type
+                        && p.function.name == q.function.name
+                        && p.function.arguments == q.function.arguments
+                })
+        }
+        _ => false,
+    }
+}
+
 /// Compare two message slices by their stable identity fields (role, content,
-/// tool_call_id, name). Volatile fields (timestamp, token_count, reasoning)
-/// are ignored — they are not part of lineage identity and differ across
-/// re-saves of the same conversation.
+/// tool_call_id, name, and the full tool_calls payload). Volatile fields
+/// (timestamp, token_count, reasoning) are ignored — they are not part of
+/// lineage identity and differ across re-saves of the same conversation.
 ///
 /// Used by the lineage check in `save_checkpoint` to decide whether a
 /// checkpoint EXTENDS the mainline (linear) or diverges from it (fork).
@@ -106,6 +131,7 @@ fn messages_same_lineage(a: &[ChatMessage], b: &[ChatMessage]) -> bool {
             && x.content == y.content
             && x.tool_call_id == y.tool_call_id
             && x.name == y.name
+            && tool_calls_same_lineage(&x.tool_calls, &y.tool_calls)
     })
 }
 

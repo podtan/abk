@@ -43,6 +43,38 @@ fn msg(role: &str, content: &str) -> ChatMessage {
     }
 }
 
+/// Build a message carrying a single tool call with fixed id/type/name and the
+/// given arguments. Used to construct two messages that differ ONLY in the
+/// tool-call `arguments` (same role/content/tool_call_id/name).
+///
+/// `ChatMessage.tool_calls` is `Option<Vec<umf::ToolCall>>` where the crate-root
+/// `umf::ToolCall` is the OpenAI-style `{ id, r#type, function: FunctionCall }`
+/// with `FunctionCall.arguments: String` (JSON text).
+fn msg_with_tool(
+    role: &str,
+    content: &str,
+    tool_call_id: &str,
+    args: serde_json::Value,
+) -> ChatMessage {
+    ChatMessage {
+        role: role.to_string(),
+        content: content.to_string(),
+        reasoning: None,
+        timestamp: Utc::now(),
+        token_count: None,
+        tool_calls: Some(vec![umf::ToolCall {
+            id: tool_call_id.to_string(),
+            r#type: "function".to_string(),
+            function: umf::FunctionCall {
+                name: "search".to_string(),
+                arguments: args.to_string(),
+            },
+        }]),
+        tool_call_id: Some(tool_call_id.to_string()),
+        name: Some("search".to_string()),
+    }
+}
+
 fn snapshot(messages: Vec<ChatMessage>) -> ConversationSnapshot {
     ConversationSnapshot {
         messages,
@@ -532,6 +564,135 @@ async fn linear_checkpoints_with_equal_length_do_not_snapshot() {
     // Reload is correct.
     let loaded = session.load_checkpoint("002_analyze").await.unwrap();
     assert_eq!(contents(&loaded), vec!["m1", "a1"]);
+}
+
+/// BUG C repro: a fork whose ONLY divergence is tool-call `arguments` (same
+/// role/content/tool_call_id/name) is classified LINEAR by the lineage helper,
+/// which omits the `tool_calls` payload. The branch is then either silently
+/// reloaded as the mainline prefix (tie, total == hwm) or appended over the
+/// mainline at seq hwm+1.. (outgrow, total > hwm) — the same corruption
+/// family already fixed in 0.13.1 (fork loses branch) and 0.13.2 (length-only
+/// heuristic).
+///
+/// Deliberately constructed so the branch's first `hwm` messages are
+/// CONTENT-IDENTICAL to the mainline (only the tool-call `arguments` differ
+/// on the assistant message). If any content differed, the pre-existing
+/// content check would catch the divergence and this test would pass without
+/// the tool_calls fix (false green).
+#[tokio::test]
+async fn tool_args_only_divergence_is_treated_as_fork() {
+    let temp = TempDir::new().unwrap();
+    let mut session = open_session(temp.path()).await;
+
+    // Same tool-call identity, DIFFERENT arguments.
+    let args_a = serde_json::json!({ "query": "mainline" });
+    let args_b = serde_json::json!({ "query": "fork" });
+
+    // Mainline: 001 (2 msgs) → 002 (4 msgs). hwm = 4.
+    let c1 = checkpoint(
+        1,
+        vec![
+            msg("user", "m1"),
+            msg_with_tool("assistant", "a1", "tc-1", args_a.clone()),
+        ],
+    );
+    session.save_checkpoint(&c1).await.unwrap();
+    let c2 = checkpoint(
+        2,
+        vec![
+            msg("user", "m1"),
+            msg_with_tool("assistant", "a1", "tc-1", args_a.clone()),
+            msg("user", "m2"),
+            msg("assistant", "a2"),
+        ],
+    );
+    session.save_checkpoint(&c2).await.unwrap();
+
+    // Fork branch: ONLY the tool-call arguments change (args_b). The rest of
+    // the first hwm messages are content-identical to the mainline.
+    // Stage 1: exactly mainline length (tie, total == hwm = 4).
+    let fork_tie = vec![
+        msg("user", "m1"),
+        msg_with_tool("assistant", "a1", "tc-1", args_b.clone()),
+        msg("user", "m2"),
+        msg("assistant", "a2"),
+    ];
+    let c3 = checkpoint(3, fork_tie.clone());
+    session.save_checkpoint(&c3).await.unwrap();
+
+    // Stage 2: resume the fork and GROW past the mainline (outgrow,
+    // total = 5 > hwm = 4).
+    let fork_grow = vec![
+        msg("user", "m1"),
+        msg_with_tool("assistant", "a1", "tc-1", args_b.clone()),
+        msg("user", "m2"),
+        msg("assistant", "a2"),
+        msg("user", "m3-fork"),
+    ];
+    let c4 = checkpoint(4, fork_grow.clone());
+    session.save_checkpoint(&c4).await.unwrap();
+
+    // Both stages must be FORKS: a full snapshot is written, and the index
+    // records cursor_seq = 0 (so the loader uses the snapshot).
+    let snapshot_tie = temp.path().join("003_analyze_conversation.json");
+    assert!(
+        snapshot_tie.exists(),
+        "args-only diverged branch at the mainline length must be a snapshot (tie)"
+    );
+    let snapshot_grow = temp.path().join("004_analyze_conversation.json");
+    assert!(
+        snapshot_grow.exists(),
+        "args-only diverged branch that outgrows the mainline must be a snapshot"
+    );
+
+    // The shared log must contain ONLY the mainline messages — never the
+    // args-B fork (pre-fix, the outgrow branch appends m3-fork at seq 5).
+    let log = abk::checkpoint::conversation_log::ConversationLog::new(temp.path());
+    let log_contents: Vec<String> = log
+        .read_all()
+        .unwrap()
+        .iter()
+        .map(|m| m.content.clone())
+        .collect();
+    assert_eq!(
+        log_contents,
+        to_strings(&["m1", "a1", "m2", "a2"]),
+        "conversation.jsonl must never be polluted with the args-B fork"
+    );
+
+    // Reload each fork checkpoint: cursor 0, exact branch, args-B tool call.
+    let mut session = open_session(temp.path()).await;
+    let index = session.list_checkpoints().await.unwrap();
+    let c3_meta = index.iter().find(|m| m.checkpoint_id == "003_analyze").unwrap();
+    assert_eq!(c3_meta.cursor_seq, 0, "tie fork must index cursor_seq = 0");
+    let c4_meta = index.iter().find(|m| m.checkpoint_id == "004_analyze").unwrap();
+    assert_eq!(c4_meta.cursor_seq, 0, "outgrow fork must index cursor_seq = 0");
+
+    let l3 = session.load_checkpoint("003_analyze").await.unwrap();
+    let l4 = session.load_checkpoint("004_analyze").await.unwrap();
+    assert_eq!(contents(&l3), to_strings(&["m1", "a1", "m2", "a2"]));
+    assert_eq!(
+        contents(&l4),
+        to_strings(&["m1", "a1", "m2", "a2", "m3-fork"])
+    );
+    let tc3 = l3.conversation_state.messages[1]
+        .tool_calls
+        .as_ref()
+        .expect("tie fork assistant message must carry tool calls");
+    assert_eq!(
+        tc3[0].function.arguments,
+        args_b.to_string(),
+        "tie fork must reload the args-B tool call, not the mainline args-A"
+    );
+    let tc4 = l4.conversation_state.messages[1]
+        .tool_calls
+        .as_ref()
+        .expect("outgrow fork assistant message must carry tool calls");
+    assert_eq!(
+        tc4[0].function.arguments,
+        args_b.to_string(),
+        "outgrow fork must reload the args-B tool call, not the mainline args-A"
+    );
 }
 
 /// Build fork-branch ChatMessages from a list of contents (alternating roles).
