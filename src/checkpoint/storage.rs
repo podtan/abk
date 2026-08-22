@@ -1218,12 +1218,33 @@ impl SessionStorage {
         remote_backend: Option<Arc<dyn StorageBackend + Send + Sync>>,
         storage_mode: super::config::StorageMode,
     ) -> CheckpointResult<Self> {
-        // For remote-only mode, don't require local files to exist
-        let checkpoints = if matches!(storage_mode, super::config::StorageMode::Remote) {
-            // Try loading from local, but don't fail if not present
-            load_checkpoint_index(&session_path).await.unwrap_or_default()
-        } else {
-            load_checkpoint_index(&session_path).await?
+        // For remote-only mode, don't require local files to exist.
+        // The checkpoint index must come from the remote backend when it is
+        // not present locally — otherwise the in-memory index is always empty
+        // and list_checkpoints()/resume resolution silently finds nothing.
+        let checkpoints = {
+            let local = load_checkpoint_index(&session_path).await.unwrap_or_default();
+            if local.is_empty()
+                && matches!(storage_mode, super::config::StorageMode::Remote)
+            {
+                let mut merged: std::collections::HashMap<String, super::models::CheckpointMetadata> = local;
+                if let Some(ref backend) = remote_backend {
+                    let index_key = format!(
+                        "projects/{}/sessions/{}/checkpoints/checkpoints.json",
+                        metadata.project_hash, metadata.session_id
+                    );
+                    if let Ok(remote_index) =
+                        backend.read_json::<std::collections::HashMap<String, super::models::CheckpointMetadata>>(&index_key).await
+                    {
+                        for (k, v) in remote_index {
+                            merged.insert(k, v);
+                        }
+                    }
+                }
+                merged
+            } else {
+                load_checkpoint_index(&session_path).await?
+            }
         };
 
         Ok(Self {
