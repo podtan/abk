@@ -1032,10 +1032,23 @@ impl AbkCheckpointAccess {
     /// Get storage manager with remote backend configuration if available.
     #[cfg(feature = "storage-documentdb")]
     async fn get_configured_storage_manager(&self) -> CliResult<crate::checkpoint::CheckpointStorageManager> {
-        // If home_dir is set, use it for per-user storage
+        // If home_dir is set, use it for per-user storage — merging in the
+        // configured remote backend so Remote/Mirror modes keep working.
+        // (with_home_dir alone would drop remote_backend: None, breaking
+        // session listing and --resume resolution in Remote-only mode.)
         if let Some(ref home) = self.home_dir {
             let agent_name = std::env::var("ABK_AGENT_NAME").unwrap_or_else(|_| "trustee".to_string());
-            return crate::checkpoint::CheckpointStorageManager::with_home_dir(home.clone(), &agent_name)
+            let manager = if let Some(ref checkpoint_config) = self.checkpoint_config {
+                crate::checkpoint::CheckpointStorageManager::with_home_dir_and_backend(
+                    home.clone(),
+                    &agent_name,
+                    checkpoint_config.storage_backend.clone(),
+                )
+                .await
+            } else {
+                crate::checkpoint::CheckpointStorageManager::with_home_dir(home.clone(), &agent_name)
+            };
+            return manager
                 .map_err(|e| CliError::CheckpointError(format!("Failed to create storage manager with home_dir: {}", e)));
         }
         if let Some(ref checkpoint_config) = self.checkpoint_config {
