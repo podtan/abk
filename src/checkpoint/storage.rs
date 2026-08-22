@@ -1254,6 +1254,45 @@ impl ProjectStorage {
             fs::remove_dir_all(&session_path).await?;
         }
 
+        // Remote cleanup (Mirror/Remote): the remote copy lives under the
+        // path-keyed prefix projects/{project_id}/sessions/{session_id}/ —
+        // without this, deleted sessions keep re-appearing in listings
+        // (local+remote merge) and remote storage grows unboundedly.
+        #[cfg(feature = "storage-documentdb")]
+        {
+            let should_delete_remote = matches!(
+                self.storage_mode,
+                super::config::StorageMode::Remote | super::config::StorageMode::Mirror
+            );
+            if should_delete_remote {
+                if let Some(ref backend) = self.remote_backend {
+                    use super::backend::ListOptions;
+                    let prefix = format!("projects/{}/sessions/{}/", self.project_id, session_id);
+                    let list_result = backend
+                        .list(ListOptions { prefix: Some(prefix), limit: None, continuation_token: None })
+                        .await
+                        .map_err(|e| CheckpointError::storage(format!(
+                            "Failed to list remote session docs for deletion ({}): {}", session_id, e
+                        )))?;
+                    let keys: Vec<String> = list_result.items.into_iter().map(|i| i.key).collect();
+                    if !keys.is_empty() {
+                        let deleted = backend
+                            .delete_many(&keys)
+                            .await
+                            .map_err(|e| CheckpointError::storage(format!(
+                                "Failed to delete remote session docs ({}): {}", session_id, e
+                            )))?;
+                        if deleted as usize != keys.len() {
+                            crate::observability::tee_eprintln(&format!(
+                                "[checkpoint] Warning: remote session deletion partially applied ({} of {} docs) for {}",
+                                deleted, keys.len(), session_id
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         // Invalidate cache after deletion
         self.invalidate_sessions_cache();
 
@@ -2191,6 +2230,11 @@ impl SessionStorage {
     /// depend on earlier messages, so a per-checkpoint deletion only removes
     /// the per-checkpoint agent file + index entry, never the shared log.
     pub async fn delete_checkpoint(&mut self, checkpoint_id: &str) -> CheckpointResult<()> {
+        use super::config::StorageMode;
+        let should_write_local = matches!(self.storage_mode, StorageMode::Local | StorageMode::Mirror);
+        #[cfg(feature = "storage-documentdb")]
+        let should_delete_remote = matches!(self.storage_mode, StorageMode::Remote | StorageMode::Mirror);
+
         // Delete conversation file (legacy optimized format)
         let conv_file = self.session_path.join(format!("{}_conversation.json", checkpoint_id));
         if conv_file.exists() {
@@ -2211,12 +2255,62 @@ impl SessionStorage {
             fs::remove_file(&v1_file).await?;
         }
 
+        // Capture the checkpoint's metadata before removal — the remote
+        // agent-state doc is keyed by seq = iteration.
+        let removed_meta = self.checkpoints.get(checkpoint_id).cloned();
         self.checkpoints.remove(checkpoint_id);
-        self.save_checkpoint_index().await?;
+        if should_write_local {
+            self.save_checkpoint_index().await?;
+        }
 
         // Update session metadata
         self.metadata.checkpoint_count = self.checkpoints.len() as u32;
-        self.save_metadata().await?;
+        self.metadata.last_accessed = Utc::now();
+        if should_write_local {
+            self.save_metadata().await?;
+        }
+
+        // Remote cleanup (Mirror/Remote): remove the per-checkpoint remote
+        // docs. The shared message log is NEVER touched (surviving
+        // checkpoints address it by cursor).
+        #[cfg(feature = "storage-documentdb")]
+        if should_delete_remote {
+            if let Some(ref backend) = self.remote_backend {
+                use super::backend::{ListOptions, StorageBackendExt};
+                let project_hash = &self.metadata.project_hash;
+                let session_key_prefix =
+                    format!("projects/{}/sessions/{}", project_hash, self.metadata.session_id);
+
+                // 1. State doc (keyed by seq = iteration of this checkpoint).
+                if let Some(meta) = removed_meta {
+                    let state_key = remote_state_key(&session_key_prefix, meta.iteration);
+                    if let Err(e) = backend.delete(&state_key).await {
+                        crate::observability::tee_eprintln(&format!(
+                            "[checkpoint] Warning: failed to delete remote state doc for {}: {}",
+                            checkpoint_id, e
+                        ));
+                    }
+                }
+
+                // 2. Fork snapshot, if this checkpoint was a fork
+                //    ({checkpoint_id}_conversation.json under checkpoints/).
+                let ckpt_prefix = format!("{}/checkpoints/{}", session_key_prefix, checkpoint_id);
+                if let Ok(list_result) = backend
+                    .list(ListOptions { prefix: Some(ckpt_prefix), limit: None, continuation_token: None })
+                    .await
+                {
+                    let keys: Vec<String> = list_result.items.into_iter().map(|i| i.key).collect();
+                    if !keys.is_empty() {
+                        if let Err(e) = backend.delete_many(&keys).await {
+                            crate::observability::tee_eprintln(&format!(
+                                "[checkpoint] Warning: failed to delete remote checkpoint docs for {}: {}",
+                                checkpoint_id, e
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
