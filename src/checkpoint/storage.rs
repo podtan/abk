@@ -40,6 +40,118 @@ fn remote_message_key(session_key_prefix: &str, seq: u32) -> String {
     format!("{}/messages/{:05}.json", session_key_prefix, seq)
 }
 
+/// Write a JSON document to the remote backend with bounded retries.
+///
+/// Transient backend errors (connection blips, gateway InternalError storms)
+/// are retried up to [`REMOTE_WRITE_ATTEMPTS`] times with a short backoff
+/// before the error is surfaced to the caller.
+async fn write_json_with_retry<T>(
+    backend: &dyn StorageBackend,
+    key: &str,
+    value: &T,
+) -> Result<(), String>
+where
+    T: serde::Serialize + Send + Sync,
+{
+    use super::backend::StorageBackendExt;
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match backend.write_json(key, value).await {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < REMOTE_WRITE_ATTEMPTS => {
+                crate::observability::tee_eprintln(&format!(
+                    "[checkpoint] ⚠️ Remote write failed (attempt {}/{} for {}): {} — retrying",
+                    attempt, REMOTE_WRITE_ATTEMPTS, key, e
+                ));
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    50u64 * (1 << (attempt - 1).min(4)),
+                ))
+                .await;
+            }
+            Err(e) => {
+                return Err(format!(
+                    "remote write failed for {} after {} attempts: {}",
+                    key, attempt, e
+                ))
+            }
+        }
+    }
+}
+
+/// Reconcile mirror/remote gaps before appending.
+///
+/// A previous save may have partially failed on the remote side, leaving
+/// message docs behind the checkpoint index's high-water mark (gaps below
+/// the cursor are otherwise never backfilled: subsequent saves only write
+/// `remote_hwm+1..`), and/or missing agent-state docs. This fills any
+/// missing docs from the authoritative local logs (Mirror mode) so the
+/// remote copy becomes complete before this save appends to it.
+///
+/// Returns the list of sequence numbers that were backfilled (messages as
+/// `seq`; state docs as `1_000_000 + seq` to keep one Vec).
+#[cfg(feature = "storage-documentdb")]
+async fn reconcile_remote_messages(
+    backend: &dyn StorageBackend,
+    session_key_prefix: &str,
+    needed: u32,
+    local_log: &ConversationLog,
+    session_path: &Path,
+) -> Vec<u32> {
+    use super::backend::StorageBackendExt;
+    let mut backfilled = Vec::new();
+    if needed == 0 {
+        return backfilled;
+    }
+    // The local log is authoritative in Mirror mode; read the prefix once.
+    let local_prefix: Vec<ChatMessage> = local_log.read_up_to(needed).unwrap_or_default();
+    for seq in 1..=needed {
+        let key = remote_message_key(session_key_prefix, seq);
+        let missing = match backend.exists(&key).await {
+            Ok(true) => false,
+            Ok(false) => true,
+            // Existence probe failed (e.g. emulator hiccup): attempt the
+            // backfill anyway — the write below overwrites idempotently, so
+            // a redundant write is safe while a skipped one leaves the gap.
+            Err(_) => true,
+        };
+        if !missing {
+            continue;
+        }
+        // Gap — backfill from the local (authoritative) log.
+        if let Some(msg) = local_prefix.get(seq as usize - 1).cloned() {
+            let doc = RemoteMessageDoc { seq, message: msg };
+            if write_json_with_retry(backend, &key, &doc).await.is_ok() {
+                backfilled.push(seq);
+            }
+        }
+    }
+
+    // Agent-state docs: one per checkpoint, keyed by seq = iteration. The
+    // local agent_state.jsonl is authoritative in Mirror mode.
+    let state_log = AgentStateLog::new(session_path);
+    if state_log.exists() {
+        if let Ok(entries) = state_log.read_all() {
+            for entry in entries.iter() {
+                let key = remote_state_key(session_key_prefix, entry.seq);
+                match backend.exists(&key).await {
+                    Ok(true) => continue,
+                    Ok(false) | Err(_) => {
+                        if write_json_with_retry(backend, &key, entry).await.is_ok() {
+                            backfilled.push(1_000_000 + entry.seq);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    backfilled
+}
+
+/// Max attempts for a single remote write (1 initial + retries).
+const REMOTE_WRITE_ATTEMPTS: u32 = 3;
+
 /// Build the remote key for a single agent state log entry.
 ///
 /// Mirrors the local `agent_state.jsonl` one-doc-per-line layout under the
@@ -1472,11 +1584,47 @@ impl SessionStorage {
         }
 
         // Write to remote backend if configured
+        //
+        // Failure semantics (fixed for the mirror-gap bug): every write goes
+        // through `write_json_with_retry` (bounded retries on transient
+        // errors), gaps below the cursor are reconciled from the local log
+        // before appending, and the outcome is reported HONESTLY —
+        // "✅ MIRRORED/SAVED" only when every remote write succeeded. In
+        // Remote-only mode any failure is fatal (the remote copy is the only
+        // copy). In Mirror mode a failed write is reported as a mirror gap
+        // with the missing pieces (local stays authoritative and a later
+        // save reconciles the gap).
+        #[cfg(feature = "storage-documentdb")]
+        let mut remote_write_errors: Vec<String> = Vec::new();
         #[cfg(feature = "storage-documentdb")]
         if should_write_remote {
             if let Some(ref backend) = self.remote_backend {
                 let project_hash = &self.metadata.project_hash;
                 let session_key_prefix = format!("projects/{}/sessions/{}", project_hash, session_id);
+
+                // 0. Reconcile any remote gap left by a previously failed
+                //    mirror write: probe the docs below the high-water mark
+                //    and backfill missing ones from the local log. Without
+                //    this a single dropped doc is permanent (later saves
+                //    only write remote_hwm+1..).
+                if matches!(self.storage_mode, StorageMode::Mirror) && !is_fork {
+                    let backfilled = reconcile_remote_messages(
+                        backend.as_ref(),
+                        &session_key_prefix,
+                        (total as u32).max(remote_hwm as u32),
+                        &log,
+                        &self.session_path,
+                    )
+                    .await;
+                    if !backfilled.is_empty() {
+                        let msgs: Vec<u32> = backfilled.iter().copied().filter(|s| *s < 1_000_000).collect();
+                        let states: Vec<u32> = backfilled.iter().copied().filter(|s| *s >= 1_000_000).map(|s| s - 1_000_000).collect();
+                        crate::observability::tee_eprintln(&format!(
+                            "[checkpoint] 🔁 Reconciled {} missing remote message doc(s) {:?} and {} state doc(s) {:?}",
+                            msgs.len(), msgs, states.len(), states
+                        ));
+                    }
+                }
 
                 // 1. Agent state doc (one per DISTINCT checkpoint), keyed by
                 //    `seq` = iteration — idempotent: re-saving a checkpoint
@@ -1491,46 +1639,41 @@ impl SessionStorage {
                     ts: Utc::now(),
                 };
                 let state_key = remote_state_key(&session_key_prefix, state_entry.seq);
-                if let Err(e) = backend.write_json(&state_key, &state_entry).await {
-                    crate::observability::tee_eprintln(
-                        &format!("[checkpoint] Warning: Failed to write agent state doc to remote backend: {}", e)
-                    );
+                if let Err(e) = write_json_with_retry(backend.as_ref(), &state_key, &state_entry).await {
+                    remote_write_errors.push(format!("state doc ({}): {}", state_key, e));
                 }
 
                 // 2. Conversation persistence (mirrors the local logic).
                 //    - **Linear** (`total >= remote hwm`): pure inserts of the
-                //      NEW message docs beyond the mainline high-water mark
-                //      (the max cursor already indexed).
-                //    - **Fork** (`total < remote hwm`): the branch diverges, so
-                //      it is written as a full `{NNN}_conversation.json` snapshot
-                //      (the legacy per-checkpoint remote key the loader reads).
+                //      NEW message docs beyond the mainline high-water mark.
+                //    - **Fork**: written as a full `{NNN}_conversation.json`
+                //      snapshot (the legacy key the loader reads).
                 let ckpt_key_prefix = format!("{}/checkpoints/{}", session_key_prefix, checkpoint_id);
                 if is_fork {
-                    if let Err(e) = backend
-                        .write_json(&format!("{}_conversation.json", ckpt_key_prefix), &checkpoint.conversation_state)
-                        .await
+                    if let Err(e) = write_json_with_retry(
+                        backend.as_ref(),
+                        &format!("{}_conversation.json", ckpt_key_prefix),
+                        &checkpoint.conversation_state,
+                    )
+                    .await
                     {
-                        crate::observability::tee_eprintln(
-                            &format!("[checkpoint] Warning: Failed to write fork conversation snapshot to remote: {}", e)
-                        );
+                        remote_write_errors.push(format!("fork snapshot ({}): {}", checkpoint_id, e));
                     }
                 } else if total > remote_hwm {
                     for (i, msg) in messages[remote_hwm..total].iter().enumerate() {
                         let seq = remote_hwm as u32 + 1 + i as u32;
                         let doc = RemoteMessageDoc { seq, message: msg.clone() };
                         let key = remote_message_key(&session_key_prefix, seq);
-                        if let Err(e) = backend.write_json(&key, &doc).await {
-                            crate::observability::tee_eprintln(
-                                &format!("[checkpoint] Warning: Failed to write message doc {} to remote: {}", seq, e)
-                            );
+                        if let Err(e) = write_json_with_retry(backend.as_ref(), &key, &doc).await {
+                            remote_write_errors.push(format!("message doc {}: {}", seq, e));
+                            // Stop the batch: a single missing doc inside this
+                            // append would desynchronize seq numbers for the
+                            // rest; the reconcile pass on the next save
+                            // backfills. Break after first failure.
+                            break;
                         }
                     }
                 }
-
-                let mode_str = if matches!(self.storage_mode, StorageMode::Mirror) { "mirrored" } else { "saved" };
-                crate::observability::tee_eprintln(
-                    &format!("[checkpoint] ✅ {} checkpoint {} to remote storage", mode_str.to_uppercase(), checkpoint_id)
-                );
             } else if matches!(self.storage_mode, StorageMode::Remote) {
                 return Err(CheckpointError::Storage {
                     message: "Remote storage mode requires a remote backend to be configured".to_string(),
@@ -1566,15 +1709,46 @@ impl SessionStorage {
 
                 // Update session metadata
                 let session_metadata_key = format!("projects/{}/sessions/{}/metadata.json", project_hash, session_id);
-                if let Err(e) = backend.write_json(&session_metadata_key, &self.metadata).await {
-                    crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to update session metadata in remote: {}", e));
+                if let Err(e) = write_json_with_retry(backend.as_ref(), &session_metadata_key, &self.metadata).await {
+                    remote_write_errors.push(format!("session metadata: {}", e));
                 }
 
                 // Update checkpoints index (replaces per-checkpoint _metadata.json)
                 let checkpoints_index_key = format!("projects/{}/sessions/{}/checkpoints/checkpoints.json", project_hash, session_id);
-                if let Err(e) = backend.write_json(&checkpoints_index_key, &self.checkpoints).await {
-                    crate::observability::tee_eprintln(&format!("[checkpoint] Warning: Failed to update checkpoints index in remote: {}", e));
+                if let Err(e) = write_json_with_retry(backend.as_ref(), &checkpoints_index_key, &self.checkpoints).await {
+                    remote_write_errors.push(format!("checkpoints index: {}", e));
                 }
+            }
+        }
+
+        // --- Honest remote outcome reporting --------------------------------
+        #[cfg(feature = "storage-documentdb")]
+        if should_write_remote && self.remote_backend.is_some() {
+            let mode_str = if matches!(self.storage_mode, StorageMode::Mirror) { "mirrored" } else { "saved" };
+            if remote_write_errors.is_empty() {
+                crate::observability::tee_eprintln(&format!(
+                    "[checkpoint] ✅ {} checkpoint {} to remote storage",
+                    mode_str.to_uppercase(), checkpoint_id
+                ));
+            } else if matches!(self.storage_mode, StorageMode::Remote) {
+                // Remote-only: the remote copy IS the durable copy — a write
+                // failure after retries means data would be silently lost.
+                return Err(CheckpointError::Storage {
+                    message: format!(
+                        "remote write failed for checkpoint {} ({} error(s)): {}",
+                        checkpoint_id,
+                        remote_write_errors.len(),
+                        remote_write_errors.join("; ")
+                    ),
+                });
+            } else {
+                // Mirror: local is authoritative; report the gap loudly and
+                // list the missing pieces so the operator can act.
+                crate::observability::tee_eprintln(&format!(
+                    "[checkpoint] ❌ NOT {} — checkpoint {} saved LOCALLY but remote copy is INCOMPLETE ({} error(s): {}). The gap will be reconciled on the next save.",
+                    mode_str.to_uppercase(), checkpoint_id,
+                    remote_write_errors.len(), remote_write_errors.join("; ")
+                ));
             }
         }
 
