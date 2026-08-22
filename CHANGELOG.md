@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2] - 2026-08-22
+
+### Fixed
+
+- **Mirror-mode remote write failures are no longer swallowed** (nghr 450e00d4). A transient backend error during `save_checkpoint` previously logged a warning and an unconditional `✅ MIRRORED` line, silently leaving the remote copy incomplete — permanently, since later saves only write `remote_hwm+1..`. Every remote write now goes through a bounded retry (3 attempts, exponential backoff); Mirror saves reconcile gaps below the high-water mark before appending (message docs from the authoritative local `conversation.jsonl`, agent-state docs from `agent_state.jsonl`) so a dropped doc self-heals on the next save; the success line is only printed when every remote write succeeded (`❌ NOT MIRRORED … INCOMPLETE` otherwise); and Remote-only mode fails the save loudly on exhausted retries (the remote copy is the only durable copy). A mid-batch message failure stops the batch so sequence numbers cannot desynchronize.
+- **Remote-only session listing and `--resume` work** (nghr 67163136). Two defects made Remote-only mode unusable from the CLI while Mirror mode masked them: `AbkCheckpointAccess::get_configured_storage_manager` built the manager with `with_home_dir` whenever a per-user home dir was set (hard-coding `remote_backend: None` and dropping the configured backend), and `SessionStorage::with_remote_backend` loaded the checkpoint index local-only (in-memory index always empty → `list_checkpoints()` empty → resume resolved nothing and silently started a fresh session).
+- **`delete_session` / `delete_checkpoint` clean remote storage** (nghr c561e911). Deletion was local-only: the CLI reported success while every remote doc under `projects/{hash}/sessions/{sid}/` persisted, so deleted sessions re-appeared in listings via the local+remote merge and remote storage grew unboundedly. Remote deletion now lists the session/checkpoint prefix and `delete_many`s; the shared message log is never touched (surviving checkpoints address it by cursor).
+- Feature gating: `create_final_checkpoint_and_get_resume_info` referenced `crate::cli::ResumeInfo` unconditionally, secretly requiring the `cli` feature for `checkpoint`; now `#[cfg(feature = "cli")]`.
+
+### Tests
+
+- **Checkpoint lib tests compile and pass again** (73/73, `--features "checkpoint,observability"`): 6 of the previously-documented 27 lib-test errors were inside the checkpoint module's own test code (missing `ChatMessage.reasoning` in restoration helpers; `MockAgent` missing two trait methods) and blocked the whole unit. Fixed the latent `resume_tracker` expiry assertion (policy is 7 days, not 2 hours). Lib-test baseline: 27 → 21.
+- NEW `tests/cleanup_retention.rs` (3): whole-directory `delete_session` with no orphans; retention preserves surviving sessions' cursors; size tracks data volume.
+- NEW `tests/remote_resilience.rs` (6, deterministic flaky-backend injection): transient failures retried, gaps below the cursor reconciled (message + state backfill), Mirror stays local-authoritative when retries exhaust, Remote-only fails the save, remote deletion leaves no orphans, `delete_checkpoint` keeps shared-log docs.
+
+### Docs
+
+- Checkpoint module header documents cleanup semantics (whole-dir session delete; per-checkpoint delete never truncates shared logs) and the legacy-migration path (`trustee sessions migrate [--prune]`).
+
 ## [0.14.1] - 2026-08-22
 
 ### Fixed
