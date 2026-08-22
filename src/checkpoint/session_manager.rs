@@ -886,6 +886,9 @@ impl SessionManager {
     /// workflow loop via `create_checkpoint`, keeping one file per iteration.
     ///
     /// Returns `None` if checkpointing is not enabled or no session exists.
+    ///
+    /// Only available with the `cli` feature, since `ResumeInfo` is a CLI-layer type.
+    #[cfg(feature = "cli")]
     pub async fn create_final_checkpoint_and_get_resume_info<C: AgentContext>(
         &mut self,
         context: &C,

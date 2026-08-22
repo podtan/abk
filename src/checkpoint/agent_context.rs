@@ -318,6 +318,8 @@ mod tests {
         iteration: u32,
         task: String,
         running: bool,
+        classification_done: bool,
+        template_sent: bool,
     }
 
     impl AgentContext for MockAgent {
@@ -474,6 +476,14 @@ mod tests {
             self.running = running;
         }
 
+        fn set_classification_done(&mut self, done: bool) {
+            self.classification_done = done;
+        }
+
+        fn set_template_sent(&mut self, sent: bool) {
+            self.template_sent = sent;
+        }
+
         fn get_provider_name(&self) -> String {
             "mock-provider".to_string()
         }
@@ -542,6 +552,8 @@ mod tests {
             iteration: 0,
             task: "test task".to_string(),
             running: false,
+            classification_done: false,
+            template_sent: false,
         };
 
         agent.add_user_message("Hello".to_string(), None);
@@ -564,6 +576,8 @@ mod tests {
             iteration: 0,
             task: "test task".to_string(),
             running: false,
+            classification_done: false,
+            template_sent: false,
         };
 
         assert_eq!(agent.get_current_iteration(), 0);

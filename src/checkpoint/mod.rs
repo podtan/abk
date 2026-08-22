@@ -49,8 +49,20 @@
 //! of being appended to the shared log. Older sessions written in per-checkpoint
 //! split-file formats remain readable via fallback loading.
 //!
+//! **Cleanup semantics:** deleting a session removes the entire per-session
+//! directory (both shared logs, the checkpoint index, and session metadata);
+//! deleting an individual checkpoint removes only its index entry and any
+//! per-checkpoint files — the shared logs are never truncated, so surviving
+//! checkpoints keep resolving their cursors. Retention-driven session
+//! deletion follows the same whole-directory rule.
+//!
 //! **Storage modes:** `local` (files only), `remote` (backend only), and
 //! `mirror` (both — local files are the authoritative shared log).
+//!
+//! **Legacy migration:** sessions written in the old per-checkpoint format
+//! can be folded into the append-only layout with
+//! `trustee sessions migrate [--prune]` (see the trustee README, task
+//! bcdcdd25 §D).
 //!
 //! ## Usage
 //!

@@ -1338,6 +1338,7 @@ mod tests {
             ChatMessage {
                 role: "system".to_string(),
                 content: "System message".to_string(),
+                reasoning: None,
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
@@ -1347,6 +1348,7 @@ mod tests {
             ChatMessage {
                 role: "user".to_string(),
                 content: "User message".to_string(),
+                reasoning: None,
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
@@ -1356,6 +1358,7 @@ mod tests {
             ChatMessage {
                 role: "tool".to_string(),
                 content: "Tool message".to_string(),
+                reasoning: None,
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
@@ -1392,6 +1395,7 @@ mod tests {
             ChatMessage {
                 role: "user".to_string(),
                 content: "Short message".to_string(),
+                reasoning: None,
                 timestamp: Utc::now(),
                 token_count: Some(5),
                 tool_calls: None,
@@ -1401,6 +1405,7 @@ mod tests {
             ChatMessage {
                 role: "assistant".to_string(),
                 content: "Another short message".to_string(),
+                reasoning: None,
                 timestamp: Utc::now(),
                 token_count: Some(10),
                 tool_calls: None,

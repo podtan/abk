@@ -182,7 +182,8 @@ mod tests {
             project_path: PathBuf::from("/test/project"),
             session_id: "test_session".to_string(),
             checkpoint_id: "001_analyze".to_string(),
-            restored_at: Utc::now() - Duration::hours(2), // 2 hours ago
+            // Older than the 7-day retention threshold (see get_resume_context_for_project)
+            restored_at: Utc::now() - Duration::days(8),
             working_directory: PathBuf::from("/test/project"),
             task_description: "Test task".to_string(),
             workflow_step: "Analyze".to_string(),
