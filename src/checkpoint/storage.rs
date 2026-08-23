@@ -247,6 +247,63 @@ fn messages_same_lineage(a: &[ChatMessage], b: &[ChatMessage]) -> bool {
     })
 }
 
+/// Canonical serialization of ONE message's lineage-identity components.
+///
+/// This is the SINGLE SOURCE OF TRUTH for both `messages_same_lineage` and
+/// the mainline fingerprint: the field order here (role, content,
+/// tool_call_id, name, then the tool-call payload) and the exact components
+/// (including `tool_calls.id` / `r#type` / `function.name` /
+/// `function.arguments`; excluding volatile `timestamp` / `token_count` /
+/// `reasoning`) MUST stay byte-for-byte identical to what the lineage check
+/// compares. If this ever diverges from `messages_same_lineage`, the
+/// fingerprint and the fallback could disagree on borderline cases — so the
+/// fingerprint is only ever allowed to flip linear → fork (the conservative
+/// direction), never fork → linear.
+fn canonical_lineage_component(m: &ChatMessage) -> serde_json::Value {
+    let tool_calls: Vec<serde_json::Value> = m
+        .tool_calls
+        .as_ref()
+        .map(|tcs| {
+            tcs.iter()
+                .map(|tc| {
+                    serde_json::json!({
+                        "id": tc.id,
+                        "type": tc.r#type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!({
+        "role": m.role,
+        "content": m.content,
+        "tool_call_id": m.tool_call_id,
+        "name": m.name,
+        "tool_calls": tool_calls,
+    })
+}
+
+/// Compute the rolling mainline fingerprint for a message prefix.
+///
+/// A SHA-256 hex digest over the canonical serialization of every message's
+/// lineage-identity components (see `canonical_lineage_component`), joined
+/// with a NUL separator. The digest is a function ONLY of the identity
+/// components, so two prefixes are fingerprint-equal iff they are
+/// `messages_same_lineage`-equal.
+pub fn mainline_fingerprint(messages: &[ChatMessage]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for m in messages {
+        hasher.update(canonical_lineage_component(m).to_string().as_bytes());
+        hasher.update([0u8]); // NUL separator (unambiguous prefix concatenation)
+    }
+    format!("{:x}", hasher.finalize())
+}
+
 /// Global checkpoint storage manager
 pub struct CheckpointStorageManager {
     home_dir: PathBuf, // ~/.{agent_name}/
@@ -1507,15 +1564,60 @@ impl SessionStorage {
         // (conservative: never corrupts the mainline).
         let is_fork = if total < hwm {
             true
-        } else {
-            let mainline_prefix = if should_write_remote && !should_write_local {
-                #[cfg(feature = "storage-documentdb")]
-                {
+        } else if should_write_remote
+            && !should_write_local
+            && matches!(self.storage_mode, StorageMode::Remote)
+        {
+            #[cfg(feature = "storage-documentdb")]
+            {
+                // Remote-only lineage verification.
+                //
+                // FAST PATH — rolling mainline fingerprint: the latest
+                // checkpoint's stored `mainline_fingerprint` covers the
+                // mainline prefix `1..=hwm`. If the candidate fingerprint of
+                // THIS checkpoint's first `hwm` messages matches it, the
+                // prefix is byte-for-byte `messages_same_lineage`-identical
+                // (same components, same order) → linear with ZERO remote
+                // prefix reads.
+                //
+                // FALLBACK — missing/legacy fingerprint or mismatch:
+                // range-read the mainline prefix docs `seq = 1..=hwm` (one
+                // serialized await per document) and compare content as
+                // before. The fingerprint is then stamped onto the metadata
+                // (roll-forward) so the NEXT save is O(1).
+                //
+                // Directionality: a mismatch may only flip linear → fork (the
+                // conservative direction) — exactly like the content check. It
+                // can never flip fork → linear.
+                let candidate_fp = mainline_fingerprint(&messages[..hwm]);
+                let latest = self
+                    .checkpoints
+                    .iter()
+                    .max_by_key(|(_, m)| m.cursor_seq)
+                    .map(|(_, m)| m.clone());
+                // The stored fingerprint is only trusted when it covers exactly
+                // `1..=hwm` (latest cursor_seq == hwm) AND hwm > 0 (an empty
+                // mainline has no prefix to fingerprint — fall back to the
+                // length check, which is exact for hwm == 0).
+                let fingerprint_hit = hwm > 0
+                    && latest.is_some()
+                    && latest.as_ref().map(|m| m.cursor_seq as usize == hwm).unwrap_or(false)
+                    && latest
+                        .as_ref()
+                        .and_then(|m| m.mainline_fingerprint.as_ref())
+                        .map(|lp| *lp == candidate_fp)
+                        .unwrap_or(false);
+                // Read the mainline prefix ONLY when the fingerprint did not
+                // verify (missing/legacy/mismatch). A hit means the prefix is
+                // already known-identical → no remote reads.
+                let mainline_prefix: Vec<ChatMessage> = if fingerprint_hit {
+                    Vec::new()
+                } else {
+                    let mut prefix = Vec::with_capacity(hwm);
                     if let Some(ref backend) = self.remote_backend {
                         let project_hash = &self.metadata.project_hash;
                         let session_key_prefix =
                             format!("projects/{}/sessions/{}", project_hash, session_id);
-                        let mut prefix = Vec::with_capacity(hwm);
                         let mut intact = true;
                         for seq in 1..=hwm as u32 {
                             match backend
@@ -1532,20 +1634,28 @@ impl SessionStorage {
                                 }
                             }
                         }
-                        if intact {
-                            prefix
-                        } else {
+                        if !intact {
                             Vec::new() // gap/failure → mismatch → fork
+                        } else {
+                            prefix
                         }
                     } else {
                         Vec::new() // no backend → errors out later; fork meanwhile
                     }
-                }
-                #[cfg(not(feature = "storage-documentdb"))]
-                { Vec::new() }
-            } else {
-                log.read_up_to(hwm as u32).unwrap_or_default()
-            };
+                };
+                !fingerprint_hit
+                    && (mainline_prefix.len() != hwm
+                        || !messages_same_lineage(&messages[..hwm], &mainline_prefix))
+            }
+            #[cfg(not(feature = "storage-documentdb"))]
+            {
+                // Without the documentdb feature the Remote-only path is
+                // unreachable (it errors out earlier); keep the legacy
+                // length-only behavior.
+                false
+            }
+        } else {
+            let mainline_prefix = log.read_up_to(hwm as u32).unwrap_or_default();
             mainline_prefix.len() != hwm
                 || !messages_same_lineage(&messages[..hwm], &mainline_prefix)
         };
@@ -1560,6 +1670,17 @@ impl SessionStorage {
         let mut metadata = checkpoint.metadata.clone();
         metadata.cursor_seq = cursor_seq;
         metadata.message_count = total as u32;
+        // Roll the mainline fingerprint forward: a LINEAR checkpoint extends
+        // the mainline, so its fingerprint covers the full mainline prefix
+        // `1..=total` (the new cursor). A fork (`cursor_seq = 0`) has no
+        // mainline prefix — clear the fingerprint so the next save falls back
+        // to the range-read. This is persisted with the checkpoints index
+        // (local + remote) below.
+        metadata.mainline_fingerprint = if is_fork {
+            None
+        } else {
+            Some(mainline_fingerprint(&messages[..total]))
+        };
 
         // Write to local files if configured
         if should_write_local {
@@ -2766,6 +2887,7 @@ mod tests {
                 tags: vec![],
                 cursor_seq: 0,
                 message_count: 0,
+                mainline_fingerprint: None,
             },
             agent_state: AgentStateSnapshot {
                 current_mode: "confirm".to_string(),
@@ -2879,6 +3001,7 @@ mod tests {
             tags: vec![],
             cursor_seq: iteration * 2,
             message_count: iteration * 2,
+            mainline_fingerprint: None,
         }
     }
 

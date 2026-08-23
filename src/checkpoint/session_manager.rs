@@ -749,6 +749,7 @@ impl SessionManager {
             ],
             cursor_seq: 0,
             message_count: 0,
+            mainline_fingerprint: None,
         };
 
         // Capture agent state

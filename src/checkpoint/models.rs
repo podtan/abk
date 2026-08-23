@@ -68,6 +68,20 @@ pub struct CheckpointMetadata {
     /// (equal to `cursor_seq` for append-only sessions).
     #[serde(default)]
     pub message_count: u32,
+    /// Rolling mainline fingerprint of the mainline prefix `seq = 1..=cursor_seq`.
+    ///
+    /// A SHA-256 hex digest over the SAME identity components the lineage
+    /// check uses (`role` + `content` + `tool_call_id` + `name` + the full
+    /// `tool_calls` payload per message; volatile fields ignored). Lets
+    /// Remote-only `save_checkpoint` verify a linear save with ZERO remote
+    /// prefix reads (compare the candidate fingerprint against this stored
+    /// value) instead of range-reading the `1..=hwm` message docs.
+    ///
+    /// `None` for legacy indexes (serde default) and for fork checkpoints
+    /// (`cursor_seq = 0`): a missing fingerprint simply falls back to the
+    /// existing range-read verification, which then stores the fingerprint.
+    #[serde(default)]
+    pub mainline_fingerprint: Option<String>,
 }
 
 /// Agent workflow steps

@@ -676,6 +676,7 @@ impl CheckpointRestoration {
                     tags: vec![],
                     cursor_seq: 0,
                     message_count: 0,
+                    mainline_fingerprint: None,
                 },
                 agent_state: AgentStateSnapshot {
                     current_mode: "confirm".to_string(),
@@ -1114,6 +1115,7 @@ mod tests {
                 tags: vec![],
                 cursor_seq: 0,
                 message_count: 0,
+                mainline_fingerprint: None,
             },
             agent_state: AgentStateSnapshot {
                 current_mode: "confirm".to_string(),

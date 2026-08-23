@@ -104,6 +104,7 @@ mod tests {
                 tags: vec![],
                 cursor_seq: 0,
                 message_count: 0,
+                mainline_fingerprint: None,
             },
             agent_state: agent(iteration),
             conversation_state: snapshot(messages),
