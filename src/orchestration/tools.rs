@@ -107,6 +107,7 @@ mod tests {
             tool_name: "test_tool".to_string(),
             content: "Success".to_string(),
             success: true,
+            description: None,
         });
 
         assert_eq!(coordinator.invocation_count(), 1);
@@ -119,6 +120,7 @@ mod tests {
             tool_name: "failing_tool".to_string(),
             content: "Error".to_string(),
             success: false,
+            description: None,
         });
 
         assert_eq!(coordinator.invocation_count(), 2);

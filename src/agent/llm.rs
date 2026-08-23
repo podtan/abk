@@ -268,7 +268,7 @@ impl super::Agent {
 #[cfg(test)]
 mod tests {
     use super::super::Agent;
-    use crate::test_utils;
+    use crate::cli::test_utils;
     use crate::config::ConfigurationLoader;
 
     #[tokio::test]

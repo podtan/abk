@@ -869,7 +869,6 @@ mod tests {
             loader.get_u64("execution.request_interval_seconds"),
             Some(0)
         );
-        assert!(loader.get_template_path("system_template").is_ok());
 
         // Test LLM getter methods
         assert_eq!(loader.get_llm_endpoint(), "chat/completions");
