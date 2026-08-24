@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.3] - 2026-08-23
+
+### Performance
+
+- **perf(checkpoint): Remote-only linear saves are now O(1) remote prefix reads via a rolling mainline fingerprint** (nghr 3c0dba81). Previously, every LINEAR `save_checkpoint` in Remote-only mode verified lineage by **range-reading the entire mainline prefix** (`seq = 1..=hwm`) — **one serialized `await` per message doc, so per-save latency grew O(hwm)** (linear with conversation length; unbounded for long sessions). Now a **rolling mainline fingerprint** is stored with each checkpoint's `CheckpointMetadata` (`mainline_fingerprint`, serde-default `None`). It is a SHA-256 digest over the **same identity components** the lineage check uses (`role` + `content` + `tool_call_id` + `name` + the full `tool_calls` payload per message; volatile `timestamp`/`token_count`/`reasoning` excluded), so two prefixes are fingerprint-equal **iff** they are `messages_same_lineage`-equal. On save, the candidate fingerprint is computed locally from the checkpoint's first `hwm` messages: **match → linear with ZERO remote prefix reads (O(1))**; mismatch or missing/legacy → **fall back to the existing range-read** (unchanged) and roll the fingerprint forward so the next save is O(1). Directionality preserved: a mismatch may only flip linear→fork (conservative), never fork→linear. **Quantified: before = O(hwm) sequential reads per linear save; after = O(1) on fingerprint hit.** Legacy indexes (no fingerprint) still work — the first save falls back to the range-read exactly once, then stores the fingerprint. Fork semantics, the 0.14.2 `reconcile_remote_messages` path, and the on-disk/remote message layout are all unchanged.
+
+### Tests
+
+- NEW `tests/remote_resilience.rs` counting-backend tests (2): `remote_only_linear_save_is_o1_remote_reads` proves the happy path is O(1) (remote read count does **not** grow with `hwm`; asserts exactly 0 reads at two different hwm values); `legacy_no_fingerprint_falls_back_to_range_read_once` proves a legacy index falls back to the range-read exactly once (hwm reads), then stores the fingerprint so the next save is O(1).
+
 ## [0.14.2] - 2026-08-22
 
 ### Fixed
