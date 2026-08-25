@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.4] - 2026-08-25
+
+### Fixed
+
+- **Deterministic `tools` array in OpenAI requests** (nghr 1494b6fe). The `tools` JSON array sent to LLM providers was ordered by upstream iteration order — cats' native tools come from a `HashMap` (per-process random order in Rust's `RandomState`), so two agent runs emitted the same 98 tools in a different order. Since the tools block is rendered at the very start of the system prompt, a reordered array changed the first prompt tokens and forced a full prefill (cache miss) on the first call of every new run (~90s on qwen3.8-27b at 90k context). `tools_to_openai()` now sorts the tool definitions by name before serializing, so the `tools` payload is byte-identical across runs and processes regardless of upstream order (native, MCP, extension). Companion fix in cats 0.1.30 (`list_tools`/`get_all_schemas` now sorted).
+
+### Changed (deps)
+
+- cats `0.1.29` → `0.1.30` (deterministic sorted tool listing).
+
 ## [0.14.3] - 2026-08-23
 
 ### Performance
