@@ -129,6 +129,7 @@ mod tests {
         let msg = InternalMessage {
             role: MessageRole::Assistant,
             content: MessageContent::Blocks(blocks),
+            reasoning: None,
             metadata: std::collections::HashMap::new(),
             tool_call_id: None,
             name: None,
@@ -159,6 +160,7 @@ mod tests {
         let msg = InternalMessage {
             role: MessageRole::Assistant,
             content: MessageContent::Blocks(blocks),
+            reasoning: None,
             metadata: std::collections::HashMap::new(),
             tool_call_id: None,
             name: None,

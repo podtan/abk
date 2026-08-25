@@ -3,12 +3,12 @@
 //! This module provides conversion between ChatML messages (used internally
 //! by ABK) and the provider-agnostic internal message format.
 
-use umf::chatml::{ChatMLFormatter, ChatMLMessage, MessageRole as ChatMLRole};
 use crate::provider::types::internal::{
     ContentBlock, InternalMessage, MessageContent, MessageRole,
 };
 use crate::provider::ToolCall;
 use anyhow::Result;
+use umf::chatml::{ChatMLFormatter, ChatMLMessage, MessageRole as ChatMLRole};
 
 /// Adapter for converting between ChatML and internal message formats
 pub struct ChatMLAdapter;
@@ -35,36 +35,37 @@ impl ChatMLAdapter {
     /// Convert a single ChatML message to internal format
     fn message_to_internal(msg: &ChatMLMessage) -> Result<InternalMessage> {
         let role = Self::convert_role(&msg.role);
-        
+
         // If message has tool_calls, create blocks content
         if let Some(ref tool_calls) = msg.tool_calls {
             let mut blocks = Vec::new();
-            
+
             // Add text content block if present
             if !msg.content.is_empty() {
                 blocks.push(ContentBlock::text(&msg.content));
             }
-            
+
             // Add tool call blocks
             for tool_call in tool_calls {
                 let input: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-                
+
                 blocks.push(ContentBlock::tool_use(
                     &tool_call.id,
                     &tool_call.function.name,
                     input,
                 ));
             }
-            
+
             let mut metadata = std::collections::HashMap::new();
             if let Some(ref name) = msg.name {
                 metadata.insert("name".to_string(), name.clone());
             }
-            
+
             Ok(InternalMessage {
                 role,
                 content: MessageContent::Blocks(blocks),
+                reasoning: msg.reasoning_content.clone(),
                 metadata,
                 tool_call_id: None,
                 name: None,
@@ -72,12 +73,13 @@ impl ChatMLAdapter {
         } else if let Some(ref tool_call_id) = msg.tool_call_id {
             // This is a tool result message
             let blocks = vec![ContentBlock::tool_result(tool_call_id, &msg.content)];
-            
+
             let tool_name = msg.name.clone().unwrap_or_else(|| "unknown".to_string());
-            
+
             Ok(InternalMessage {
                 role,
                 content: MessageContent::Blocks(blocks),
+                reasoning: None,
                 metadata: std::collections::HashMap::new(),
                 tool_call_id: Some(tool_call_id.clone()),
                 name: Some(tool_name),
@@ -88,10 +90,11 @@ impl ChatMLAdapter {
             if let Some(ref name) = msg.name {
                 metadata.insert("name".to_string(), name.clone());
             }
-            
+
             Ok(InternalMessage {
                 role,
                 content: MessageContent::Text(msg.content.clone()),
+                reasoning: msg.reasoning_content.clone(),
                 metadata,
                 tool_call_id: None,
                 name: None,
@@ -134,7 +137,9 @@ impl ChatMLAdapter {
 
         match &msg.content {
             MessageContent::Text(text) => {
-                Ok(ChatMLMessage::new(role, text.clone(), name))
+                let mut m = ChatMLMessage::new(role, text.clone(), name);
+                m.reasoning_content = msg.reasoning.clone();
+                Ok(m)
             }
             MessageContent::Blocks(blocks) => {
                 // Extract tool calls and tool results from blocks
@@ -152,13 +157,16 @@ impl ChatMLAdapter {
                             tool_calls.push(ToolCall {
                                 id: id.clone(),
                                 r#type: "function".to_string(),
-                                function: crate::provider::FunctionCall { 
-                                    name: name.clone(), 
-                                    arguments 
+                                function: crate::provider::FunctionCall {
+                                    name: name.clone(),
+                                    arguments,
                                 },
                             });
                         }
-                        ContentBlock::ToolResult { tool_use_id, content } => {
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                        } => {
                             tool_call_id = Some(tool_use_id.clone());
                             text_parts.push(content.clone());
                         }
@@ -172,9 +180,13 @@ impl ChatMLAdapter {
 
                 // Create appropriate ChatML message based on what we found
                 if !tool_calls.is_empty() {
-                    Ok(ChatMLMessage::new_assistant_with_tool_calls(content, tool_calls))
+                    let mut m = ChatMLMessage::new_assistant_with_tool_calls(content, tool_calls);
+                    m.reasoning_content = msg.reasoning.clone();
+                    Ok(m)
                 } else if let Some(tid) = tool_call_id {
-                    let tool_name = msg.metadata.get("tool_name")
+                    let tool_name = msg
+                        .metadata
+                        .get("tool_name")
                         .cloned()
                         .unwrap_or_else(|| "unknown".to_string());
                     Ok(ChatMLMessage::new_tool(content, tid, tool_name))
@@ -203,11 +215,7 @@ mod tests {
 
     #[test]
     fn test_simple_message_conversion() {
-        let chatml_msg = ChatMLMessage::new(
-            ChatMLRole::User,
-            "Hello, world!".to_string(),
-            None,
-        );
+        let chatml_msg = ChatMLMessage::new(ChatMLRole::User, "Hello, world!".to_string(), None);
 
         let internal_msg = ChatMLAdapter::message_to_internal(&chatml_msg).unwrap();
         assert_eq!(internal_msg.role, MessageRole::User);
@@ -232,7 +240,7 @@ mod tests {
 
         let internal_msg = ChatMLAdapter::message_to_internal(&chatml_msg).unwrap();
         assert_eq!(internal_msg.role, MessageRole::Assistant);
-        
+
         if let MessageContent::Blocks(blocks) = &internal_msg.content {
             assert_eq!(blocks.len(), 2); // text + tool_use
             assert!(matches!(blocks[0], ContentBlock::Text { .. }));
@@ -252,14 +260,8 @@ mod tests {
 
         let internal_msg = ChatMLAdapter::message_to_internal(&chatml_msg).unwrap();
         assert_eq!(internal_msg.role, MessageRole::Tool);
-        assert_eq!(
-            internal_msg.tool_call_id,
-            Some("call_123".to_string())
-        );
-        assert_eq!(
-            internal_msg.name,
-            Some("get_weather".to_string())
-        );
+        assert_eq!(internal_msg.tool_call_id, Some("call_123".to_string()));
+        assert_eq!(internal_msg.name, Some("get_weather".to_string()));
     }
 
     #[test]
@@ -278,5 +280,60 @@ mod tests {
             assert_eq!(orig.role, converted.role);
             assert_eq!(orig.content, converted.content);
         }
+    }
+
+    #[test]
+    fn test_reasoning_round_trip_preserved() {
+        // Regression test (nghr 1494b6fe follow-up): assistant reasoning_content
+        // must survive ChatML -> InternalMessage -> request serialization. The
+        // engine renders <think> blocks from reasoning_content; dropping it
+        // changes the rendered prompt and defeats prefix-cache reuse across turns.
+        let mut formatter = ChatMLFormatter::new();
+        formatter.add_system_message("You are helpful".to_string(), None);
+        formatter.add_user_message("Hello".to_string(), None);
+        formatter.add_assistant_message_with_reasoning(
+            "Done.".to_string(),
+            "I should greet the user politely.".to_string(),
+            None,
+        );
+
+        let internal = ChatMLAdapter::to_internal(&formatter).unwrap();
+        assert_eq!(
+            internal[2].reasoning.as_deref(),
+            Some("I should greet the user politely.")
+        );
+
+        // And back to ChatML must keep it too.
+        let back = ChatMLAdapter::from_internal(&internal).unwrap();
+        assert_eq!(
+            back[2].reasoning_content.as_deref(),
+            Some("I should greet the user politely.")
+        );
+    }
+
+    #[test]
+    fn test_reasoning_with_tool_calls_preserved() {
+        let tool_call = ToolCall {
+            id: "call_1".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "bash".to_string(),
+                arguments: r#"{"command":"ls"}"#.to_string(),
+            },
+        };
+
+        let mut formatter = ChatMLFormatter::new();
+        formatter.add_assistant_message_with_reasoning(
+            "Running ls.".to_string(),
+            "User wants a listing.".to_string(),
+            Some(vec![tool_call]),
+        );
+
+        let internal = ChatMLAdapter::to_internal(&formatter).unwrap();
+        assert_eq!(
+            internal[0].reasoning.as_deref(),
+            Some("User wants a listing.")
+        );
+        assert!(internal[0].blocks().is_some());
     }
 }

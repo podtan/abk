@@ -632,6 +632,7 @@ where
                 Some(InternalMessage {
                     role,
                     content,
+                    reasoning: msg.get("reasoning_content").and_then(|v| v.as_str()).map(|s| s.to_string()),
                     metadata: std::collections::HashMap::new(),
                     tool_call_id,
                     name,

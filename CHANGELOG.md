@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.5] - 2026-08-25
+
+### Fixed
+
+- **Assistant `reasoning_content` preserved end-to-end** (nghr 1494b6fe follow-up). Thinking-model reasoning was captured from responses but silently dropped when re-serializing conversation history: `ChatMLAdapter::to_internal` and `messages_to_openai` had no reasoning field to carry it. Under serving engines that render `<think>` blocks from `reasoning_content` (NInfer `--preserve-thinking`), the re-rendered prompt diverged from the engine's resident prefix on **every** assistant message — the engine could not append at its frontier and fell back to `restore_turn_checkpoint`, re-prefilling the entire previous turn on the first call after each new user message (15–22s TTFT observed at 40–70k context). `umf 0.2.7` adds `InternalMessage.reasoning`; this release plumbs it through `ChatMLAdapter` (both directions), the legacy `agent_session` conversion, and emits `reasoning_content` in OpenAI requests. Round-trip proven: engine probe showed cached=126/149 with reasoning preserved vs cached=0 without. Tool-call `arguments` re-serialization verified safe (engine re-parses arguments JSON; cached=507/509 with compact re-serialized args).
+
+### Changed (deps)
+
+- umf `0.2.6` → `0.2.7` (`InternalMessage.reasoning` field).
+
 ## [0.14.4] - 2026-08-25
 
 ### Fixed
