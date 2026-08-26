@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-26
+
+### Removed (BREAKING)
+
+- **Removed the deprecated trait-based `AgentSession` orchestration** (`src/orchestration/agent_session.rs`) and its public re-exports: `AgentSession`, `SessionConfig`, `TemplateProvider`, `ClassificationHandler`, `SessionStorage`, `ErrorFormatter`, `OrchestrationLogger`, `ToolExecutor`, `ChatFormatter`, `SessionToolResult` (nghr 9f84f51d). The path was long marked deprecated with zero in-tree call sites — all consumers (trustee CLI/TUI/web) use `Agent` + `agent_orchestration`. Its history→request conversion also silently dropped assistant `tool_calls` (nghr 830c9d4d); the dead path is deleted rather than patched. Migrate to `agent_orchestration` (`AgentContext` + `run_workflow` / `run_workflow_streaming`).
+- **Removed `AgentRuntime` "Simple Orchestration"** (`src/orchestration/runtime.rs`): `AgentRuntime`, `RuntimeConfig`, `RuntimeState`, `ExecutionResult`, `WorkflowStatus`, `OrchestrationProvider`, `OrchestrationTools`, `OrchestrationFormatter`, `CheckpointCallback`, plus its only consumer `tests/orchestration_integration_test.rs`. No production use in abk or trustee.
+- 0.x semver note: per 0.x convention, breaking public-API removals land in a minor-version bump (0.14.x → 0.15.0).
+
 ## [0.14.5] - 2026-08-25
 
 ### Fixed

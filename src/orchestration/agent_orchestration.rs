@@ -1,7 +1,7 @@
 //! Orchestration functions for agents with integrated state
 //!
-//! Unlike the trait-based AgentSession, these functions work with agents
-//! that have tightly coupled components (like ABK's Agent).
+//! These functions work with agents that have tightly coupled components
+//! (like ABK's Agent).
 //!
 //! This provides the orchestration logic extraction without forcing
 //! architectural changes on the consuming agent.

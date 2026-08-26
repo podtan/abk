@@ -9,36 +9,20 @@
 //! The orchestration layer sits between the LLM provider and the application,
 //! coordinating conversations, tool calls, and checkpointing.
 //!
-//! ## Three orchestration approaches:
+//! ## Orchestration approach
 //!
-//! ### 1. Simple Orchestration (AgentRuntime)
-//! For basic agents with straightforward workflows:
-//! - Basic iteration loop
-//! - Simple tool execution
-//! - Auto-checkpointing
-//!
-//! ### 2. Trait-Based Orchestration (AgentSession) - DEPRECATED
-//! Too complex, requires 8 separate trait implementations.
-//! Use agent_orchestration instead.
-//!
-//! ### 3. Context-Based Orchestration (agent_orchestration) - RECOMMENDED
+//! Context-Based Orchestration (agent_orchestration) - RECOMMENDED
 //! For agents with integrated state (like ABK's Agent):
 //! - Single AgentContext trait to implement
 //! - Standalone functions (run_workflow, run_workflow_streaming)
 //! - Works with tightly coupled components
 
-pub mod runtime;
 pub mod workflow;
 pub mod tools;
-pub mod agent_session;  // Deprecated - use agent_orchestration
 pub mod agent_orchestration;
 pub mod output;  // OutputSink foundation (Workstream A)
 
 // Re-export main types
-pub use runtime::{
-    AgentRuntime, RuntimeConfig, RuntimeState, ExecutionResult, WorkflowStatus,
-    OrchestrationProvider, OrchestrationTools, OrchestrationFormatter, CheckpointCallback,
-};
 pub use workflow::{WorkflowCoordinator, WorkflowStep, ExecutionMode, AgentMode};
 pub use tools::{ToolCoordinator, ToolExecutionResult, ToolInvocation};
 
@@ -51,11 +35,3 @@ pub use agent_orchestration::{
 
 // Re-export output sink types
 pub use output::{OutputEvent, OutputSink, StdoutSink, NoopSink, SharedSink};
-
-// Re-export sophisticated session types (DEPRECATED)
-pub use agent_session::{
-    AgentSession, SessionConfig, TemplateProvider, ClassificationHandler,
-    SessionStorage, ErrorFormatter, OrchestrationLogger, ToolExecutor, ChatFormatter,
-    ToolExecutionResult as SessionToolResult,
-};
-
