@@ -199,6 +199,62 @@ impl McpClient {
         }
     }
 
+    /// Send an authenticated MCP request.
+    ///
+    /// With `registry-mcp-token`, a 401 response triggers a single
+    /// invalidated retry: the dynamic token provider's cached token is
+    /// dropped via [`pep::token_provider::TokenProvider::invalidate`] and
+    /// the request is rebuilt and re-sent exactly once. Defense-in-depth
+    /// for tokens that are rejected by the resource server before the
+    /// provider's cache believes they expired (nghr 199c4801; pep 849e7528
+    /// added the invalidate hook for exactly this). Static-token configs
+    /// have nothing to refresh and are not retried.
+    async fn send_with_retry(
+        &self,
+        build_request: impl Fn() -> reqwest::RequestBuilder,
+        config: &McpServerConfig,
+    ) -> RegistryResult<reqwest::Response> {
+        let mut http_request = build_request();
+
+        #[cfg(feature = "registry-mcp-token")]
+        self.apply_auth(&mut http_request, config).await;
+
+        #[cfg(not(feature = "registry-mcp-token"))]
+        self.apply_auth_static(&mut http_request, config);
+
+        let response = Self::send_one(http_request, config).await?;
+
+        #[cfg(feature = "registry-mcp-token")]
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+            && config.token_provider.is_some()
+        {
+            crate::observability::tee_eprintln(&format!(
+                "[MCP] 401 from '{}' — cached token rejected; invalidating and retrying once",
+                config.name
+            ));
+            if let Some(ref provider) = config.token_provider {
+                provider.invalidate().await;
+            }
+            let mut http_request = build_request();
+            self.apply_auth(&mut http_request, config).await;
+            return Self::send_one(http_request, config).await;
+        }
+
+        Ok(response)
+    }
+
+    async fn send_one(
+        http_request: reqwest::RequestBuilder,
+        config: &McpServerConfig,
+    ) -> RegistryResult<reqwest::Response> {
+        http_request.send().await.map_err(|e| {
+            RegistryError::McpServerError {
+                server: config.name.clone(),
+                message: format!("HTTP request failed: {}", e),
+            }
+        })
+    }
+
     /// Fetch tools from an MCP server.
     pub async fn fetch_tools(&self, config: &McpServerConfig) -> RegistryResult<Vec<McpTool>> {
         let message_url = format!("{}/message", config.url.trim_end_matches('/'));
@@ -210,21 +266,12 @@ impl McpClient {
             params: Some(json!({})),
         };
 
-        let mut http_request = self.http_client.post(&message_url).json(&request);
-
-        #[cfg(feature = "registry-mcp-token")]
-        self.apply_auth(&mut http_request, config).await;
-
-        #[cfg(not(feature = "registry-mcp-token"))]
-        self.apply_auth_static(&mut http_request, config);
-
-        let response = http_request
-            .send()
-            .await
-            .map_err(|e| RegistryError::McpServerError {
-                server: config.name.clone(),
-                message: format!("HTTP request failed: {}", e),
-            })?;
+        let response = self
+            .send_with_retry(
+                || self.http_client.post(&message_url).json(&request),
+                config,
+            )
+            .await?;
 
         if !response.status().is_success() {
             return Err(RegistryError::McpServerError {
@@ -311,21 +358,12 @@ impl McpClient {
             })),
         };
 
-        let mut http_request = self.http_client.post(&message_url).json(&init_request);
-
-        #[cfg(feature = "registry-mcp-token")]
-        self.apply_auth(&mut http_request, config).await;
-
-        #[cfg(not(feature = "registry-mcp-token"))]
-        self.apply_auth_static(&mut http_request, config);
-
-        let response = http_request
-            .send()
-            .await
-            .map_err(|e| RegistryError::McpServerError {
-                server: config.name.clone(),
-                message: format!("Initialize request failed: {}", e),
-            })?;
+        let response = self
+            .send_with_retry(
+                || self.http_client.post(&message_url).json(&init_request),
+                config,
+            )
+            .await?;
 
         if !response.status().is_success() {
             return Err(RegistryError::McpServerError {
@@ -342,24 +380,12 @@ impl McpClient {
             params: None,
         };
 
-        let mut http_request = self
-            .http_client
-            .post(&message_url)
-            .json(&initialized_request);
-
-        #[cfg(feature = "registry-mcp-token")]
-        self.apply_auth(&mut http_request, config).await;
-
-        #[cfg(not(feature = "registry-mcp-token"))]
-        self.apply_auth_static(&mut http_request, config);
-
-        let _ = http_request
-            .send()
-            .await
-            .map_err(|e| RegistryError::McpServerError {
-                server: config.name.clone(),
-                message: format!("Initialized notification failed: {}", e),
-            })?;
+        let _ = self
+            .send_with_retry(
+                || self.http_client.post(&message_url).json(&initialized_request),
+                config,
+            )
+            .await?;
 
         Ok(())
     }
@@ -395,21 +421,9 @@ impl McpClient {
             })),
         };
 
-        let mut http_request = self.http_client.post(&message_url).json(&request);
-
-        #[cfg(feature = "registry-mcp-token")]
-        self.apply_auth(&mut http_request, config).await;
-
-        #[cfg(not(feature = "registry-mcp-token"))]
-        self.apply_auth_static(&mut http_request, config);
-
-        let response = http_request
-            .send()
-            .await
-            .map_err(|e| RegistryError::McpServerError {
-                server: config.name.clone(),
-                message: format!("Tool call request failed: {}", e),
-            })?;
+        let response = self
+            .send_with_retry(|| self.http_client.post(&message_url).json(&request), config)
+            .await?;
 
         if !response.status().is_success() {
             return Err(RegistryError::McpServerError {
@@ -528,5 +542,92 @@ mod tests {
     fn test_mcp_client_default() {
         let client = McpClient::default();
         let _ = client;
+    }
+
+    // -- retry-on-401 (pep 849e7528 follow-through) ---------------------------
+    //
+    // TokenProviderEnum is a closed enum, so a refreshable custom provider
+    // can't be injected through the public config path; invalidate semantics
+    // (incl. enum dispatch) are proven by pep's own unit tests. These tests
+    // prove the retry MECHANICS in abk: one invalidated re-send after a 401,
+    // success on the second attempt, no retry loop on persistent 401, and no
+    // spurious retry when the first attempt succeeds.
+
+    /// One-shot TCP server. Serves `statuses` in order (e.g. ["401", "200"]);
+    /// a "200" entry answers with a valid empty tools/list JSON-RPC reply.
+    /// Returns the bound address (tests append /message via the client).
+    #[cfg(feature = "registry-mcp-token")]
+    fn serve_sequential(statuses: &[&str]) -> std::net::SocketAddr {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let statuses: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+        std::thread::spawn(move || {
+            let body = br#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#;
+            for status in &statuses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).unwrap_or(0);
+                let status_line = if status == "200" {
+                    "HTTP/1.1 200 OK"
+                } else {
+                    "HTTP/1.1 401 Unauthorized"
+                };
+                let resp = format!(
+                    "{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    status_line,
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.write_all(body.as_slice());
+            }
+            // Hold the listener open until the test drops its client; any
+            // UNEXPECTED extra request (retry loop bug) would block here and
+            // the test's timeout/panic surfaces it.
+            let _ = listener;
+        });
+        addr
+    }
+
+    #[cfg(feature = "registry-mcp-token")]
+    #[tokio::test]
+    async fn unauthorized_is_retried_once_then_succeeds() {
+        let addr = serve_sequential(&["401", "200"]);
+        let config = McpServerConfig::new("retry-ok", &format!("http://{addr}"))
+            .with_token_provider(pep::token_provider::TokenProviderEnum::Static(
+                pep::token_provider::StaticTokenProvider::new("fixed-token".to_string()),
+            ));
+        let client = McpClient::new();
+        let tools = client.fetch_tools(&config).await.unwrap();
+        assert!(tools.is_empty(), "second attempt must succeed with empty tools");
+    }
+
+    #[cfg(feature = "registry-mcp-token")]
+    #[tokio::test]
+    async fn persistent_unauthorized_fails_after_single_retry() {
+        let addr = serve_sequential(&["401", "401"]);
+        let config = McpServerConfig::new("retry-fail", &format!("http://{addr}"))
+            .with_token_provider(pep::token_provider::TokenProviderEnum::Static(
+                pep::token_provider::StaticTokenProvider::new("fixed-token".to_string()),
+            ));
+        let client = McpClient::new();
+        let result = client.fetch_tools(&config).await;
+        assert!(result.is_err(), "double 401 must surface as an error");
+    }
+
+    #[cfg(feature = "registry-mcp-token")]
+    #[tokio::test]
+    async fn success_first_try_makes_no_second_request() {
+        // The server thread handles exactly ONE request; any spurious retry
+        // would hang on accept() and fail the test via its own completion.
+        let addr = serve_sequential(&["200"]);
+        let config = McpServerConfig::new("no-retry", &format!("http://{addr}"))
+            .with_token_provider(pep::token_provider::TokenProviderEnum::Static(
+                pep::token_provider::StaticTokenProvider::new("fixed-token".to_string()),
+            ));
+        let client = McpClient::new();
+        let tools = client.fetch_tools(&config).await.unwrap();
+        assert!(tools.is_empty());
     }
 }

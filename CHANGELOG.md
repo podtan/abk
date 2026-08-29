@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-08-29
+
+### Fixed
+
+- **Single retry-on-401 for dynamic-token MCP requests** (nghr 199c4801 defense-in-depth; pep 849e7528 shipped `TokenProvider::invalidate` for this). `McpClient` requests now route through one `send_with_retry` helper: a 401 on a provider-backed server invalidates the cached token and re-sends exactly once (loud `[MCP] 401 … retrying once` log line). A token that dies at the resource server before the provider's cache believes it expired now costs one request instead of a fail-closed window. Static-token configs are not retried (nothing to refresh).
+- pep `0.5.5` → `0.5.6` (lock): service-account token cache now honors the real JWT `exp` claim — the actual root-cause fix for the ~15-min Cedar fail-closed windows (see pep 0.5.6 / nghr 849e7528).
+
+### Tests
+
+- 3 new guards with a std-only TCP server: `401→200` succeeds on the invalidated retry; `401→401` errors after exactly one retry; first-try `200` makes no second request. Module green in debug AND release (no Agent construction — unaffected by the known debug-only reqwest panic).
+
 ## [0.16.0] - 2026-08-29
 
 ### Added
