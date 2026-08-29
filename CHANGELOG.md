@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-08-29
+
+### Changed (deps)
+
+- pep `0.4` → `0.5` (nghr 199c4801). Converges the abk dependency tree on pep 0.5.5 — the same version trustee-api/core already use — eliminating the two-pep skew in the trustee workspace (trustee's lock previously carried pep 0.4.5 via abk **and** 0.5.5 via trustee-api/core). No code changes were required: the pep API surface abk consumes (`token_provider::{ServiceAccountConfig, ServiceAccountTokenProvider, TokenProviderEnum, TokenProvider, StaticTokenProvider}`, `token_store::{FileTokenStore, TokenStore, StoredToken}`, `oidc::types::OidcClientConfig`, `oidc_client::OidcClient`) is unchanged between 0.4.x and 0.5.5 (verified by source diff).
+- **Scope note (verified 2026-08-29):** this bump alone does NOT close the ~15-min Cedar fail-closed windows from nghr 199c4801. `ServiceAccountTokenProvider`'s proactive refresh (CachedToken, 30s buffer) is functionally identical across pep 0.4.0–0.5.5; the windows stem from it trusting the exchange response's `expires_in` estimate instead of the real JWT `exp` claim — a gap already fixed for the human path in pep 0.5.3 (d7b485d, session_manager only). The service-path port is tracked in the pep follow-up issue.
+
 ## [0.15.0] - 2026-08-26
 
 ### Removed (BREAKING)
