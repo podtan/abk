@@ -73,9 +73,25 @@ pub async fn execute_run<C: CommandContext>(
         agent_mode, run_mode
     ));
 
-    let mut agent = crate::agent::Agent::new_from_config(
+    // Resolve the MCP source BEFORE constructing the agent: a prebuilt loader
+    // in the caller's RunContext must be injected at construction time (the
+    // loader is built once, shared via Arc, and construction performs zero
+    // MCP network I/O). Retro-fitting after construction is not possible.
+    #[cfg(feature = "registry-mcp")]
+    let mcp_source = match run_context
+        .as_ref()
+        .and_then(|rc| rc.mcp_loader().cloned())
+    {
+        Some(loader) => crate::agent::McpSource::Prebuilt(Some(loader)),
+        None => crate::agent::McpSource::FromConfig,
+    };
+    #[cfg(not(feature = "registry-mcp"))]
+    let mcp_source = crate::agent::McpSource::FromConfig;
+
+    let mut agent = crate::agent::Agent::new_from_config_with_mcp(
         ctx.config().clone(),
         Some(agent_mode),
+        mcp_source,
     )
     .await
     .map_err(|e| CliError::ExecutionError(format!("Failed to create agent: {}", e)))?;

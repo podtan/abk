@@ -43,6 +43,27 @@ pub mod mcp;
 #[cfg(feature = "registry-mcp")]
 pub use mcp::{McpToolLoader, McpToolExecutionResult};
 
+/// Where the agent's MCP tool loader comes from at construction time.
+///
+/// `FromConfig` preserves the legacy behavior: when the configuration enables
+/// MCP, every configured server is contacted (SSE connect + tool discovery)
+/// while the agent is being constructed. `Prebuilt` lets the caller inject a
+/// loader that was built once and is shared across agents (e.g. a per-user
+/// registry cache in a multi-user host), so per-task agent construction
+/// performs zero MCP network I/O.
+///
+/// The enum exists unconditionally so callers (CLI, hosts) can be
+/// feature-agnostic; the `Prebuilt` payload only exists with the
+/// `registry-mcp` feature.
+pub enum McpSource {
+    /// Build the loader from the configuration's `[mcp]` section (legacy path).
+    FromConfig,
+    /// Use this prebuilt loader as-is. `None` disables MCP entirely —
+    /// identical to a config with MCP disabled, but also skips config parsing.
+    #[cfg(feature = "registry-mcp")]
+    Prebuilt(Option<std::sync::Arc<McpToolLoader>>),
+}
+
 /// Main ABK agent structure.
 #[allow(dead_code)]
 pub struct Agent {
@@ -63,8 +84,12 @@ pub struct Agent {
     tool_registry: ToolRegistry,
     execution_mode: ExecutionMode,
     // MCP tools loaded from external servers
+    // Arc-shared so a host (e.g. trustee) can build one loader and hand the
+    // same instance to every per-task Agent (zero reconnects). All in-crate
+    // consumers borrow through `Option<Arc<_>>` with auto-deref, so call
+    // sites are unchanged.
     #[cfg(feature = "registry-mcp")]
-    mcp_tools: Option<McpToolLoader>,
+    mcp_tools: Option<std::sync::Arc<McpToolLoader>>,
     // Session management (replaces checkpoint_storage_manager, current_session, and classification state)
     // Wrapped in Option to allow taking ownership during delegation calls
     session_manager: Option<crate::checkpoint::SessionManager>,
@@ -120,6 +145,25 @@ impl Agent {
     pub async fn new_from_config(
         config: crate::config::Configuration,
         mode: Option<AgentMode>,
+    ) -> Result<Self> {
+        Self::new_from_config_with_mcp(config, mode, McpSource::FromConfig).await
+    }
+
+    /// Create a new agent from a loaded configuration, with an explicit MCP
+    /// source.
+    ///
+    /// Use [`McpSource::Prebuilt`] to inject an already-connected
+    /// [`McpToolLoader`] (shared via `Arc`) and skip every MCP network
+    /// operation during construction; per-task agent creation in multi-user
+    /// hosts then costs zero reconnects. [`McpSource::FromConfig`] reproduces
+    /// [`Agent::new_from_config`] exactly.
+    ///
+    /// This avoids reading any config files from disk. Use this when the caller
+    /// has already loaded and merged the configuration (e.g., via figment layered config).
+    pub async fn new_from_config_with_mcp(
+        config: crate::config::Configuration,
+        mode: Option<AgentMode>,
+        mcp: McpSource,
     ) -> Result<Self> {
         let env = EnvironmentLoader::new(None);
         let config_loader = ConfigurationLoader::from_config(config);
@@ -194,32 +238,43 @@ impl Agent {
         );
 
         #[cfg(feature = "registry-mcp")]
-        let mcp_tools = {
-            if let Some(ref mcp_config) = config_loader.config.mcp {
-                if mcp_config.enabled {
-                    match McpToolLoader::new(mcp_config).await {
-                        Ok(loader) => {
-                            // Always keep the loader, even when no tools loaded.
-                            // The loader carries `server_statuses` with per-server
-                            // error details that must be emitted to the TUI/CLI
-                            // even when ALL servers fail.  Previously, discarding
-                            // the loader when `has_tools()` was false caused the
-                            // MCP panel to permanently show "0/0 (none)" with no
-                            // indication that servers were attempted.
-                            Some(loader)
+        let mcp_tools = match mcp {
+            // Prebuilt: caller-supplied loader (or explicit disable).
+            // Zero network I/O — this is the whole point of the injection path.
+            McpSource::Prebuilt(prebuilt) => prebuilt,
+            McpSource::FromConfig => {
+                if let Some(ref mcp_config) = config_loader.config.mcp {
+                    if mcp_config.enabled {
+                        #[cfg(feature = "registry-mcp-token")]
+                        let built = McpToolLoader::with_token_store(mcp_config, None).await;
+                        #[cfg(not(feature = "registry-mcp-token"))]
+                        let built = McpToolLoader::new(mcp_config).await;
+                        match built {
+                            Ok(loader) => {
+                                // Always keep the loader, even when no tools loaded.
+                                // The loader carries `server_statuses` with per-server
+                                // error details that must be emitted to the TUI/CLI
+                                // even when ALL servers fail.  Previously, discarding
+                                // the loader when `has_tools()` was false caused the
+                                // MCP panel to permanently show "0/0 (none)" with no
+                                // indication that servers were attempted.
+                                Some(std::sync::Arc::new(loader))
+                            }
+                            Err(e) => {
+                                crate::observability::tee_eprintln(&format!("Warning: Failed to load MCP tools: {}", e));
+                                None
+                            }
                         }
-                        Err(e) => {
-                            crate::observability::tee_eprintln(&format!("Warning: Failed to load MCP tools: {}", e));
-                            None
-                        }
+                    } else {
+                        None
                     }
                 } else {
                     None
                 }
-            } else {
-                None
             }
         };
+        #[cfg(not(feature = "registry-mcp"))]
+        let _ = mcp; // MCP support not compiled; the source is irrelevant.
 
         let open_window_size = config_loader.config.tools.open_file_window_size;
 
@@ -708,4 +763,149 @@ impl Drop for Agent {
             }
         }
     }
+}
+
+#[cfg(all(test, feature = "registry-mcp"))]
+mod mcp_source_tests {
+    use super::{Agent, McpSource, McpToolLoader};
+    use crate::config::{McpConfig, McpServerConfig};
+    use crate::orchestration::agent_orchestration::AgentContext;
+    use crate::orchestration::output::{OutputEvent, OutputSink, SharedSink};
+    use std::sync::{Arc, Mutex};
+
+    /// Records emitted output events for assertions.
+    #[derive(Default)]
+    struct RecordingSink(Mutex<Vec<OutputEvent>>);
+
+    impl OutputSink for RecordingSink {
+        fn emit(&self, event: OutputEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    impl RecordingSink {
+        fn mcp_status_count(&self) -> usize {
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| matches!(e, OutputEvent::McpServerStatus { .. }))
+                .count()
+        }
+    }
+
+    fn mcp_status_events(agent: &mut Agent) -> usize {
+        let recorder = Arc::new(RecordingSink::default());
+        let sink: SharedSink = recorder.clone();
+        agent.set_output_sink(sink);
+        agent.emit_mcp_server_statuses();
+        recorder.mcp_status_count()
+    }
+
+    /// Config with MCP enabled pointing at a port where nothing listens.
+    fn config_with_enabled_mcp() -> crate::config::Configuration {
+        let mut config = crate::config::ConfigurationLoader::get_default_config();
+        config.mcp = Some(McpConfig {
+            enabled: true,
+            timeout_seconds: 1,
+            credentials: Default::default(),
+            servers: vec![McpServerConfig {
+                name: "blackhole".to_string(),
+                url: "http://127.0.0.1:9/sse".to_string(),
+                transport: "http".to_string(),
+                auth_token: None,
+                credentials: None,
+                auto_init: false,
+            }],
+        });
+        config
+    }
+
+    #[tokio::test]
+    async fn prebuilt_none_performs_zero_mcp_io() {
+        let _guard = crate::cli::test_utils::setup_env();
+        // FromConfig with this config would attempt a connect (loader kept,
+        // status emitted). Prebuilt(None) must skip ALL of it: fast, no loader.
+        let start = std::time::Instant::now();
+        let mut agent = Agent::new_from_config_with_mcp(
+            config_with_enabled_mcp(),
+            None,
+            McpSource::Prebuilt(None),
+        )
+        .await
+        .unwrap();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "Prebuilt(None) must not attempt MCP connections, took {:?}",
+            start.elapsed()
+        );
+        assert_eq!(mcp_status_events(&mut agent), 0, "no loader → no server statuses");
+    }
+
+    #[tokio::test]
+    async fn prebuilt_some_schemas_pass_through() {
+        let _guard = crate::cli::test_utils::setup_env();
+        // Build a loader offline: empty config = no network, then register
+        // tools directly into its (public) registry.
+        let empty = McpConfig::default();
+        let mut loader = McpToolLoader::new(&empty).await.unwrap();
+        loader
+            .registry
+            .register_native_batch(vec![
+                umf::InternalTool::new(
+                    "mcp_alpha_tool",
+                    "alpha test tool",
+                    serde_json::json!({"type": "object"}),
+                ),
+                umf::InternalTool::new(
+                    "mcp_beta_tool",
+                    "beta test tool",
+                    serde_json::json!({"type": "object"}),
+                ),
+            ])
+            .unwrap();
+        loader.tool_count = 2;
+        let expected = loader.get_openai_schemas();
+        assert_eq!(expected.len(), 2);
+
+        let agent = Agent::new_from_config_with_mcp(
+            crate::config::ConfigurationLoader::get_default_config(),
+            None,
+            McpSource::Prebuilt(Some(Arc::new(loader))),
+        )
+        .await
+        .unwrap();
+
+        let schemas = agent.get_tool_schemas();
+        for name in ["mcp_alpha_tool", "mcp_beta_tool"] {
+            assert!(
+                schemas.iter().any(|s| {
+                    s.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str())
+                        == Some(name)
+                }),
+                "agent schemas must contain prebuilt tool {}",
+                name
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn from_config_enabled_empty_servers_still_builds_loader() {
+        let _guard = crate::cli::test_utils::setup_env();
+        // FromConfig path unchanged: MCP enabled with zero servers → loader
+        // built (carrying zero statuses), agent constructs normally.
+        let mut config = crate::config::ConfigurationLoader::get_default_config();
+        config.mcp = Some(McpConfig {
+            enabled: true,
+            timeout_seconds: 1,
+            credentials: Default::default(),
+            servers: vec![],
+        });
+        let mut agent =
+            Agent::new_from_config_with_mcp(config, None, McpSource::FromConfig)
+                .await
+                .unwrap();
+        assert_eq!(mcp_status_events(&mut agent), 0, "zero servers → zero statuses");
+    }
+
 }

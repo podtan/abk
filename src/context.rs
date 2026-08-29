@@ -229,6 +229,23 @@ pub struct RunContext {
         serde(skip)
     )]
     pub token_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
+
+    /// Optional prebuilt MCP tool loader.
+    ///
+    /// When set, `Agent::new_from_config_with_mcp` uses this loader instead of
+    /// building one from the configuration — agent construction performs zero
+    /// MCP network I/O, and the same connected loader can be shared across
+    /// agents. Callers read it back via [`RunContext::mcp_loader`] before
+    /// constructing the agent (construction cannot be retrofitted after the
+    /// fact).
+    ///
+    /// Only available with the `agent` and `registry-mcp` features.
+    #[cfg(all(feature = "agent", feature = "registry-mcp"))]
+    #[cfg_attr(
+        any(feature = "checkpoint", feature = "config", feature = "agent", feature = "orchestration"),
+        serde(skip)
+    )]
+    pub mcp_loader: Option<std::sync::Arc<crate::agent::McpToolLoader>>,
 }
 
 impl RunContext {
@@ -274,6 +291,19 @@ impl RunContext {
         self
     }
 
+    /// Set a prebuilt MCP tool loader (requires `agent` + `registry-mcp`).
+    ///
+    /// The loader must already be connected; agent construction will not
+    /// perform any MCP network I/O when this is set.
+    #[cfg(all(feature = "agent", feature = "registry-mcp"))]
+    pub fn with_mcp_loader(
+        mut self,
+        loader: std::sync::Arc<crate::agent::McpToolLoader>,
+    ) -> Self {
+        self.mcp_loader = Some(loader);
+        self
+    }
+
     /// Get the project identity, if any.
     pub fn project(&self) -> Option<&ProjectIdentity> {
         self.project.as_ref()
@@ -298,6 +328,14 @@ impl RunContext {
     #[cfg(feature = "registry-mcp-token")]
     pub fn token_store(&self) -> Option<&std::sync::Arc<dyn pep::token_store::TokenStore>> {
         self.token_store.as_ref()
+    }
+
+    /// Get the prebuilt MCP tool loader, if any (requires `agent` +
+    /// `registry-mcp`). Check this BEFORE constructing the agent and pass the
+    /// result as `McpSource::Prebuilt` to `new_from_config_with_mcp`.
+    #[cfg(all(feature = "agent", feature = "registry-mcp"))]
+    pub fn mcp_loader(&self) -> Option<&std::sync::Arc<crate::agent::McpToolLoader>> {
+        self.mcp_loader.as_ref()
     }
 
     /// Resolve the agent name, falling back to the `ABK_AGENT_NAME`
@@ -344,6 +382,17 @@ impl std::fmt::Debug for RunContext {
                     &self.token_store.as_ref().map(|_| "<TokenStore>")
                 },
                 #[cfg(not(feature = "registry-mcp-token"))]
+                {
+                    &None::<&str>
+                },
+            )
+            .field(
+                "mcp_loader",
+                #[cfg(all(feature = "agent", feature = "registry-mcp"))]
+                {
+                    &self.mcp_loader.as_ref().map(|_| "<McpToolLoader>")
+                },
+                #[cfg(not(all(feature = "agent", feature = "registry-mcp")))]
                 {
                     &None::<&str>
                 },

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-29
+
+### Added
+
+- **`Agent::new_from_config_with_mcp(config, mode, mcp: McpSource)`** with `McpSource::FromConfig | Prebuilt(Option<Arc<McpToolLoader>>)` (nghr 72fce534, ABK-16A). `Prebuilt` injects an already-connected loader (or explicitly disables MCP) so agent construction performs **zero MCP network I/O**; hosts that build one loader and share it across per-task agents (trustee per-user registry cache, workstream task C) no longer reconnect per agent. `FromConfig` reproduces the legacy path exactly and now routes through `McpToolLoader::with_token_store(…, None)` under `registry-mcp-token` (behaviorally identical to `::new`).
+- **`RunContext.mcp_loader` + `with_mcp_loader()` + `mcp_loader()`** (mirrors the `token_store` pattern; `serde(skip)`, masked in `Debug`). `Agent` construction cannot be retrofitted after the fact, so `abk::cli::execute_run` checks the caller's `RunContext` **before** constructing the agent and forwards it as `McpSource::Prebuilt`.
+- `Agent.mcp_tools` is now `Option<Arc<McpToolLoader>>` — shareable across agents. All in-crate consumers (`emit_mcp_server_statuses`, tool dispatch, schema aggregation) borrow via auto-deref; no call-site changes.
+
+### Tests
+
+- `mcp_source_tests`: `Prebuilt(None)` constructs with zero connect attempts (config has an enabled MCP server; asserted <1s **and** zero `McpServerStatus` emissions); `Prebuilt(Some(loader))` schemas pass through to `AgentContext::get_tool_schemas`; `FromConfig` with enabled-but-empty MCP still builds the loader. All green (release): full lib suite **236 passed / 0 failed / 2 ignored**.
+- **Root-caused the long-standing "7 pre-existing lib-test failures"** (nghr 199c4801 session): every failure (old and new) is `cats::WebFetchTool::new` → `reqwest::blocking::Client` construction, which spawns/drops an internal tokio runtime; reqwest's `wait::enter()` check is `#[cfg(debug_assertions)]`, so ANY `Agent` construction inside a tokio context panics **in debug builds only**. Release builds (trustee prod) are unaffected. Agent-constructing tests must run under `--release` (or `-C debug-assertions=off`) until cats builds `WebFetchTool` without `reqwest::blocking`.
+
+### Changed (BREAKING)
+
+- `abk 0.16.0` is a minor bump for the new public API (0.x convention). trustee pins abk = "0.15.0" (root + trustee-core); both pins move to "0.16.0" at trustee's next release — decide 0.9.33 (pins only) vs 0.10.0 (full ship) with the owner.
+
 ## [0.15.1] - 2026-08-29
 
 ### Changed (deps)
