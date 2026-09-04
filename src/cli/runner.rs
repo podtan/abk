@@ -156,6 +156,9 @@ pub async fn run_from_raw_config(
 /// * `attachments` - Local image files attached to the initial user turn
 ///   (multimodal). Loaded and base64-encoded before the first model call;
 ///   pass an empty vec for text-only runs.
+/// * `images` - Pre-loaded image sidecar entries (mime + base64 + filename)
+///   for callers that hold attachments in memory (web/API hosts). Merged
+///   with `attachments`.
 /// * `output_sink` - Optional custom output sink (e.g., TuiSink for TUI mode).
 ///   When `Some`, the agent's output sink is set to this value, overriding
 ///   the default NoopSink behavior in TUI mode.
@@ -180,6 +183,7 @@ pub async fn run_task_from_raw_config(
     mut build_info: Option<crate::cli::config::BuildInfo>,
     task: &str,
     attachments: Vec<std::path::PathBuf>,
+    images: Vec<umf::chatml::ImageAttachment>,
     output_sink: Option<crate::orchestration::output::SharedSink>,
     resume_info: Option<super::ResumeInfo>,
     resume_info_tx: Option<tokio::sync::mpsc::UnboundedSender<Option<super::ResumeInfo>>>,
@@ -251,6 +255,7 @@ pub async fn run_task_from_raw_config(
         run_mode: None,
         verbose: false,
         attachments,
+        images,
         output_sink,
         resume_info,
         on_checkpoint: resume_info_tx,
@@ -1526,6 +1531,7 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         run_mode: None,
         verbose,
         attachments,
+        images: Vec::new(),
         output_sink: None,
         resume_info,
         cancel_token: None,

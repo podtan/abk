@@ -21,6 +21,11 @@ pub struct RunOptions {
     /// Loaded and base64-encoded before the first model call; empty for
     /// text-only runs. See `crate::cli::attachments`.
     pub attachments: Vec<std::path::PathBuf>,
+    /// Pre-loaded image attachments (multimodal sidecar entries) for
+    /// programmatic callers that already hold base64 payloads in memory
+    /// (e.g. web/API hosts). Merged with `attachments` — no file loading
+    /// happens for these.
+    pub images: Vec<umf::chatml::ImageAttachment>,
     /// Optional custom output sink (e.g., TuiSink for TUI mode).
     /// When `Some`, the agent's output sink is set to this value, overriding
     /// the default NoopSink behavior in TUI mode.
@@ -45,17 +50,22 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<TaskResult> {
-    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token, run_context, attachments } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token, run_context, attachments, images } = options;
 
     // Load image attachments up front: fail fast (before agent init / any
-    // model call) on unsupported types or unreadable files.
-    let attached_images = if attachments.is_empty() {
+    // model call) on unsupported types or unreadable files, then merge with
+    // any pre-loaded sidecar entries the caller passed directly.
+    let mut attached_images = if attachments.is_empty() {
         Vec::new()
     } else {
         ctx.log_info(&format!("Loading {} image attachment(s)...", attachments.len()));
         crate::cli::attachments::load_image_attachments(&attachments)
             .map_err(CliError::ValidationError)?
     };
+    if !images.is_empty() {
+        ctx.log_info(&format!("Received {} pre-loaded image attachment(s)...", images.len()));
+        attached_images.extend(images);
+    }
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-09-04
+
+### Added
+
+- **`RunOptions.images: Vec<umf::chatml::ImageAttachment>`** (nghr f64e98af) — pre-loaded multimodal sidecar entries for programmatic callers that hold base64 payloads in memory (trustee web/API hosts; no files to load). `execute_run` merges them with the file-based `attachments` (loaded paths first, then in-memory entries) and both ride the same fresh/resume user-turn attachment path shipped in 0.17.0.
+- **`run_task_from_raw_config` gains an `images` parameter** (after `attachments`) mirroring the two-parameter split: `Vec<PathBuf>` for file-backed callers, `Vec<ImageAttachment>` for in-memory callers.
+
+### Breaking
+
+- Minor bump (0.x convention): `RunOptions` gained a public field (exhaustive struct literals break); `run_task_from_raw_config` gained a positional parameter.
+
 ## [0.17.0] - 2026-09-04
 
 ### Added
