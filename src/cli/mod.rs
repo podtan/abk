@@ -38,6 +38,9 @@ pub mod error;
 pub mod adapters;
 
 #[cfg(feature = "cli")]
+pub mod attachments;
+
+#[cfg(feature = "cli")]
 pub mod commands;
 
 #[cfg(feature = "cli")]
@@ -58,6 +61,9 @@ pub use error::{CliError, CliResult};
 
 #[cfg(feature = "cli")]
 pub use adapters::{CommandContext, CheckpointAccess, ProviderFactory, ToolRegistryAdapter};
+
+#[cfg(feature = "cli")]
+pub use attachments::{extract_attach_flags, load_image_attachments, sniff_image_mime};
 
 #[cfg(feature = "cli")]
 pub use config::*;

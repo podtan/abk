@@ -17,6 +17,10 @@ pub struct RunOptions {
     pub mode: Option<String>,
     pub run_mode: Option<String>,
     pub verbose: bool,
+    /// Local image files attached to the initial user turn (multimodal).
+    /// Loaded and base64-encoded before the first model call; empty for
+    /// text-only runs. See `crate::cli::attachments`.
+    pub attachments: Vec<std::path::PathBuf>,
     /// Optional custom output sink (e.g., TuiSink for TUI mode).
     /// When `Some`, the agent's output sink is set to this value, overriding
     /// the default NoopSink behavior in TUI mode.
@@ -41,7 +45,17 @@ pub async fn execute_run<C: CommandContext>(
     ctx: &C,
     options: RunOptions,
 ) -> CliResult<TaskResult> {
-    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token, run_context } = options;
+    let RunOptions { task, yolo, mode, run_mode, verbose, output_sink, resume_info, on_checkpoint, cancel_token, run_context, attachments } = options;
+
+    // Load image attachments up front: fail fast (before agent init / any
+    // model call) on unsupported types or unreadable files.
+    let attached_images = if attachments.is_empty() {
+        Vec::new()
+    } else {
+        ctx.log_info(&format!("Loading {} image attachment(s)...", attachments.len()));
+        crate::cli::attachments::load_image_attachments(&attachments)
+            .map_err(CliError::ValidationError)?
+    };
 
     // Determine run mode (global or local)
     let run_mode = run_mode.unwrap_or_else(|| "global".to_string());
@@ -185,7 +199,12 @@ pub async fn execute_run<C: CommandContext>(
         .map_err(|e| CliError::ExecutionError(format!("Failed to resume from checkpoint: {}", e)))?;
         
         // Add the new task as a user message to the restored conversation
-        agent.chat_formatter_mut().add_user_message(task.clone(), None);
+        // (multimodal: images ride on the ChatML sidecar).
+        agent.chat_formatter_mut().add_user_message_with_images(
+            task.clone(),
+            attached_images.clone(),
+            None,
+        );
         
         // Create a new checkpoint with the updated conversation (including new task)
         if agent.should_checkpoint() {
@@ -207,6 +226,22 @@ pub async fn execute_run<C: CommandContext>(
         let result = agent.start_session(&task, None)
             .await
             .map_err(|e| CliError::ExecutionError(format!("Failed to start session: {}", e)))?;
+
+        // Multimodal: start_session seeded the text user message; extend it
+        // with the image sidecar so the first model call is multimodal.
+        if !attached_images.is_empty() {
+            let msgs = agent.chat_formatter_mut().get_messages_mut();
+            match msgs.last_mut() {
+                Some(last) if last.role == umf::chatml::MessageRole::User => {
+                    last.images.extend(attached_images);
+                }
+                _ => {
+                    return Err(CliError::ExecutionError(
+                        "Internal error: no user message to attach images to after session start".to_string(),
+                    ));
+                }
+            }
+        }
 
         // Send incremental resume info so TUI can resume if ESC cancels
         if let Some(tx) = &on_checkpoint {

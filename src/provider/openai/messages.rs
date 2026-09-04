@@ -19,7 +19,45 @@ pub fn messages_to_openai(messages: &[InternalMessage]) -> Vec<Value> {
             }
 
             umf::MessageRole::User => {
-                if let Some(text) = msg.text() {
+                // Multimodal user turns carry Image blocks; render them as
+                // OpenAI `image_url` content parts with `data:` URLs.
+                // Text-only messages keep the plain string content form.
+                let has_image = msg
+                    .blocks()
+                    .map(|blocks| blocks.iter().any(|b| b.as_image().is_some()))
+                    .unwrap_or(false);
+
+                if has_image {
+                    let parts: Vec<Value> = msg
+                        .blocks()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|b| match b {
+                            umf::ContentBlock::Text { text } => {
+                                Some(json!({"type": "text", "text": text}))
+                            }
+                            umf::ContentBlock::Image {
+                                source:
+                                    umf::ImageSource::Base64 {
+                                        media_type,
+                                        data,
+                                    },
+                            } => Some(json!({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": format!("data:{};base64,{}", media_type, data),
+                                }
+                            })),
+                            _ => None,
+                        })
+                        .collect();
+                    if !parts.is_empty() {
+                        result.push(json!({
+                            "role": "user",
+                            "content": parts,
+                        }));
+                    }
+                } else if let Some(text) = msg.text() {
                     result.push(json!({
                         "role": "user",
                         "content": text,
@@ -168,4 +206,70 @@ mod tests {
         assert_eq!(out[0]["content"], "Running ls");
         assert_eq!(out[0]["tool_calls"][0]["function"]["name"], "bash");
     }
+}
+
+#[test]
+fn test_user_image_blocks_serialize_as_image_url_parts() {
+    // Wire format (nghr 02ce6d5e / task 95b19c56): user turns with Image
+    // blocks must serialize text+image parts in order, images as
+    // {"type":"image_url","image_url":{"url":"data:{mime};base64,{data}"}}.
+    let blocks = vec![
+        umf::ContentBlock::text("describe this"),
+        umf::ContentBlock::image(umf::ImageSource::Base64 {
+            media_type: "image/jpeg".to_string(),
+            data: "QUJD".to_string(),
+        }),
+    ];
+    let msg = InternalMessage {
+        role: umf::MessageRole::User,
+        content: umf::MessageContent::Blocks(blocks),
+        reasoning: None,
+        metadata: std::collections::HashMap::new(),
+        tool_call_id: None,
+        name: None,
+    };
+
+    let out = messages_to_openai(&[msg]);
+    assert_eq!(out[0]["role"], "user");
+    let parts = out[0]["content"].as_array().unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0]["type"], "text");
+    assert_eq!(parts[0]["text"], "describe this");
+    assert_eq!(parts[1]["type"], "image_url");
+    assert_eq!(
+        parts[1]["image_url"]["url"],
+        "data:image/jpeg;base64,QUJD"
+    );
+}
+
+#[test]
+fn test_user_image_only_turn_serializes_image_part_without_text() {
+    // Image-only turn (empty content dropped, no text part emitted).
+    let blocks = vec![umf::ContentBlock::image(umf::ImageSource::Base64 {
+        media_type: "image/png".to_string(),
+        data: "iVBOR".to_string(),
+    })];
+    let msg = InternalMessage {
+        role: umf::MessageRole::User,
+        content: umf::MessageContent::Blocks(blocks),
+        reasoning: None,
+        metadata: std::collections::HashMap::new(),
+        tool_call_id: None,
+        name: None,
+    };
+
+    let out = messages_to_openai(&[msg]);
+    let parts = out[0]["content"].as_array().unwrap();
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0]["type"], "image_url");
+    assert_eq!(parts[0]["image_url"]["url"], "data:image/png;base64,iVBOR");
+}
+
+#[test]
+fn test_user_plain_text_unchanged_string_content() {
+    // Regression guard: text-only user messages must keep the plain string
+    // content form (no parts array).
+    let out = messages_to_openai(&[InternalMessage::user("plain")]);
+    assert_eq!(out[0]["content"], "plain");
+    assert!(out[0]["content"].is_string());
 }

@@ -153,6 +153,9 @@ pub async fn run_from_raw_config(
 /// * `secrets` - Key-value pairs to inject into environment
 /// * `build_info` - Optional build-time metadata
 /// * `task` - The task description to execute
+/// * `attachments` - Local image files attached to the initial user turn
+///   (multimodal). Loaded and base64-encoded before the first model call;
+///   pass an empty vec for text-only runs.
 /// * `output_sink` - Optional custom output sink (e.g., TuiSink for TUI mode).
 ///   When `Some`, the agent's output sink is set to this value, overriding
 ///   the default NoopSink behavior in TUI mode.
@@ -176,6 +179,7 @@ pub async fn run_task_from_raw_config(
     secrets: std::collections::HashMap<String, String>,
     mut build_info: Option<crate::cli::config::BuildInfo>,
     task: &str,
+    attachments: Vec<std::path::PathBuf>,
     output_sink: Option<crate::orchestration::output::SharedSink>,
     resume_info: Option<super::ResumeInfo>,
     resume_info_tx: Option<tokio::sync::mpsc::UnboundedSender<Option<super::ResumeInfo>>>,
@@ -246,6 +250,7 @@ pub async fn run_task_from_raw_config(
         mode: None,
         run_mode: None,
         verbose: false,
+        attachments,
         output_sink,
         resume_info,
         on_checkpoint: resume_info_tx,
@@ -1492,10 +1497,15 @@ pub async fn run_configured_cli<C: CommandContext>(
 
 /// Handle the run command
 async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliResult<()> {
-    let task = matches
+    // Task is trailing_var_arg: values may contain repeatable --attach <path>
+    // pairs typed after the task text. Extract them before joining.
+    let raw_values: Vec<String> = matches
         .get_many::<String>("task")
-        .map(|vals| vals.map(|s| s.as_str()).collect::<Vec<_>>().join(" "))
+        .map(|vals| vals.map(|s| s.to_string()).collect())
         .unwrap_or_default();
+    let (task_values, attachments) =
+        crate::cli::attachments::extract_attach_flags(raw_values);
+    let task = task_values.join(" ");
 
     let yolo = matches.get_flag("yolo");
     let mode = matches.get_one::<String>("mode").cloned();
@@ -1515,6 +1525,7 @@ async fn run_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRes
         mode,
         run_mode: None,
         verbose,
+        attachments,
         output_sink: None,
         resume_info,
         cancel_token: None,

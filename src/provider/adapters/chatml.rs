@@ -36,6 +36,40 @@ impl ChatMLAdapter {
     fn message_to_internal(msg: &ChatMLMessage) -> Result<InternalMessage> {
         let role = Self::convert_role(&msg.role);
 
+        // Multimodal sidecar: ChatML images map to Image blocks so provider
+        // adapters can serialize them (e.g. OpenAI image_url parts).
+        if !msg.images.is_empty() {
+            let mut blocks = Vec::new();
+
+            // Text part first (may be empty for image-only turns)
+            if !msg.content.is_empty() {
+                blocks.push(ContentBlock::text(&msg.content));
+            }
+
+            for image in &msg.images {
+                blocks.push(ContentBlock::image(
+                    umf::ImageSource::Base64 {
+                        media_type: image.mime.clone(),
+                        data: image.data.clone(),
+                    },
+                ));
+            }
+
+            let mut metadata = std::collections::HashMap::new();
+            if let Some(ref name) = msg.name {
+                metadata.insert("name".to_string(), name.clone());
+            }
+
+            return Ok(InternalMessage {
+                role,
+                content: MessageContent::Blocks(blocks),
+                reasoning: msg.reasoning_content.clone(),
+                metadata,
+                tool_call_id: None,
+                name: None,
+            });
+        }
+
         // If message has tool_calls, create blocks content
         if let Some(ref tool_calls) = msg.tool_calls {
             let mut blocks = Vec::new();
@@ -146,6 +180,7 @@ impl ChatMLAdapter {
                 let mut text_parts = Vec::new();
                 let mut tool_calls = Vec::new();
                 let mut tool_call_id = None;
+                let mut images: Vec<umf::chatml::ImageAttachment> = Vec::new();
 
                 for block in blocks {
                     match block {
@@ -170,8 +205,15 @@ impl ChatMLAdapter {
                             tool_call_id = Some(tool_use_id.clone());
                             text_parts.push(content.clone());
                         }
-                        ContentBlock::Image { .. } => {
-                            // Images not supported in ChatML yet, skip
+                        ContentBlock::Image { source } => {
+                            // Multimodal: preserve images on the ChatML sidecar
+                            // (base64 form only; URL sources degrade: dropped here).
+                            if let umf::ImageSource::Base64 { media_type, data } = source {
+                                images.push(umf::chatml::ImageAttachment::new(
+                                    media_type.clone(),
+                                    data.clone(),
+                                ));
+                            }
                         }
                     }
                 }
@@ -182,6 +224,7 @@ impl ChatMLAdapter {
                 if !tool_calls.is_empty() {
                     let mut m = ChatMLMessage::new_assistant_with_tool_calls(content, tool_calls);
                     m.reasoning_content = msg.reasoning.clone();
+                    m.images = images;
                     Ok(m)
                 } else if let Some(tid) = tool_call_id {
                     let tool_name = msg
@@ -189,9 +232,13 @@ impl ChatMLAdapter {
                         .get("tool_name")
                         .cloned()
                         .unwrap_or_else(|| "unknown".to_string());
-                    Ok(ChatMLMessage::new_tool(content, tid, tool_name))
+                    let mut m = ChatMLMessage::new_tool(content, tid, tool_name);
+                    m.images = images;
+                    Ok(m)
                 } else {
-                    Ok(ChatMLMessage::new(role, content, name))
+                    let mut m = ChatMLMessage::new(role, content, name);
+                    m.images = images;
+                    Ok(m)
                 }
             }
         }
@@ -336,4 +383,64 @@ mod tests {
         );
         assert!(internal[0].blocks().is_some());
     }
+}
+
+#[test]
+fn test_chatml_images_sidecar_maps_to_image_blocks() {
+    // Sidecar → Internal: images become ordered [Text?, Image...] blocks so
+    // provider adapters can serialize them (nghr 02ce6d5e / task 95b19c56).
+    let mut msg = ChatMLMessage::new(ChatMLRole::User, "describe this".to_string(), None);
+    msg.images.push(
+        umf::chatml::ImageAttachment::new("image/jpeg", "QUJD").with_filename("photo.jpg"),
+    );
+
+    let internal = ChatMLAdapter::message_to_internal(&msg).unwrap();
+    let blocks = internal.blocks().unwrap();
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].as_text(), Some("describe this"));
+    match blocks[1].as_image().unwrap() {
+        umf::ImageSource::Base64 { media_type, data } => {
+            assert_eq!(media_type, "image/jpeg");
+            assert_eq!(data, "QUJD");
+        }
+        other => panic!("expected base64 image source, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_chatml_image_only_sidecar_maps_without_text_block() {
+    let mut msg = ChatMLMessage::new(ChatMLRole::User, String::new(), None);
+    msg.images.push(umf::chatml::ImageAttachment::new("image/png", "iVBOR"));
+
+    let internal = ChatMLAdapter::message_to_internal(&msg).unwrap();
+    let blocks = internal.blocks().unwrap();
+    assert_eq!(blocks.len(), 1);
+    assert!(blocks[0].as_image().is_some());
+}
+
+#[test]
+fn test_internal_image_blocks_roundtrip_into_chatml_sidecar() {
+    // Internal → ChatML (from_internal): base64 Image blocks must land on the
+    // ChatMLMessage.images sidecar instead of being dropped.
+    let blocks = vec![
+        umf::ContentBlock::text("look at this"),
+        umf::ContentBlock::image(umf::ImageSource::Base64 {
+            media_type: "image/webp".to_string(),
+            data: "UklGRg".to_string(),
+        }),
+    ];
+    let internal = InternalMessage {
+        role: MessageRole::User,
+        content: MessageContent::Blocks(blocks),
+        reasoning: None,
+        metadata: std::collections::HashMap::new(),
+        tool_call_id: None,
+        name: None,
+    };
+
+    let chatml_msgs = ChatMLAdapter::from_internal(&[internal]).unwrap();
+    assert_eq!(chatml_msgs[0].content, "look at this");
+    assert_eq!(chatml_msgs[0].images.len(), 1);
+    assert_eq!(chatml_msgs[0].images[0].mime, "image/webp");
+    assert_eq!(chatml_msgs[0].images[0].data, "UklGRg");
 }

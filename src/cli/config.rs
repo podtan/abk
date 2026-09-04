@@ -169,7 +169,7 @@ impl CliConfig {
             args: vec![
                 ArgConfig {
                     name: "task".to_string(),
-                    help: "Description of the task to perform".to_string(),
+                    help: "Description of the task to perform (--attach <file> for image attachments)".to_string(),
                     arg_type: ArgType::String,
                     short: None,
                     long: None,

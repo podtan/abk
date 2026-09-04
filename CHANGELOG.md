@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-09-04
+
+### Added
+
+- **Multimodal image support (OpenAI-compatible wire path)** (nghr workstream 02ce6d5e, tasks 95b19c56 + cdee4ac0). User turns can now carry images end-to-end: `ChatMLMessage.images` sidecar (umf 0.3.0) → `InternalMessage` `ContentBlock::Image` blocks → OpenAI `image_url` content parts.
+- **`RunOptions.attachments: Vec<PathBuf>`** — local image files attached to the initial user turn. `execute_run` loads and validates them **before** agent init / any model call (fail-fast on unsupported extension or unreadable file). Fresh sessions extend the just-seeded user message's image sidecar; resumed sessions add the task via `add_user_message_with_images`. `run_task_from_raw_config` gains an `attachments` parameter (callers: pass `Vec::new()` for text-only). abk's own `run` subcommand passes an empty vec (no `--attach` yet).
+- **`cli::attachments` module** (exported `load_image_attachments`, `sniff_image_mime`): MIME sniffing by extension (`jpg/jpeg/png/gif/webp` — no new mime dep), full-file read, base64 encoding via the `base64` crate (new optional dep, enabled by the `cli` feature).
+
+### Fixed
+
+- **Image drop point 1** — `provider::adapters::chatml`: `ContentBlock::Image` no longer silently skipped when converting internal → ChatML; base64 images land on the `ChatMLMessage.images` sidecar. ChatML sidecar images conversely map to ordered `[Text?, Image…]` `MessageContent::Blocks` so no image is lost between the formatter and provider adapters.
+- **Image drop point 2** — `provider::openai::messages`: the user arm now serializes Image blocks as `{"type":"image_url","image_url":{"url":"data:{mime};base64,{data}"}}` parts, text and images interleaved in order. Text-only messages keep the plain string content form byte-for-byte (regression-guarded).
+
+### Breaking
+
+- Minor bump (0.x convention): `RunOptions` gained a public field (breaks exhaustive struct literals) and `run_task_from_raw_config` gained a parameter. umf dependency `0.2.7` → `0.3.0` (developed against `path = "../umf"`; the path is stripped on `cargo publish`).
+
+### Tests
+
+- 10 new tests: attachment mime sniffing/loading (4, incl. base64 round-trip through the data URL), ChatML adapter sidecar↔blocks round-trips (3), OpenAI wire `image_url` serialization (3, incl. text-only string-content regression guard). Suite green on the trustee consumer feature set (`cli,agent,orchestration,observability`): 164 passed, 4 pre-existing failures unrelated to this change (`agent::llm` parsers — identical set at baseline); clippy warning parity maintained (804 = 804).
+
 ## [0.16.1] - 2026-08-29
 
 ### Fixed
