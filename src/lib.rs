@@ -115,6 +115,10 @@ pub fn get_home_dir() -> Result<String, String> {
  /// Runtime context for identity and configuration (always available)
  pub mod context;
 
+/// Boundary-safe text truncation and casing helpers (always available;
+/// UTF-8 aware — see nghr f844d2df)
+pub mod text;
+
  /// Configuration management (enabled with the `config` feature)
  #[cfg(feature = "config")]
  pub mod config;

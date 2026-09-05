@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-09-05
+
+### Fixed
+
+- **UTF-8 char-boundary panics on Persian/multibyte text (nghr f844d2df, 3rd occurrence of the class)** — replaced all bytewise string slicing on user/LLM text with the new boundary-safe `abk::text` module (always compiled, dependency-free):
+  - `checkpoint::session_manager` — session description built from task text (`&task[..77]`) panicked when byte 77 fell mid-character (Persian = 2 bytes, CJK/emoji = 3–4). Ran at session creation with no named identity.
+  - `cli::runner` — the "LLM hasn't re-titled yet" probe (`&user_command[..77]`) panicked identically.
+  - `cli::runner` — LLM-generated session title truncation (`&trimmed[..47]`); LLMs title Persian sessions in Persian.
+  - `cli::runner` — `&agent_name[1..]` capitalization panicked on a multi-byte first character (×3 sites); now `text::capitalize_first` (also drops the `.unwrap()` on empty names).
+- New helpers: `text::truncate_str` (ASCII output byte-identical to the legacy idiom, so descriptions stored by older abk versions keep comparing equal — required by the re-title probe), `text::truncate_at_boundary` (caller-supplied suffix), `text::capitalize_first`. Full regression matrix in `src/text.rs` tests (Persian 2-byte, CJK/emoji 4-byte straddle, mixed scripts, boundary-exactly-at-cut, ASCII identity).
+- Related: `cli::utils::truncate_with_ellipsis` and its duplicate in `cli::commands::resume` were already boundary-safe and are unchanged.
+
 ## [0.18.0] - 2026-09-04
 
 ### Added

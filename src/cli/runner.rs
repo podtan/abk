@@ -322,12 +322,10 @@ pub async fn should_generate_title(
     match &metadata.description {
         None => true,
         Some(desc) => {
-            // If description matches the truncated command, LLM hasn't run yet
-            let solution_a_desc = if user_command.len() > 80 {
-                format!("{}...", &user_command[..77])
-            } else {
-                user_command.to_string()
-            };
+            // If description matches the truncated command, LLM hasn't run yet.
+            // MUST stay byte-identical to the producer in
+            // checkpoint::session_manager (nghr f844d2df, finding F3).
+            let solution_a_desc = crate::text::truncate_str(user_command, 80);
             desc == &solution_a_desc
         }
     }
@@ -418,10 +416,8 @@ fn extract_title_from_response(text: &str, reasoning: Option<&str>) -> Option<St
     log_debug(&format!("[title] final title: {:?}", trimmed));
     if trimmed.is_empty() {
         None
-    } else if trimmed.len() > 50 {
-        Some(format!("{}...", &trimmed[..47]))
     } else {
-        Some(trimmed)
+        Some(crate::text::truncate_str(&trimmed, 50))
     }
 }
 
@@ -1668,7 +1664,7 @@ async fn init_command<C: CommandContext>(ctx: &C, matches: &ArgMatches) -> CliRe
     if agent_dir.exists() && !force {
         return Err(CliError::ValidationError(format!(
             "{} directory already exists: {}. Use --force to overwrite.",
-            agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..],
+            crate::text::capitalize_first(agent_name),
             agent_dir.display()
         )));
     }
@@ -1764,7 +1760,7 @@ max_tokens = 4000
 [llm]
 endpoint = "chat/completions"
 enable_streaming = true
-"#, agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..], agent_name, agent_name);
+"#, crate::text::capitalize_first(agent_name), agent_name, agent_name);
             std::fs::write(&config_file, default_config)?;
             ctx.log_info(&format!("Created default config file: {}", config_file.display()));
         }
@@ -1864,7 +1860,7 @@ enable_streaming = true
         }
     }
 
-    ctx.log_success(&format!("{} initialized successfully", agent_name.chars().next().unwrap().to_uppercase().collect::<String>() + &agent_name[1..]));
+    ctx.log_success(&format!("{} initialized successfully", crate::text::capitalize_first(agent_name)));
     ctx.log_info(&format!("Configuration directory: {}", agent_dir.display()));
     ctx.log_info(&format!("Binary installed to: {}", binary_dest.display()));
     ctx.log_info(&format!("Binary link created: {}", local_bin_link.display()));

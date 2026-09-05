@@ -642,7 +642,7 @@ impl SessionManager {
                 .or_else(|| {
                     let task = task_description.to_string();
                     if task.is_empty() { None } else {
-                        Some(if task.len() > 80 { format!("{}...", &task[..77]) } else { task })
+                        Some(crate::text::truncate_str(&task, 80))
                     }
                 });
             (identity.id.clone(), desc)
