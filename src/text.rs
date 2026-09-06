@@ -66,6 +66,77 @@ pub fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Byte-level SSE event buffer that never splits multi-byte UTF-8 sequences.
+///
+/// SSE events are framed by the ASCII separator `\n\n`. Because `\n` is a
+/// single-byte character it can never occur *inside* a multi-byte UTF-8
+/// sequence, so every `\n\n` boundary is a valid char boundary — decoding
+/// complete events only makes it impossible to corrupt a character that
+/// straddles an HTTP/TCP chunk edge (nghr b33d3efc: applying
+/// `String::from_utf8_lossy` to each raw chunk turned such characters into
+/// U+FFFD replacement glyphs, silently damaging Persian/emoji output at
+/// random offsets).
+pub struct SseBuffer {
+    buf: Vec<u8>,
+}
+
+impl Default for SseBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SseBuffer {
+    /// Create an empty buffer.
+    pub fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    /// Append a raw HTTP chunk. May split events and characters anywhere;
+    /// both are reassembled internally before decoding.
+    pub fn push(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// Pop the next complete event (without its `\n\n` separator), if any.
+    ///
+    /// Decoding happens only over complete events, so a multi-byte
+    /// character split across two chunks is reassembled at the byte level
+    /// before it ever becomes a `String`.
+    pub fn next_event(&mut self) -> Option<String> {
+        let end = self.buf.windows(2).position(|w| w == b"\n\n")?;
+        let event: Vec<u8> = self.buf.drain(..end + 2).collect();
+        let cut = event.len() - 2; // drop the "\n\n" separator
+        Some(decode_utf8_prefer_strict(&event[..cut]))
+    }
+
+    /// Decode and clear whatever remains. Call at stream end when the final
+    /// event may lack its trailing separator. A truncated final character
+    /// (genuinely broken stream) still degrades to U+FFFD — by then the
+    /// data is unrecoverable, matching the old behavior for garbage input.
+    pub fn flush(&mut self) -> Option<String> {
+        if self.buf.is_empty() {
+            return None;
+        }
+        let rest = std::mem::take(&mut self.buf);
+        Some(decode_utf8_prefer_strict(&rest))
+    }
+
+    /// True when nothing is buffered.
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+}
+
+/// Strict UTF-8 decode with lossy fallback (never panics; valid input is
+/// byte-identical, invalid input degrades exactly like `from_utf8_lossy`).
+fn decode_utf8_prefer_strict(bytes: &[u8]) -> String {
+    match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +247,115 @@ mod tests {
     #[test]
     fn capitalize_first_empty() {
         assert_eq!(capitalize_first(""), "");
+    }
+
+    // --- SseBuffer: the nghr b33d3efc corruption class ---
+
+    fn sse_frame(payload: &str) -> String {
+        format!("{}\n\n", payload)
+    }
+
+    /// THE regression test: a ZWNJ-dense Persian event fed in chunks of
+    /// every size 1..=8 must reassemble byte-identically. The old
+    /// per-chunk `from_utf8_lossy` corrupted this at essentially every
+    /// split point.
+    #[test]
+    fn sse_multibyte_survives_every_chunk_split() {
+        let payload = "قابل‌اندازه‌گیری پیشنهاد بازنگری‌شده 🙂کتاب‌خانه می‌رود خانه‌ی";
+        let stream = sse_frame(&format!("data: {}", payload));
+        for size in 1..=8usize {
+            let mut b = SseBuffer::new();
+            let mut events = Vec::new();
+            for chunk in stream.as_bytes().chunks(size) {
+                b.push(chunk);
+                while let Some(ev) = b.next_event() {
+                    events.push(ev);
+                }
+            }
+            assert_eq!(
+                events,
+                vec![format!("data: {}", payload)],
+                "corruption at chunk size {}",
+                size
+            );
+            assert!(b.is_empty(), "buffer not drained at chunk size {}", size);
+        }
+    }
+
+    #[test]
+    fn sse_full_stream_multiple_events_roundtrip() {
+        let stream = format!(
+            "{}\n\n{}\n\n{}\n\n",
+            "data: {\"delta\":\"سلام دنیا\"}",
+            "data: {\"delta\":\"نیم‌فاصله و ZWNJ‌تست 🙂\"}",
+            "data: [DONE]"
+        );
+        let mut b = SseBuffer::new();
+        let mut events = Vec::new();
+        for chunk in stream.as_bytes().chunks(3) {
+            b.push(chunk);
+            while let Some(ev) = b.next_event() {
+                events.push(ev);
+            }
+        }
+        assert_eq!(events.len(), 3);
+        assert!(events[0].contains("سلام دنیا"));
+        assert!(events[1].contains("ZWNJ‌تست 🙂"));
+        assert_eq!(events[2], "data: [DONE]");
+    }
+
+    #[test]
+    fn sse_partial_event_and_partial_char_stay_buffered() {
+        // "data: " (6 bytes) + س (D8 B3) + ل (D9 84) + ا (D8 A7) + م (D9 85) + \n\n
+        let full: &[u8] = b"data: \xd8\xb3\xd9\x84\xd8\xa7\xd9\x85\n\n";
+        let mut b = SseBuffer::new();
+        b.push(&full[..7]); // "data: " + lone 0xD8 lead byte
+        assert_eq!(b.next_event(), None, "incomplete event must stay buffered");
+        assert!(!b.is_empty());
+        b.push(&full[7..]);
+        assert_eq!(b.next_event().as_deref(), Some("data: سلام"));
+        assert!(b.is_empty());
+        assert_eq!(b.next_event(), None);
+    }
+
+    #[test]
+    fn sse_multiple_events_in_single_chunk() {
+        let mut b = SseBuffer::new();
+        b.push(b"data: one\n\ndata: two\n\ndata: three\n\n");
+        assert_eq!(b.next_event().as_deref(), Some("data: one"));
+        assert_eq!(b.next_event().as_deref(), Some("data: two"));
+        assert_eq!(b.next_event().as_deref(), Some("data: three"));
+        assert_eq!(b.next_event(), None);
+    }
+
+    #[test]
+    fn sse_flush_emits_final_event_without_separator() {
+        let mut b = SseBuffer::new();
+        b.push(b"data: unterminated tail");
+        assert_eq!(b.next_event(), None);
+        assert_eq!(b.flush().as_deref(), Some("data: unterminated tail"));
+        assert_eq!(b.flush(), None);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn sse_separator_only_chunks_produce_nothing() {
+        let mut b = SseBuffer::new();
+        b.push(b"\n\n");
+        assert_eq!(b.next_event().as_deref(), Some("")); // empty event, caller skips
+        assert_eq!(b.next_event(), None);
+    }
+
+    /// Strict decode must win for valid bytes: the event bytes are
+    /// byte-identical to the source (the f844d2df-style guarantee).
+    #[test]
+    fn sse_decoded_events_are_byte_identical_for_valid_utf8() {
+        let payload = "متن فارسی با نیم‌فاصله";
+        let stream = sse_frame(&format!("data: {}", payload));
+        let mut b = SseBuffer::new();
+        b.push(stream.as_bytes());
+        let ev = b.next_event().expect("event");
+        let expected = format!("data: {}", payload);
+        assert_eq!(ev.as_bytes(), expected.as_bytes());
     }
 }

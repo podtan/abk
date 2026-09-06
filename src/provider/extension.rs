@@ -442,19 +442,19 @@ impl LlmProvider for ExtensionProvider {
 
         tokio::spawn(async move {
             let mut byte_stream = byte_stream;
-            let mut line_buffer = String::new();
+            // Byte-level buffer: per-chunk String::from_utf8_lossy destroyed
+            // multi-byte characters split across chunk edges (nghr b33d3efc).
+            let mut line_buffer = crate::text::SseBuffer::new();
 
             while let Some(chunk_result) = byte_stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes).to_string();
-                        line_buffer.push_str(&text);
+                        line_buffer.push(&bytes);
 
-                        // Process complete SSE events
-                        while let Some(event_end) = line_buffer.find("\n\n") {
-                            let event = line_buffer[..event_end].to_string();
-                            line_buffer = line_buffer[event_end + 2..].to_string();
-
+                        // Process complete SSE events; decoding happens only
+                        // on complete events, so a multi-byte character split
+                        // across chunks reassembles intact (nghr b33d3efc).
+                        while let Some(event) = line_buffer.next_event() {
                             if event.trim().is_empty() {
                                 continue;
                             }

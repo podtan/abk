@@ -680,7 +680,9 @@ impl LlmProvider for WasmProvider {
         let engine = self.engine.clone();
         
         // Buffer for incomplete SSE lines across HTTP chunks
-        let line_buffer = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+        // Byte-level buffer: per-chunk String::from_utf8_lossy destroyed
+        // multi-byte characters split across chunk edges (nghr b33d3efc).
+        let line_buffer = std::sync::Arc::new(tokio::sync::Mutex::new(crate::text::SseBuffer::new()));
         
         // Create channel for emitting multiple chunks per HTTP chunk
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -693,21 +695,20 @@ impl LlmProvider for WasmProvider {
             while let Some(chunk_result) = byte_stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes).to_string();
-                        let preview_end = text.char_indices().map(|(i, _)| i).take_while(|&i| i < 200).last().unwrap_or(0);
-                        debug!("WASM STREAM DEBUG Received {} bytes: {:?}", text.len(), &text[..preview_end]);
-                        
-                        // Acquire buffer lock and append new data
+                        // Debug preview is lossy by design (log-only, not the data
+                        // path); char-safe via chars().take() — never slice at a
+                        // raw byte offset.
+                        let preview: String = String::from_utf8_lossy(&bytes).chars().take(200).collect();
+                        debug!("WASM STREAM DEBUG Received {} bytes: {:?}", bytes.len(), preview);
+
+                        // Acquire buffer lock and append raw bytes
                         let mut buffer = line_buffer.lock().await;
-                        buffer.push_str(&text);
-                        
-                        // Process complete SSE events (separated by double newline)
-                        while let Some(event_end) = buffer.find("\n\n") {
-                            // Extract complete event
-                            let event = buffer[..event_end].to_string();
-                            // Remove from buffer (including the \n\n separator)
-                            *buffer = buffer[event_end + 2..].to_string();
-                            
+                        buffer.push(&bytes);
+
+                        // Process complete SSE events (separated by double newline);
+                        // byte-level buffering keeps multi-byte characters split
+                        // across chunks intact (nghr b33d3efc).
+                        while let Some(event) = buffer.next_event() {
                             // Skip empty events
                             if event.trim().is_empty() {
                                 continue;

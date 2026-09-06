@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-09-06
+
+### Fixed
+
+- **Silent UTF-8 corruption (U+FFFD) in SSE streaming of Persian/multibyte LLM output (nghr b33d3efc)** — all three streaming providers decoded each raw HTTP chunk independently with `String::from_utf8_lossy` *before* buffering, so any multi-byte character straddling a chunk edge was destroyed (2-byte Persian letter → 2× U+FFFD, 3-byte ZWNJ → 3×; random per-write offsets, hence the "retry until clean" pain with ~50% corruption per large write). Affected `provider::openai` (default wire path), `provider::wasm`, and `provider::extension` — this is what damaged large Persian `pdt_updateAsset` tool-call arguments through aether.
+- **New `abk::text::SseBuffer`** — byte-level SSE event buffer: raw chunks accumulate as `Vec<u8>`, and decoding happens only over complete `\n\n`-terminated events (ASCII separator can never split a UTF-8 sequence), so characters split across chunks reassemble byte-identically. Strict decode preferred, lossy fallback preserved for genuinely broken input. Wired into all three providers (the wasm debug preview stays lossy — log-only, and now `chars().take()`-safe instead of a byte-offset slice). 7 new tests, including the decisive one: a ZWNJ-dense Persian event fed at every chunk size 1–8 reassembles byte-identically.
+
 ## [0.18.1] - 2026-09-05
 
 ### Fixed
