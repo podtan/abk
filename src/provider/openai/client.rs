@@ -22,6 +22,16 @@ macro_rules! debug {
 impl HttpClient {
     /// Create a new HTTP client, reading timeout/pool config from env vars.
     pub fn new() -> Result<Self> {
+        Self::new_with_tls(false)
+    }
+
+    /// Create a new HTTP client with an explicit certificate-verification
+    /// policy. `accept_invalid_certs = true` maps to reqwest's
+    /// `danger_accept_invalid_certs` — ANY certificate is accepted for the
+    /// provider's endpoint (self-signed, private CA, mismatched hostname).
+    /// Intended for self-hosted/LAN endpoints; the default (`false`) keeps
+    /// full rustls/webpki validation.
+    pub fn new_with_tls(accept_invalid_certs: bool) -> Result<Self> {
         let timeout_secs = std::env::var("LLM_TIMEOUT_SECONDS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -32,12 +42,16 @@ impl HttpClient {
             .and_then(|s| s.parse().ok())
             .unwrap_or(600u64);
 
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(30))
-            .pool_idle_timeout(Duration::from_secs(pool_idle_secs))
-            .build()
-            .context("Failed to create HTTP client")?;
+            .pool_idle_timeout(Duration::from_secs(pool_idle_secs));
+
+        if accept_invalid_certs {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        let client = builder.build().context("Failed to create HTTP client")?;
 
         Ok(Self { client })
     }
@@ -139,5 +153,26 @@ impl HttpClient {
         }
 
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Max retries exceeded")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Default client (validation ON) and permissive client (validation OFF)
+    /// both build cleanly. No network — construction only. The permissive
+    /// path is what a self-signed endpoint needs
+    /// (danger_accept_invalid_certs from [llm.providers.*]).
+    #[test]
+    fn test_new_with_tls_builds_both_policies() {
+        let strict = HttpClient::new().expect("default client builds");
+        let permissive = HttpClient::new_with_tls(true).expect("permissive client builds");
+        let explicit_strict = HttpClient::new_with_tls(false).expect("explicit strict builds");
+        // Different policies are distinct clients; all three hold a usable
+        // reqwest::Client (inner() borrows — proves construction completed).
+        let _ = strict.inner();
+        let _ = permissive.inner();
+        let _ = explicit_strict.inner();
     }
 }

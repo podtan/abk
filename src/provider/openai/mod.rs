@@ -52,7 +52,7 @@ impl OpenAIProvider {
     /// equivalent environment variable. When absent, the env var is used
     /// as fallback.
     pub fn with_config(config: ProviderConfig) -> Result<Self> {
-        let http = HttpClient::new()?;
+        let http = HttpClient::new_with_tls(config.danger_accept_invalid_certs)?;
         Ok(Self { http, config: Some(config) })
     }
 

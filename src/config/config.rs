@@ -396,6 +396,15 @@ pub struct ProviderConfig {
     /// When absent, defaults to `[model]` (single entry).
     #[serde(default)]
     pub models: Vec<String>,
+    /// Accept invalid TLS certificates for this provider's endpoint —
+    /// self-signed, private-CA, or IP-address endpoints whose certs can
+    /// never chain to webpki roots (e.g. `https://10.0.0.5/v1` without
+    /// `invalid peer certificate: UnknownIssuer`). Maps to reqwest's
+    /// `danger_accept_invalid_certs`: ANY certificate is accepted for
+    /// THIS endpoint, so only use it on trusted networks. Default:
+    /// `false` — full rustls/webpki validation (unchanged behavior).
+    #[serde(default)]
+    pub danger_accept_invalid_certs: bool,
 }
 
 impl ProviderConfig {
@@ -853,6 +862,47 @@ mod tests {
         let llm = config.llm.unwrap();
         assert_eq!(llm.endpoint, "chat/completions");
         assert!(llm.enable_streaming);
+    }
+
+    #[test]
+    fn test_provider_danger_accept_invalid_certs_serde() {
+        // Default (field absent) → false. Zero behavior change for every
+        // existing config — full rustls/webpki validation stays.
+        let absent: ProviderConfig = toml::from_str(
+            r#"
+name = "ninfer"
+provider_type = "openai"
+base_url = "https://10.253.1.9/v1"
+api_key = "${NINFER_API_KEY}"
+model = "qwen3.8-27b"
+models = ["qwen3.8-27b"]
+"#,
+        )
+        .expect("parse provider without the field");
+        assert!(!absent.danger_accept_invalid_certs);
+
+        // Explicit true → accepted (self-hosted/self-signed endpoint).
+        let enabled: ProviderConfig = toml::from_str(
+            r#"
+name = "ninfer"
+base_url = "https://10.253.1.9/v1"
+api_key = "${NINFER_API_KEY}"
+danger_accept_invalid_certs = true
+"#,
+        )
+        .expect("parse provider with the field");
+        assert!(enabled.danger_accept_invalid_certs);
+
+        // Explicit false → validation stays on.
+        let disabled: ProviderConfig = toml::from_str(
+            r#"
+name = "cloud"
+base_url = "https://api.openai.com/v1"
+danger_accept_invalid_certs = false
+"#,
+        )
+        .expect("parse provider with explicit false");
+        assert!(!disabled.danger_accept_invalid_certs);
     }
 
     #[test]
