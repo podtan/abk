@@ -117,7 +117,9 @@ impl Default for McpConfig {
 pub struct McpServerConfig {
     /// Server identifier (used for logging and tool namespacing)
     pub name: String,
-    /// Server URL (SSE endpoint for HTTP transport)
+    /// Server base URL — streamable HTTP: bare `host:port` gets `/mcp`
+    /// appended; a URL with a path is used as-is. `legacy-sse` transport:
+    /// JSON-RPC is POSTed to `{url}/message`.
     pub url: String,
     /// Transport type: "http" (SSE) or "stdio"
     #[serde(default = "default_transport")]

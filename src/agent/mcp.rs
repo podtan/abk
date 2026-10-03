@@ -109,7 +109,10 @@ impl McpToolLoader {
         let mut server_statuses = Vec::new();
 
         for server in &config.servers {
-            if server.transport != "http" {
+            // nghr d7d28cfe: "http" = MCP Streamable HTTP (default, modern
+            // servers); "legacy-sse" = the pre-0.20 homemade {url}/message
+            // protocol. Anything else still fails loud.
+            if server.transport != "http" && server.transport != "legacy-sse" {
                 crate::observability::tee_eprintln(
                     &format!("Warning: MCP server '{}' uses unsupported transport '{}', skipping",
                     server.name, server.transport)
@@ -120,6 +123,7 @@ impl McpToolLoader {
             let client_config = build_registry_config(
                 &server.name,
                 &server.url,
+                &server.transport,
                 server.auth_token.as_deref(),
                 server.credentials.as_deref(),
                 &config.credentials,
@@ -210,7 +214,10 @@ impl McpToolLoader {
         let mut server_statuses = Vec::new();
 
         for server in &config.servers {
-            if server.transport != "http" {
+            // nghr d7d28cfe: "http" = MCP Streamable HTTP (default, modern
+            // servers); "legacy-sse" = the pre-0.20 homemade {url}/message
+            // protocol. Anything else still fails loud.
+            if server.transport != "http" && server.transport != "legacy-sse" {
                 crate::observability::tee_eprintln(
                     &format!("Warning: MCP server '{}' uses unsupported transport '{}', skipping",
                     server.name, server.transport)
@@ -222,6 +229,7 @@ impl McpToolLoader {
             let client_config = build_registry_config(
                 &server.name,
                 &server.url,
+                &server.transport,
                 server.auth_token.as_deref(),
                 server.credentials.as_deref(),
                 &config.credentials,
@@ -403,12 +411,13 @@ pub struct McpToolExecutionResult {
 async fn build_registry_config(
     name: &str,
     url: &str,
+    transport: &str,
     auth_token: Option<&str>,
     credentials_ref: Option<&str>,
     credentials_map: &HashMap<String, McpCredentialConfig>,
     #[cfg(feature = "registry-mcp-token")] shared_store: Option<std::sync::Arc<dyn pep::token_store::TokenStore>>,
 ) -> RegistryServerConfig {
-    let mut config = RegistryServerConfig::new(name, url);
+    let mut config = RegistryServerConfig::new(name, url).with_transport(transport);
 
     // Check for named credential reference first
     if let Some(cred_name) = credentials_ref {
