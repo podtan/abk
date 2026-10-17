@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-10-17
+
+### Fixed
+
+- **Thinking-block dropped for providers serving the `reasoning` key (nghr 5fc21214)** — the OpenAI-compatible providers have no spec'd reasoning field, and they drift: z.ai/DeepSeek/OpenRouter serve `reasoning_content` (de-facto standard), while vLLM ≥0.30 (`--reasoning-parser glm47`) serves `reasoning`. abk read only `reasoning_content`, so self-hosted vLLM thinking (generated AND billed) never reached `StreamChunk::Reasoning` — trustee rendered no thinking block on Pardis GLM while z.ai worked. Both inbound parse sites now accept both keys with `reasoning_content` taking precedence: `provider::openai::response::parse_response` (non-streaming `message.*`) and `provider::openai::sse::parse_sse_event` (streaming `delta.*`). Additive fallback — z.ai behavior byte-identical. 8 regression tests (vLLM shape, z.ai shape, precedence, empty-string silence, plain-model None).
+- Known sibling gap, documented not fixed here: the wasm/extension provider paths consume `delta.reasoning` from the WASM guest's own parser (host never sees raw JSON on those paths) — the mirror-image key gap lives in the guest SDK and is tracked for a follow-up.
+
+## [0.20.0] - 2026-10-03
+
+### Added
+
+- MCP Streamable HTTP transport for the registry MCP surface (`registry-mcp-token` feature) — browser-MCP compatibility fix; trustee 0.21.0 wave rode this (nghr-thread receipt 2026-10-03).
+
+## [0.19.0] - 2026-09-30
+
+### Added
+
+- `ProviderConfig.danger_accept_invalid_certs` (serde default false) threaded into `HttpClient::new_with_tls` — opt-in per-provider TLS acceptance for self-signed LLM endpoints (e.g. on-prem inference behind private CAs). Streaming and non-streaming share the one client. Shipped end-to-end with trustee 0.19.11 (owner-tested on self-signed ninfer endpoint).
+
 ## [0.18.2] - 2026-09-06
 
 ### Fixed

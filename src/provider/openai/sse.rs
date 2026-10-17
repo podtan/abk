@@ -23,8 +23,14 @@ pub fn parse_sse_event(data: &str) -> Option<Vec<StreamChunk>> {
 
     let mut chunks = Vec::new();
 
-    // Reasoning content (thinking models)
-    if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+    // Reasoning content (thinking models).
+    // Providers drift on the key: `reasoning_content` (z.ai/DeepSeek/OpenRouter)
+    // vs `reasoning` (vLLM reasoning-parser). Accept both (nghr 5fc21214).
+    if let Some(reasoning) = delta
+        .get("reasoning_content")
+        .or_else(|| delta.get("reasoning"))
+        .and_then(|v| v.as_str())
+    {
         if !reasoning.is_empty() {
             chunks.push(StreamChunk::Reasoning(reasoning.to_string()));
         }
@@ -92,4 +98,44 @@ pub fn parse_sse_event(data: &str) -> Option<Vec<StreamChunk>> {
     }
 
     Some(chunks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // vLLM >=0.30 reasoning-parser shape (nghr 5fc21214): thinking rides `delta.reasoning`.
+    #[test]
+    fn test_sse_reasoning_key_vllm() {
+        let data = r#"{"choices":[{"delta":{"reasoning":"checking the bat and ball puzzle"}}]}"#;
+        let chunks = parse_sse_event(data).expect("event should parse");
+        assert_eq!(chunks.len(), 1);
+        assert!(matches!(&chunks[0], StreamChunk::Reasoning(t) if t == "checking the bat and ball puzzle"));
+    }
+
+    // z.ai/DeepSeek/OpenRouter shape: `delta.reasoning_content` (de-facto standard) — must not regress.
+    #[test]
+    fn test_sse_reasoning_content_key_zai() {
+        let data = r#"{"choices":[{"delta":{"reasoning_content":"thinking"}}]}"#;
+        let chunks = parse_sse_event(data).expect("event should parse");
+        assert_eq!(chunks.len(), 1);
+        assert!(matches!(&chunks[0], StreamChunk::Reasoning(t) if t == "thinking"));
+    }
+
+    // Precedence: `reasoning_content` wins when a provider serves both.
+    #[test]
+    fn test_sse_reasoning_content_takes_precedence() {
+        let data = r#"{"choices":[{"delta":{"reasoning_content":"canonical","reasoning":"alias"}}]}"#;
+        let chunks = parse_sse_event(data).expect("event should parse");
+        assert_eq!(chunks.len(), 1);
+        assert!(matches!(&chunks[0], StreamChunk::Reasoning(t) if t == "canonical"));
+    }
+
+    // Empty reasoning string stays silent (existing behavior preserved for both keys).
+    #[test]
+    fn test_sse_empty_reasoning_emits_nothing() {
+        let data = r#"{"choices":[{"delta":{"reasoning":""}}]}"#;
+        let chunks = parse_sse_event(data).expect("event should parse");
+        assert!(chunks.is_empty());
+    }
 }
