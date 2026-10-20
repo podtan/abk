@@ -397,9 +397,11 @@ pub struct McpToolExecutionResult {
 ///
 /// Priority:
 /// 1. `credentials` reference (if found in registry):
-///    - `service-account`: **eagerly exchanges** service token → access token via
-///      RFC 8693, then stores the result as a static `auth_token` (uses the proven
-///      old code path).
+///    - `service-account`: attaches a lazily-exchanging
+///      [`pep::token_provider::ServiceAccountTokenProvider`] — the RFC 8693
+///      exchange happens on first use and the short-lived access token is
+///      proactively refreshed (never a static `auth_token`); requires the
+///      `registry-mcp-token` feature.
 ///    - `static`: resolves env vars and stores as `auth_token`.
 /// 2. `auth_token` → static token
 /// 3. neither → no auth
