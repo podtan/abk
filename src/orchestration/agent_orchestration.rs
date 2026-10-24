@@ -132,15 +132,15 @@ pub trait AgentContext {
     // Optional channel to send incremental resume_info after each checkpoint.
     // Used by TUI to preserve session context when ESC cancels mid-workflow.
     // Returns a cloned sender to avoid borrow conflicts with &mut self methods.
-    fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>;
+    fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>>;
 
     /// Restore the checkpoint sender after a take (for reuse across workflow iterations).
-    fn restore_on_checkpoint_sender(&mut self, sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>);
+    fn restore_on_checkpoint_sender(&mut self, sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>>);
 
     /// Create a final checkpoint and return resume info for session continuity.
     /// Called by the orchestration layer to send incremental resume_info after
     /// each workflow iteration's checkpoint (for TUI ESC-cancel preservation).
-    async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::cli::ResumeInfo>;
+    async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::resume::ResumeInfo>;
 
     // LLM helpers
     fn parse_response(&self, response: &str) -> (Option<String>, Option<String>, bool);
@@ -192,9 +192,10 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
 
         // Limit history — pin-aware: the leading system message AND a
         // compaction checkpoint wrapper directly behind it survive the trim
-        // (plain limit_history would silently drop the wrapper).
+        // (plain limit_history would silently drop the wrapper). Lives in
+        // crate::resume (feature-neutral) — no agent-module dependency.
         let max_history = agent.max_history();
-        crate::agent::compaction::limit_history_keeping_checkpoint(
+        crate::resume::limit_history_keeping_checkpoint(
             agent.chat_formatter_mut(),
             max_history,
         );

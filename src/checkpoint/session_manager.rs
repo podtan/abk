@@ -893,7 +893,7 @@ impl SessionManager {
     pub async fn create_final_checkpoint_and_get_resume_info<C: AgentContext>(
         &mut self,
         context: &C,
-    ) -> Option<crate::cli::ResumeInfo> {
+    ) -> Option<crate::resume::ResumeInfo> {
         if !self.checkpointing_enabled {
             return None;
         }
@@ -905,7 +905,7 @@ impl SessionManager {
             .latest_checkpoint_id()
             .unwrap_or_else(|| format!("{:03}_analyze", iteration));
 
-        Some(crate::cli::ResumeInfo {
+        Some(crate::resume::ResumeInfo {
             session_id: session_storage.session_id().to_string(),
             checkpoint_id,
             iteration,

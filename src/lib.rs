@@ -127,6 +127,12 @@ pub mod text;
 #[cfg(feature = "observability")]
 pub mod observability;
 
+/// Feature-neutral resume handle (serde-gated; see the module docs — moved
+/// out of `cli` in 0.21.2 so `agent`/`orchestration`/`checkpoint` compile
+/// without the `cli` feature).
+#[cfg(feature = "serde")]
+pub mod resume;
+
 /// CLI display utilities (enabled with the `cli` feature)
 #[cfg(feature = "cli")]
 pub mod cli;

@@ -123,7 +123,7 @@ pub struct Agent {
     // Optional channel to send incremental resume_info after each checkpoint.
     // Used by TUI to preserve session context when ESC cancels mid-workflow.
     // When None (non-TUI mode), sends are no-ops.
-    on_checkpoint: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+    on_checkpoint: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>>,
 
     // Tool filtering: None = all tools allowed, Some(set) = only those tools.
     // Set once at init from config.tools.enabled_tools for O(1) lookup.
@@ -438,7 +438,7 @@ impl Agent {
 
     /// Create a final checkpoint and return resume info for session continuity.
     /// Returns None if checkpointing is not enabled or no session exists.
-    pub async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::cli::ResumeInfo> {
+    pub async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::resume::ResumeInfo> {
         // Take the session_manager temporarily to avoid borrow conflict:
         // SessionManager needs &mut self (to save checkpoint) and &Agent (as AgentContext).
         let mut session_manager = self.session_manager.take()?;
@@ -604,7 +604,7 @@ impl Agent {
     /// When `None` (non-TUI mode), all sends are no-ops — zero overhead on the CLI path.
     pub fn set_on_checkpoint_sender(
         &mut self,
-        sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+        sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>>,
     ) {
         self.on_checkpoint = sender;
     }
@@ -612,7 +612,7 @@ impl Agent {
     /// Restore the checkpoint sender after a take (for reuse across workflow iterations).
     pub fn restore_on_checkpoint_sender(
         &mut self,
-        sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>,
+        sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>>,
     ) {
         self.on_checkpoint = sender;
     }

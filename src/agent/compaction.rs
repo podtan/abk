@@ -36,7 +36,13 @@ use umf::chatml::{ChatMLFormatter, ChatMLMessage, MessageRole};
 use crate::orchestration::AgentContext as _;
 
 /// Marker prefix that identifies a checkpoint wrapper message in history.
-pub const CHECKPOINT_PREFIX: &str = "<conversation-checkpoint>";
+///
+/// Defined in the feature-neutral [`crate::resume`] module (the orchestration
+/// loop's trim helper lives there too); re-exported here for all in-crate and
+/// external callers.
+pub use crate::resume::CHECKPOINT_PREFIX;
+pub use crate::resume::is_checkpoint_message;
+pub use crate::resume::limit_history_keeping_checkpoint;
 
 /// Fallback chars-per-token when the tokenizer is unavailable (opencode
 /// util/token.ts CHARS_PER_TOKEN = 4).
@@ -211,9 +217,7 @@ pub fn calculate_ceiling(window: u64, buffer: Option<u64>) -> u64 {
 // ---------------------------------------------------------------------------
 
 /// True when the message is a compaction checkpoint wrapper.
-pub fn is_checkpoint_message(message: &ChatMLMessage) -> bool {
-    message.content.trim_start().starts_with(CHECKPOINT_PREFIX)
-}
+/// (Definition lives in [`crate::resume`]; re-exported above.)
 
 /// Index of the first message AFTER the leading system message (0 when the
 /// history does not open with a system message).
@@ -815,33 +819,9 @@ pub async fn maybe_auto_compact(agent: &mut super::Agent) -> Result<()> {
     Ok(())
 }
 
-/// History trim that pins the leading system message AND a checkpoint wrapper
-/// sitting directly behind it (abk-side replacement for umf's
-/// `limit_history`, which would silently drop the wrapper).
-pub fn limit_history_keeping_checkpoint(formatter: &mut ChatMLFormatter, max_messages: usize) {
-    let messages = formatter.get_messages();
-    if messages.len() <= max_messages {
-        return;
-    }
-    let mut keep_head: Vec<ChatMLMessage> = Vec::new();
-    if let Some(first) = messages.first() {
-        keep_head.push(first.clone());
-    }
-    if let Some(second) = messages.get(1) {
-        if is_checkpoint_message(second) {
-            keep_head.push(second.clone());
-        }
-    }
-    let recent: Vec<ChatMLMessage> = messages
-        .iter()
-        .rev()
-        .take(max_messages.saturating_sub(keep_head.len()))
-        .rev()
-        .cloned()
-        .collect();
-    keep_head.extend(recent);
-    *formatter.get_messages_mut() = keep_head;
-}
+// limit_history_keeping_checkpoint moved to crate::resume (feature-neutral
+// home — the orchestration loop calls it without the agent module);
+// re-exported above.
 
 #[cfg(test)]
 mod tests {

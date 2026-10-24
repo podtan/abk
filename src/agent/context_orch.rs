@@ -385,18 +385,18 @@ impl AgentContext for super::Agent {
     }
 
     // Checkpoint channel for incremental resume_info (take-and-restore pattern)
-    fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>> {
+    fn take_on_checkpoint_sender(&mut self) -> Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>> {
         self.on_checkpoint.take()
     }
 
     /// Restore the checkpoint sender after a take (for reuse across workflow iterations).
-    fn restore_on_checkpoint_sender(&mut self, sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::cli::ResumeInfo>>>) {
+    fn restore_on_checkpoint_sender(&mut self, sender: Option<tokio::sync::mpsc::UnboundedSender<Option<crate::resume::ResumeInfo>>>) {
         self.restore_on_checkpoint_sender(sender);
     }
 
     /// Create a final checkpoint and return resume info for session continuity.
     /// Delegates to Agent's method which handles SessionManager take/put pattern.
-    async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::cli::ResumeInfo> {
+    async fn create_final_checkpoint_and_get_resume_info(&mut self) -> Option<crate::resume::ResumeInfo> {
         self.create_final_checkpoint_and_get_resume_info().await
     }
 

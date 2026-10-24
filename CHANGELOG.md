@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2] - 2026-10-24
+
+### Fixed
+
+- **Isolated feature-set compile defects (the trustee "feature issue", owner-reported 2026-10-24)** — several feature combinations failed standalone:
+  - `orchestration` (isolated): `config/environment.rs` + `provider/factory.rs` reference `crate::observability` while the chain (`orchestration` → `provider` → `config`) never enabled it → `config` feature now includes `observability` (transitively fixes `provider` and `orchestration`). Plus the compaction wave's pin-aware trim helper moved out of the `agent`-gated module.
+  - `agent` / `orchestration` / `checkpoint` without `cli`: the documented-since-0.18.2 ungated `crate::cli::ResumeInfo` references (E0432). **`ResumeInfo` moved to a feature-neutral home** — new `abk::resume` module (serde-gated); `abk::cli::ResumeInfo` re-export kept byte-stable for every consumer (trustee, TUI, external). In-crate references repointed. `orchestration` also gains `serde` (the handle needs the derive under isolated orchestration).
+  - Compaction trim helpers (`is_checkpoint_message`, `limit_history_keeping_checkpoint`, `CHECKPOINT_PREFIX`) live in `abk::resume` gated on `umf`; `agent::compaction` re-exports them — the orchestration loop no longer depends on the `agent` module for the trim.
+- MATRIX DELTA (cargo check --no-default-features --features <f>, per-feature): orchestration broken→**0 errors** · agent 12→**2** · provider 0 · config 0 · cli 0 · checkpoint 19 (unchanged, pre-existing) · extension 2 (unchanged, pre-existing, documented class). Remaining `agent`-2 / `checkpoint`-19 / `extension`-2 are pre-existing cfg-shape gaps (stash-verified on the clean tree) — separate workstream, disclosed not fixed. Gates: compaction suite 19/19; trustee-consumed lib suite 298 passed / 10 pre-existing (identical to the 0.21.0 baseline).
+
 ## [0.21.1] - 2026-10-24
 
 ### Fixed
