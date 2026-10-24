@@ -3,7 +3,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"tiktoke
 
 [package]
 name = "abk"
-version = "0.21.0"
+version = "0.21.1"
 edition = "2021"
 description = "Agent Builder Kit - Complete modular agent building blocks with feature-gated modules"
 license = "MIT OR Apache-2.0"
@@ -18,7 +18,7 @@ readme = "README.md"
 default = []
 config = ["serde", "serde_json", "toml", "anyhow", "chrono", "dotenv"]
 observability = ["anyhow", "chrono", "serde_json", "tokio"]
-cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "async-trait", "serde", "serde_json", "thiserror", "config", "checkpoint", "dirs", "shellexpand", "base64"]
+cli = ["colored", "unicode-width", "clap", "comfy-table", "chrono", "anyhow", "async-trait", "serde", "serde_json", "thiserror", "config", "checkpoint", "dirs", "shellexpand", "base64", "agent"]
 checkpoint = ["serde", "serde_json", "thiserror", "anyhow", "tokio", "chrono", "sha2", "uuid", "toml", "umf", "hostname", "async-trait", "regex", "urlencoding"]
 provider = ["serde", "serde_json", "anyhow", "async-trait", "reqwest", "futures-util", "umf", "tokio", "config"]
 provider-wasm = ["provider", "wasmtime", "wasmtime-wasi"]

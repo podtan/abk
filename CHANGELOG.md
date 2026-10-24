@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-10-24
+
+### Fixed
+
+- **`cli` feature is standalone-compilable again** — the `cli` feature did not include `agent`, yet `cli/commands/run.rs` unconditionally imports `crate::orchestration` / `crate::agent` (workflow loop, resume, checkpoint APIs) and `tokio_util`. Under a bare `features = ["cli"]` consumer — exactly trustee-tui's pin — the crate failed to compile with E0432/E0433. PROVEN PRE-EXISTING on published 0.20.1 (identical errors from the registry source; trustee-tui 0.4.7's October-17 publish shipped past this red gate — disclosed). Fix: `cli` now includes `agent` (which pulls `orchestration`, `provider`, `executor`, `observability`, `tokio-util`) — the feature graph now matches what the code always required. Caught by the per-crate publish dry-run during the trustee 0.22.0 wave — the dry-run gate did its job.
+
 ## [0.21.0] - 2026-10-24
 
 ### Added
