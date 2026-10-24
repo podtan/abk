@@ -22,6 +22,10 @@ pub use types::{AgentMode, ExecutionMode, ToolExecutionResult, WorkflowStep};
 // Phase 2: checkpoint helpers module
 pub mod checkpoint_utils;
 
+/// Session compaction — summarize-to-checkpoint (opencode-derived,
+/// conservative v1; see the module docs for the port scope).
+pub mod compaction;
+
 // AgentContext implementation for abk integration
 pub mod context_impl;
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-10-24
+
+### Added
+
+- **Session compaction — summarize-to-checkpoint (conservative v1)** — new `agent::compaction` module porting the opencode compaction mechanism (anomalyco/opencode @ b64cc80, `session/compaction.ts`) per the owner order of 2026-10-24; design of record: nghr doc 57ef6f9a / workstream e74a4f94. Mechanism: the newest `keep` tokens (default 15 000) of history stay verbatim beside a structured-template summary (Objective / Requirements / Decisions / Work State Completed-Active-Blocked / Next Move / Relevant Files / Important Context), heading-validated with ONE nudge retry; the result splices into history as one user-role `<conversation-checkpoint>` wrapper; successive compactions chain via the update-mode prompt (newer-history-wins — no monotonic bloat). The summary request sends the whole conversation with tools disabled and falls back to opencode's text-flatten shrink ladder (levels whole → clip tool outputs → drop tool outputs → user-only → omit, oldest first, newest exchange never omitted) with the 85/70/50/35 re-aim-on-rejection arithmetic ported to i64. Triggers: `/compact` task (manual, intercepted in `execute_run` before the session fork — loud `Nothing to compact yet` on fresh sessions, honest failure leaves the session untouched) and the opt-in automatic gate (`[compaction] auto = false` DEFAULT; unknown `context_window` never auto-fires; fail-open on error — the step continues uncompacted, a deliberate divergence from opencode's StepFailed). History is never destroyed: compaction splices the working history and lands in new checkpoints — append-only snapshots keep pre-compaction history (tombstone law intact). Estimator: umf cl100k primary, chars/4 CHARS-based fallback (never `String::len()` bytes — char-boundary panic class), images flat 1 500 tokens, ceiling = window − max(15 %, 16 000) (opencode constants). `limit_history` call sites replaced by a pin-aware trim that never drops the wrapper behind the system message. 19 unit tests (wrapper render, split alignment, ladder levels/ordering, char-safety incl. Persian, config defaults). NOT ported (v1 non-goals): background precompute/held-summary swap, provider-native compaction windows, overflow-recovery trigger.
+
 ## [0.20.1] - 2026-10-17
 
 ### Fixed

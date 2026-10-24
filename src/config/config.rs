@@ -30,6 +30,10 @@ pub struct Configuration {
     /// Unified tool source configuration
     #[serde(default)]
     pub tool_sources: Vec<ToolSourceConfig>,
+    /// Session compaction settings (summarize-to-checkpoint; conservative v1 —
+    /// `auto` defaults to false, so this block is opt-in end to end).
+    #[serde(default)]
+    pub compaction: Option<crate::config::config::CompactionConfig>,
     #[cfg(feature = "checkpoint")]
     pub checkpointing: Option<crate::checkpoint::GlobalCheckpointConfig>,
     #[cfg(feature = "cli")]
@@ -590,6 +594,29 @@ pub struct ModeConfig {
     pub auto_execute: bool,
 }
 
+/// `[compaction]` settings (session compaction; opencode-derived, conservative
+/// v1). Absent block = fully disabled defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    /// Opt-in automatic compaction before requests when the estimated context
+    /// reaches the trigger threshold. DEFAULT false — nothing runs unless a
+    /// user issues `/compact` or this is flipped explicitly.
+    #[serde(default)]
+    pub auto: Option<bool>,
+    /// Tokens of recent conversation kept verbatim beside the summary
+    /// (default 15000).
+    #[serde(default)]
+    pub keep: Option<u64>,
+    /// The model's context window in tokens. Automatic compaction NEVER fires
+    /// when this is absent (unknown windows are never estimated into a start).
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    /// Tokens kept free below the context window before compaction fires
+    /// (default: max(15% of window, 16000 when window ≥ 32000)).
+    #[serde(default)]
+    pub buffer: Option<u64>,
+}
+
 /// Loads and manages TOML configuration.
 #[derive(Debug)]
 pub struct ConfigurationLoader {
@@ -658,6 +685,7 @@ impl ConfigurationLoader {
     /// Get default configuration.
     pub fn get_default_config() -> Configuration {
         Configuration {
+            compaction: None,
             agent: AgentConfig {
                 name: "NO_AGENT_NAME".to_string(),
                 version: "0.1.0".to_string(),

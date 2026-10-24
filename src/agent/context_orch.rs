@@ -8,6 +8,11 @@ use crate::orchestration::AgentContext;
 use std::collections::HashMap;
 
 impl AgentContext for super::Agent {
+    // Automatic session-compaction gate (default-off; fail-open inside).
+    async fn maybe_auto_compact(&mut self) -> Result<()> {
+        crate::agent::compaction::maybe_auto_compact(self).await
+    }
+
     // Session state
     fn is_running(&self) -> bool { self.is_running }
     fn set_running(&mut self, running: bool) { self.is_running = running; }

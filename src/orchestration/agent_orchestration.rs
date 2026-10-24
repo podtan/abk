@@ -50,6 +50,15 @@ pub trait AgentContext {
     fn retry_strategy(&self) -> crate::config::RetryStrategy {
         crate::config::RetryStrategy::Exponential
     }
+
+    /// Automatic session-compaction gate, called before each request build
+    /// (opencode-derived, conservative v1). Default: disabled no-op — only
+    /// the real agent overrides it. Implementations must be cheap when
+    /// `[compaction].auto` is false and MUST be fail-open (log, never
+    /// propagate — a failed optimization must not kill the user's turn).
+    async fn maybe_auto_compact(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn enable_task_classification(&self) -> bool;
     fn streaming_enabled(&self) -> bool;
     
@@ -176,9 +185,19 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
             send_checkpoint_resume_info(agent).await;
         }
 
-        // Limit history
+        // Compaction gate (default-off; see [compaction] config) — runs
+        // before the history trim so a compacted history is what gets
+        // trimmed. Fail-open by contract: the override logs its own failures.
+        let _ = agent.maybe_auto_compact().await;
+
+        // Limit history — pin-aware: the leading system message AND a
+        // compaction checkpoint wrapper directly behind it survive the trim
+        // (plain limit_history would silently drop the wrapper).
         let max_history = agent.max_history();
-        agent.chat_formatter_mut().limit_history(max_history);
+        crate::agent::compaction::limit_history_keeping_checkpoint(
+            agent.chat_formatter_mut(),
+            max_history,
+        );
 
         // Validate messages
         if !agent.validate_messages() {

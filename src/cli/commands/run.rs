@@ -194,6 +194,86 @@ pub async fn execute_run<C: CommandContext>(
         None
     };
 
+    // ── /compact intercept (manual compaction trigger; opencode-derived, conservative v1) ──
+    // Runs before the session fork so a compaction-only request never starts
+    // an LLM task run. Resume path: restore → compact → checkpoint → return.
+    // Failure leaves the session untouched and returns the caller's
+    // resume_info so the chain continues exactly as before (fail loud, never
+    // silently degrade).
+    if task.trim().eq_ignore_ascii_case("/compact") {
+        let Some(info) = resume_info.as_ref() else {
+            return Ok(TaskResult {
+                success: false,
+                error: Some(
+                    "Compaction failed (session unchanged): Nothing to compact yet".to_string(),
+                ),
+                resume_info: None,
+            });
+        };
+        let Some(context) = resume_context.as_ref() else {
+            return Ok(TaskResult {
+                success: false,
+                error: Some(
+                    "Compaction failed (session unchanged): no resumable checkpoint".to_string(),
+                ),
+                resume_info: resume_info.clone(),
+            });
+        };
+        ctx.log_info(&format!(
+            "Compacting session {} (checkpoint {})…",
+            info.session_id, info.checkpoint_id
+        ));
+        if let Err(e) = agent
+            .resume_from_checkpoint(&context.project_path, &context.session_id, &context.checkpoint_id)
+            .await
+        {
+            return Ok(TaskResult {
+                success: false,
+                error: Some(format!("Compaction failed (session unchanged): Failed to resume from checkpoint: {:#}", e)),
+                resume_info: resume_info.clone(),
+            });
+        }
+        return match agent.compact_history("manual").await {
+            Ok(outcome) => {
+                let marker = format!(
+                    "🗜 context compacted ({}→{} tokens)",
+                    outcome.tokens_before, outcome.tokens_after
+                );
+                ctx.log_info(&marker);
+                agent.output_sink().emit(
+                    crate::orchestration::output::OutputEvent::WorkflowCompleted {
+                        reason: marker,
+                        iterations: agent.current_iteration(),
+                    },
+                );
+                // Checkpoint the compacted conversation; failure here is loud
+                // — the compacted history exists only in memory until this
+                // lands, so a failed checkpoint must not claim success.
+                if let Err(e) = agent.create_workflow_checkpoint(agent.current_iteration()).await {
+                    Ok(TaskResult {
+                        success: false,
+                        error: Some(format!(
+                            "Compaction succeeded but checkpoint failed: {:#}",
+                            e
+                        )),
+                        resume_info: resume_info.clone(),
+                    })
+                } else {
+                    let resume = agent.create_final_checkpoint_and_get_resume_info().await;
+                    Ok(TaskResult { success: true, error: None, resume_info: resume })
+                }
+            }
+            Err(e) => Ok(TaskResult {
+                success: false,
+                error: Some(format!(
+                    "Compaction failed (session unchanged): {:#}",
+                    e
+                )),
+                resume_info: resume_info.clone(),
+            }),
+        };
+    }
+
     let result = if let Some(context) = resume_context {
         // Resume from checkpoint instead of starting new session
         ctx.log_info(&format!("Found resumed session: {} (checkpoint: {})", 
