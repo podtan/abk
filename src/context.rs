@@ -255,6 +255,9 @@ pub struct RunContext {
     /// (trustee sessions, consoles) hold the same handle and read it any
     /// time to show live "compacting…" state that survives a console
     /// refresh. Runtime state, never persisted — skipped by serde.
+    /// Gated on `serde` (the type lives in the serde-gated `resume` module —
+    /// the no-feature publish-verify build must stay clean).
+    #[cfg(feature = "serde")]
     #[cfg_attr(
         any(feature = "checkpoint", feature = "config", feature = "agent", feature = "orchestration"),
         serde(skip)
@@ -323,6 +326,7 @@ impl RunContext {
     /// The host creates the handle (`abk::resume::SharedCompactionStatus`),
     /// keeps a clone for reading, and passes it here; the compaction loop
     /// stamps it from inside the run.
+    #[cfg(feature = "serde")]
     pub fn with_compaction_status(
         mut self,
         status: crate::resume::SharedCompactionStatus,
@@ -426,7 +430,14 @@ impl std::fmt::Debug for RunContext {
             )
             .field(
                 "compaction_status",
-                &self.compaction_status.as_ref().map(|_| "<SharedCompactionStatus>"),
+                #[cfg(feature = "serde")]
+                {
+                    &self.compaction_status.as_ref().map(|_| "<SharedCompactionStatus>")
+                },
+                #[cfg(not(feature = "serde"))]
+                {
+                    &None::<&str>
+                },
             )
             .finish()
     }
