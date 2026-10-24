@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3] - 2026-10-24
+
+### Added
+
+- **Live compaction status handle (owner-reported UX gap)** — while a compaction (manual `/compact` or the auto gate) runs, hosts had NO queryable "compacting…" signal: the command is intercepted before it becomes a task message (it never enters the transcript), and a console refresh mid-compaction showed the stale checkpoint transcript with nothing on the wire. New feature-neutral types in `abk::resume` (serde-only, the 0.21.2 ResumeInfo lesson): `CompactionStatus { in_progress, started_at, reason, last }` + `LastCompaction { tokens_before, tokens_after, finished_at, reason }` + `SharedCompactionStatus` (Arc<std::sync::Mutex>). `RunContext` gains `compaction_status` (builder `with_compaction_status`, serde-skipped runtime state) — the host creates the handle, threads it through the run context, and reads it any time. The compaction loop stamps it around the summary request (the expensive part — cheap pre-checks stay banner-free): `stamp_compaction_begin` sets `in_progress`/`started_at`/`reason`; `stamp_compaction_end` clears them and records the durable `last` trace on success (a failed compaction records no trace). Zero changes to history/LLM context — UI state never rides the model context, history stays append-only (tombstone law intact). 6 new unit tests (begin/end stamps, no-handle no-op, serde round-trip incl. empty-object default).
+
 ## [0.21.2] - 2026-10-24
 
 ### Fixed

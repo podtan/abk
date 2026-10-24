@@ -648,6 +648,47 @@ pub struct CompactionOutcome {
     pub reason: String,
 }
 
+// ---------------------------------------------------------------------------
+// Live status stamps (free functions — directly unit-testable without an
+// Agent; the compaction loop calls them with the RunContext handle).
+// ---------------------------------------------------------------------------
+
+/// Stamp `in_progress` on the shared status handle (host shows "compacting…").
+/// No handle = no-op. std Mutex, never held across an await.
+pub fn stamp_compaction_begin(handle: Option<&crate::resume::SharedCompactionStatus>, reason: &str) {
+    if let Some(h) = handle {
+        if let Ok(mut s) = h.lock() {
+            s.in_progress = true;
+            s.started_at = Some(chrono::Utc::now().to_rfc3339());
+            s.reason = Some(reason.to_string());
+        }
+    }
+}
+
+/// Clear `in_progress` on the shared status handle; on success also record
+/// the durable `last` trace (tokens + completion time + reason). No handle =
+/// no-op.
+pub fn stamp_compaction_end(
+    handle: Option<&crate::resume::SharedCompactionStatus>,
+    outcome: Option<&CompactionOutcome>,
+) {
+    if let Some(h) = handle {
+        if let Ok(mut s) = h.lock() {
+            s.in_progress = false;
+            s.started_at = None;
+            s.reason = None;
+            if let Some(o) = outcome {
+                s.last = Some(crate::resume::LastCompaction {
+                    tokens_before: o.tokens_before,
+                    tokens_after: o.tokens_after,
+                    finished_at: chrono::Utc::now().to_rfc3339(),
+                    reason: o.reason.clone(),
+                });
+            }
+        }
+    }
+}
+
 impl super::Agent {
     /// Read `[compaction]` settings from this agent's configuration.
     pub fn compaction_settings(&self) -> CompactionSettings {
@@ -697,7 +738,18 @@ impl super::Agent {
             anyhow!("Compaction request cannot be reduced further without losing the latest exchange")
         })?;
 
-        let summary = self.generate_summary_text(request_messages).await?;
+        // Live status: stamp in_progress BEFORE the summary request (the
+        // expensive part — the cheap checks above already passed) so hosts
+        // can show "compacting…" while it runs. Cleared on EVERY exit path.
+        let status = self.run_context.compaction_status.clone();
+        stamp_compaction_begin(status.as_ref(), reason);
+        let summary = match self.generate_summary_text(request_messages).await {
+            Ok(s) => s,
+            Err(e) => {
+                stamp_compaction_end(status.as_ref(), None);
+                return Err(e);
+            }
+        };
 
         // Splice: replace [system_prefix..boundary) with the wrapper. The
         // kept tail stays verbatim beside the summary.
@@ -716,12 +768,15 @@ impl super::Agent {
             tokens_before, tokens_after, reason
         ));
 
-        Ok(CompactionOutcome {
+        let outcome = CompactionOutcome {
             tokens_before,
             tokens_after,
             summary_chars: summary.trim().chars().count(),
             reason: reason.to_string(),
-        })
+        };
+        stamp_compaction_end(status.as_ref(), Some(&outcome));
+
+        Ok(outcome)
     }
 
     /// One summary generation (no tools, no streaming) with the single
@@ -1073,5 +1128,80 @@ mod tests {
         }
         limit_history_keeping_checkpoint(&mut fmt, 10);
         assert_eq!(fmt.get_messages().len(), 2);
+    }
+
+    #[test]
+    fn status_begin_stamps_in_progress_and_reason() {
+        let handle: crate::resume::SharedCompactionStatus =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::resume::CompactionStatus::default()));
+        stamp_compaction_begin(Some(&handle), "manual");
+        let s = handle.lock().unwrap();
+        assert!(s.in_progress);
+        assert!(s.started_at.is_some(), "started_at must be an RFC3339 stamp");
+        assert_eq!(s.reason.as_deref(), Some("manual"));
+        assert!(s.last.is_none(), "no last trace before completion");
+    }
+
+    #[test]
+    fn status_end_failure_clears_in_progress_keeps_last_empty() {
+        let handle: crate::resume::SharedCompactionStatus =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::resume::CompactionStatus::default()));
+        stamp_compaction_begin(Some(&handle), "auto");
+        stamp_compaction_end(Some(&handle), None);
+        let s = handle.lock().unwrap();
+        assert!(!s.in_progress);
+        assert!(s.started_at.is_none());
+        assert!(s.reason.is_none());
+        assert!(s.last.is_none(), "a failed compaction records no last trace");
+    }
+
+    #[test]
+    fn status_end_success_records_durable_last() {
+        let handle: crate::resume::SharedCompactionStatus =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::resume::CompactionStatus::default()));
+        stamp_compaction_begin(Some(&handle), "manual");
+        let outcome = CompactionOutcome {
+            tokens_before: 641_717,
+            tokens_after: 169_970,
+            summary_chars: 4_200,
+            reason: "manual".to_string(),
+        };
+        stamp_compaction_end(Some(&handle), Some(&outcome));
+        let s = handle.lock().unwrap();
+        assert!(!s.in_progress);
+        let last = s.last.clone().expect("success must record the durable last trace");
+        assert_eq!(last.tokens_before, 641_717);
+        assert_eq!(last.tokens_after, 169_970);
+        assert_eq!(last.reason, "manual");
+        assert!(!last.finished_at.is_empty());
+    }
+
+    #[test]
+    fn status_stamps_are_noop_without_handle() {
+        // None handle = no-op (fresh sessions / hosts that did not opt in).
+        stamp_compaction_begin(None, "manual");
+        stamp_compaction_end(None, None);
+    }
+
+    #[test]
+    fn compaction_status_serde_round_trip() {
+        let st = crate::resume::CompactionStatus {
+            in_progress: true,
+            started_at: Some("2026-10-24T13:00:00+00:00".to_string()),
+            reason: Some("manual".to_string()),
+            last: Some(crate::resume::LastCompaction {
+                tokens_before: 100,
+                tokens_after: 40,
+                finished_at: "2026-10-24T12:00:00+00:00".to_string(),
+                reason: "auto".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&st).unwrap();
+        let back: crate::resume::CompactionStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(st, back);
+        // Default deserializes from an empty object (serde defaults everywhere).
+        let empty: crate::resume::CompactionStatus = serde_json::from_str("{}").unwrap();
+        assert!(!empty.in_progress);
+        assert!(empty.last.is_none());
     }
 }

@@ -246,6 +246,20 @@ pub struct RunContext {
         serde(skip)
     )]
     pub mcp_loader: Option<std::sync::Arc<crate::agent::McpToolLoader>>,
+
+    /// Optional shared compaction-status handle.
+    ///
+    /// When set, the compaction loop (manual `/compact` and the auto gate)
+    /// stamps `in_progress`/`started_at` while a summarization run is in
+    /// flight and records the durable `last` trace on completion. Hosts
+    /// (trustee sessions, consoles) hold the same handle and read it any
+    /// time to show live "compacting…" state that survives a console
+    /// refresh. Runtime state, never persisted — skipped by serde.
+    #[cfg_attr(
+        any(feature = "checkpoint", feature = "config", feature = "agent", feature = "orchestration"),
+        serde(skip)
+    )]
+    pub compaction_status: Option<crate::resume::SharedCompactionStatus>,
 }
 
 impl RunContext {
@@ -301,6 +315,19 @@ impl RunContext {
         loader: std::sync::Arc<crate::agent::McpToolLoader>,
     ) -> Self {
         self.mcp_loader = Some(loader);
+        self
+    }
+
+    /// Set a shared compaction-status handle.
+    ///
+    /// The host creates the handle (`abk::resume::SharedCompactionStatus`),
+    /// keeps a clone for reading, and passes it here; the compaction loop
+    /// stamps it from inside the run.
+    pub fn with_compaction_status(
+        mut self,
+        status: crate::resume::SharedCompactionStatus,
+    ) -> Self {
+        self.compaction_status = Some(status);
         self
     }
 
@@ -396,6 +423,10 @@ impl std::fmt::Debug for RunContext {
                 {
                     &None::<&str>
                 },
+            )
+            .field(
+                "compaction_status",
+                &self.compaction_status.as_ref().map(|_| "<SharedCompactionStatus>"),
             )
             .finish()
     }

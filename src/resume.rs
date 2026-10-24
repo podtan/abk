@@ -22,6 +22,54 @@ pub fn is_checkpoint_message(message: &umf::chatml::ChatMLMessage) -> bool {
     message.content.trim_start().starts_with(CHECKPOINT_PREFIX)
 }
 
+/// Live compaction status — stamped by the compaction loop, read by hosts.
+///
+/// When a compaction (manual `/compact` or the auto gate) is in flight, hosts
+/// (trustee sessions, consoles) need a queryable "compacting…" signal that
+/// survives a console refresh: the transcript cannot carry it (the command is
+/// intercepted before it becomes a task message, and history is append-only
+/// model context — UI state must never ride the LLM context). The host owns a
+/// [`SharedCompactionStatus`] handle, threads it through
+/// `RunContext::with_compaction_status`, and reads it any time; the
+/// compaction loop stamps it from inside the run.
+///
+/// Feature-neutral home (the ResumeInfo lesson): serde-only, no feature deps,
+/// so every consumer feature set can name it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct CompactionStatus {
+    /// True while a compaction is running (summary request in flight).
+    #[serde(default)]
+    pub in_progress: bool,
+    /// RFC3339 stamp of when the in-flight compaction started.
+    #[serde(default)]
+    pub started_at: Option<String>,
+    /// Trigger reason of the in-flight compaction ("manual" or "auto").
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Durable trace of the most recent COMPLETED compaction. In-memory on
+    /// the host session (survives console refresh/navigation); the compacted
+    /// conversation itself is the on-disk evidence (checkpoint wrapper).
+    #[serde(default)]
+    pub last: Option<LastCompaction>,
+}
+
+/// Durable trace of one completed compaction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LastCompaction {
+    pub tokens_before: usize,
+    pub tokens_after: usize,
+    /// RFC3339 stamp of completion.
+    pub finished_at: String,
+    /// Trigger reason: "manual" (/compact) or "auto".
+    pub reason: String,
+}
+
+/// Shared status handle: the host creates it, passes it via
+/// `RunContext::with_compaction_status`, and reads it any time. The
+/// compaction loop stamps it from inside the run (std Mutex — never held
+/// across an await).
+pub type SharedCompactionStatus = std::sync::Arc<std::sync::Mutex<CompactionStatus>>;
+
 /// History trim that pins the leading system message AND a checkpoint wrapper
 /// sitting directly behind it (abk-side replacement for umf's
 /// `limit_history`, which would silently drop the wrapper).
