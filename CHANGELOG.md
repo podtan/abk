@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.4] - 2026-10-24
+
+### Fixed
+
+- **FIX-FORWARD of DEAD tag v0.21.3** — v0.21.3 (pushed at a4ad2e7) is a DEAD tag: its publish-verify failed with E0433 because the new `RunContext::compaction_status` field referenced `crate::resume` UNGATED while `pub mod resume` is `#[cfg(feature = "serde")]` — and the publish verify compiles the package with DEFAULT features (`[]`, no serde). The bare no-feature build was the one set the pre-flight missed (the trustee-consumed sets all pull serde transitively). Fix: field + builder + Debug arm gated on `feature = "serde"`. LESSON re-confirmed: the per-crate publish dry-run is the real gate — it caught this before the upload; and the publish-verify feature set is the DEFAULT set (`[]`), so `cargo check --no-default-features` (bare) belongs in the pre-flight checklist next to the per-consumer checks. v0.21.3 stays pushed as the receipt of the miss (dead-tag policy — tags are never rewritten).
+
 ## [0.21.3] - 2026-10-24
+
+### DEAD TAG (never published — superseded by 0.21.4)
+
+- Pushed at a4ad2e7; publish verify red (ungated `crate::resume` reference from the serde-gated module under default features). Content superseded by 0.21.4 (identical feature set + the serde gate).
 
 ### Added
 
