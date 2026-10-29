@@ -139,8 +139,29 @@ impl McpToolLoader {
 
             match result {
                 Ok(tools) => {
+                    // 76cbecf0: namespaced names for the collision check —
+                    // computed before the batch consumes the tools vec.
+                    let namespaced: Vec<String> = tools
+                        .iter()
+                        .map(|t| crate::registry::mcp_tool_name(&server.name, &t.name))
+                        .collect();
                     match registry.register_mcp_batch(tools, &server.name) {
                         Ok(registered) => {
+                            // 76cbecf0: a tool-name collision at startup warns
+                            // LOUD, naming the shadowed server — never silent
+                            // shadowing. With namespacing this only fires when
+                            // two configured servers share the same name.
+                            if registered < namespaced.len() {
+                                let shadowed: Vec<String> = namespaced
+                                    .iter()
+                                    .filter(|n| !registry.contains(n))
+                                    .cloned()
+                                    .collect();
+                                crate::observability::tee_eprintln(&format!(
+                                    "Warning: MCP tool name collision — {} tool(s) from server '{}' are SHADOWED (unreachable this session): {}. Another configured server already registered these namespaced names; give the servers distinct names.",
+                                    shadowed.len(), server.name, shadowed.join(", ")
+                                ));
+                            }
                             total_tools += registered;
                             crate::observability::tee_println(
                                 &format!("✓ Loaded {} tools from MCP server '{}'",
@@ -248,8 +269,29 @@ impl McpToolLoader {
 
             match result {
                 Ok(tools) => {
+                    // 76cbecf0: namespaced names for the collision check —
+                    // computed before the batch consumes the tools vec.
+                    let namespaced: Vec<String> = tools
+                        .iter()
+                        .map(|t| crate::registry::mcp_tool_name(&server.name, &t.name))
+                        .collect();
                     match registry.register_mcp_batch(tools, &server.name) {
                         Ok(registered) => {
+                            // 76cbecf0: a tool-name collision at startup warns
+                            // LOUD, naming the shadowed server — never silent
+                            // shadowing. With namespacing this only fires when
+                            // two configured servers share the same name.
+                            if registered < namespaced.len() {
+                                let shadowed: Vec<String> = namespaced
+                                    .iter()
+                                    .filter(|n| !registry.contains(n))
+                                    .cloned()
+                                    .collect();
+                                crate::observability::tee_eprintln(&format!(
+                                    "Warning: MCP tool name collision — {} tool(s) from server '{}' are SHADOWED (unreachable this session): {}. Another configured server already registered these namespaced names; give the servers distinct names.",
+                                    shadowed.len(), server.name, shadowed.join(", ")
+                                ));
+                            }
                             total_tools += registered;
                             crate::observability::tee_println(
                                 &format!("✓ Loaded {} tools from MCP server '{}'",
@@ -362,6 +404,11 @@ impl McpToolLoader {
             .get(&server_name)
             .ok_or_else(|| anyhow::anyhow!("Server config for '{}' not found", server_name))?;
 
+        // 76cbecf0: the registry stores the namespaced form
+        // (mcp__<server>__<tool>); the remote server expects the RAW name.
+        let raw_tool_name = crate::registry::strip_mcp_server_prefix(&server_name, tool_name)
+            .unwrap_or(tool_name);
+
         // Parse arguments
         let args: serde_json::Value = serde_json::from_str(arguments)
             .unwrap_or_else(|_| serde_json::json!({}));
@@ -369,7 +416,7 @@ impl McpToolLoader {
         // Call the tool
         let result = self
             .client
-            .call_tool(server_config, tool_name, args)
+            .call_tool(server_config, raw_tool_name, args)
             .await
             .map_err(|e| anyhow::anyhow!("MCP tool call failed: {}", e))?;
 

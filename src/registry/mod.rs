@@ -56,6 +56,8 @@ pub use factory::build_registry_from_config;
 // MCP support (requires registry-mcp feature)
 #[cfg(feature = "registry-mcp")]
 mod mcp;
+#[cfg(feature = "registry-mcp")]
+pub use mcp::{mcp_tool_name, strip_mcp_server_prefix};
 
 // MCP client (requires registry-mcp feature)
 #[cfg(feature = "registry-mcp")]
