@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.4] - 2026-10-31
+
+### Fixed
+
+- **/compact no longer refuses on big sessions when user messages cluster at the history's ends (nghr 124cb0e7 — field-proven: three consecutive "Nothing to compact yet" refusals on a ~320K-token session)** — the keep-boundary's user-message alignment searched BACKWARD (`(0..=dropped).rev()`) for the newest user message WITHIN the dropped range and extended the kept tail backward to it. With user messages clustered at the ends — the previous checkpoint wrapper at message [1] (itself a user message, 74K tokens: the fbfdb12c growth product) and the recent turns at the tail — the alignment grabbed the EARLY user message, the kept tail swallowed nearly the whole history, and the summarizable prefix shrank to exactly one message (the old wrapper) → the "never rewrite the checkpoint without new material" guard refused. Fix: the alignment searches FORWARD from the dropped edge (the first user message at-or-after it; fallback: the edge itself) — the kept tail never keeps more than the allowance. Simulated on the real data: the boundary moves from message 2 → 242, the summarizable prefix from 1 → 241 messages (~315K tokens), the kept tail to 37 messages — the compaction finally shrinks ~320K → ~21K. New regression test (keep_boundary_never_extends_backward_to_a_start_clustered_user_message); the existing boundary tests pass unchanged.
+
 ## [0.22.3] - 2026-10-31
 
 ### Fixed

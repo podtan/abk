@@ -353,18 +353,26 @@ pub fn find_keep_boundary(messages: &[ChatMLMessage], keep_tokens: u64) -> usize
     }
     let dropped = start_idx.min(entries.len() - 1);
 
-    // When EVERYTHING fits the allowance, keep only the latest exchange
-    // rather than duplicating the whole conversation beside the summary
-    // (opencode recentStart's latest-user fallback).
+    // Align FORWARD to the first user message at-or-after the dropped edge —
+    // the kept tail starts at an exchange boundary WITHOUT extending
+    // backward. The old backward search ((0..=dropped).rev()) grabbed user
+    // messages clustered at the history's START (e.g. a previous checkpoint
+    // wrapper — itself a user message) and extended the kept tail to nearly
+    // the whole history, leaving the summarizable prefix with only the
+    // wrapper → "Nothing to compact yet" on a ~320K-token session
+    // (nghr 124cb0e7, three consecutive /compact refusals). The backward
+    // search kept MORE than the allowance; the forward alignment keeps LESS
+    // — the correct direction for a compaction boundary (never keep more
+    // than the allowance; the newest exchange always stays).
     if dropped > 0 {
-        // Align to a user message so an assistant's tool calls and results
-        // stay together (recentStart userBoundary).
-        if let Some(boundary) = (0..=dropped).rev().find(|&k| {
+        if let Some(boundary) = (dropped..entries.len()).find(|&k| {
             let i = entries[k];
             messages[i].role == MessageRole::User
         }) {
             return entries[boundary];
         }
+        // No user message at/after the edge: the dropped edge itself.
+        return entries[dropped];
     }
 
     // Everything fits, or no user boundary inside the allowance: keep only
@@ -993,6 +1001,36 @@ mod tests {
     fn keep_boundary_with_only_system_returns_end() {
         let history = vec![system("sys")];
         assert_eq!(find_keep_boundary(&history, 100), 1);
+    }
+
+    /// nghr 124cb0e7: user messages clustered at the history's ENDS — a
+    /// previous checkpoint wrapper at the start (itself a user message, the
+    /// fbfdb12c growth product) and the recent turns at the tail — must NOT
+    /// drag the kept tail backward to the wrapper. The alignment searches
+    /// FORWARD from the dropped edge: the summarizable prefix holds the
+    /// middle of the history and the compaction proceeds (the old backward
+    /// search left the prefix with only the wrapper → "Nothing to compact
+    /// yet" on a ~320K session, three consecutive refusals).
+    #[test]
+    fn keep_boundary_never_extends_backward_to_a_start_clustered_user_message() {
+        let history = vec![
+            system("sys"),           // [0]
+            user("wrapper"),         // [1] — previous checkpoint wrapper (user role!)
+            assistant(&long(3000)),  // [2]
+            assistant(&long(3000)),  // [3]
+            assistant(&long(3000)),  // [4]
+            user("recent question"), // [5] — the recent turns at the tail
+            assistant(&long(100)),   // [6]
+        ];
+        // Budget fits only the tail exchange (messages 5+6) — the dropped
+        // range is entries for messages 1..5. The OLD backward alignment
+        // grabbed the wrapper (message 1, a user message) → boundary=1 →
+        // nothing to summarize. The forward alignment must land on the
+        // RECENT user message (message 5) instead.
+        let keep_tail = (estimate_message_tokens(&history[5]) + estimate_message_tokens(&history[6]))
+            as u64;
+        let boundary = find_keep_boundary(&history, keep_tail);
+        assert_eq!(boundary, 5, "alignment must search FORWARD from the dropped edge, never backward to the start-clustered wrapper");
     }
 
     #[test]
