@@ -149,19 +149,21 @@ pub trait AgentContext {
 
 /// Detect an anomalous no-op turn (nghr b29371e2).
 ///
-/// A thinking model that emits reasoning ALWAYS follows with either visible
-/// content or tool calls. A turn with reasoning present but content EMPTY and
-/// no tool calls means the tool-call deltas were lost in assembly or the
-/// model stalled mid-turn — the exact "workflow completed without acting"
-/// class (reasoning ends with clear tool intent, engine declares "Task
-/// completed", zero actions executed). Such a turn must never complete the
+/// The Content variant means NO tool calls by construction — so a
+/// Content-shaped turn with EMPTY text produced neither visible content nor
+/// actions. Two shapes hit this (both field-proven 2026-10-31):
+///   - reasoning streamed but no tool-call deltas arrived (the model emitted
+///     the call inside the reasoning block, or assembly lost it) — the turn
+///     ends with clear tool intent and zero actions;
+///   - a COMPLETELY EMPTY turn (no content, no reasoning — the model emitted
+///     EOS immediately; degenerate, and it slips a reasoning-required
+///     signature — the guard MUST NOT require reasoning).
+/// Either shape completes the workflow with zero actions — the "workflow
+/// completed without acting" class. Such a turn must never complete the
 /// workflow silently: the caller retries once, then fails loud.
 fn is_anomalous_noop_turn(text: &str, reasoning: &Option<String>) -> bool {
-    reasoning
-        .as_ref()
-        .map(|r| !r.trim().is_empty())
-        .unwrap_or(false)
-        && text.trim().is_empty()
+    let _ = reasoning; // deliberately ignored — see doc: the empty-turn shape has none
+    text.trim().is_empty()
 }
 
 /// Run non-streaming workflow - reusable for any agent
@@ -254,12 +256,18 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
                 if is_anomalous_noop_turn(&response_text, &reasoning) {
                     if noop_retry_count == 0 {
                         noop_retry_count += 1;
-                        agent.log_info(
-                            "⚠️ Anomalous turn: reasoning without content or tool calls — retrying once (nghr b29371e2)",
-                        );
+                        let shape = if reasoning.as_ref().map(|r| !r.trim().is_empty()).unwrap_or(false) {
+                            "reasoning without content or tool calls"
+                        } else {
+                            "completely empty turn (no content, no reasoning, no tool calls)"
+                        };
+                        agent.log_info(&format!(
+                            "⚠️ Anomalous no-op turn: {} — retrying once (nghr b29371e2)",
+                            shape
+                        ));
                         continue;
                     }
-                    let err = "Anomalous turn repeated: reasoning without content or tool calls — failing loud instead of silent completion (nghr b29371e2)";
+                    let err = "Anomalous no-op turn repeated: content and tool calls both absent — failing loud instead of silent completion (nghr b29371e2)";
                     agent.log_error(err, None)?;
                     return Err(anyhow::anyhow!(err));
                 }
@@ -382,12 +390,18 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                         if is_anomalous_noop_turn(&response_text, &reasoning) {
                             if noop_retry_count == 0 {
                                 noop_retry_count += 1;
-                                agent.log_info(
-                                    "⚠️ Anomalous turn: reasoning without content or tool calls — retrying once (nghr b29371e2)",
-                                );
+                                let shape = if reasoning.as_ref().map(|r| !r.trim().is_empty()).unwrap_or(false) {
+                                    "reasoning without content or tool calls"
+                                } else {
+                                    "completely empty turn (no content, no reasoning, no tool calls)"
+                                };
+                                agent.log_info(&format!(
+                                    "⚠️ Anomalous no-op turn: {} — retrying once (nghr b29371e2)",
+                                    shape
+                                ));
                                 continue;
                             }
-                            let err = "Anomalous turn repeated: reasoning without content or tool calls — failing loud instead of silent completion (nghr b29371e2)";
+                            let err = "Anomalous no-op turn repeated: content and tool calls both absent — failing loud instead of silent completion (nghr b29371e2)";
                             agent.log_error(err, None)?;
                             return Err(anyhow::anyhow!(err));
                         }
@@ -746,9 +760,9 @@ fn extract_hint(name: &str, args_json: &str) -> Option<String> {
 mod noop_turn_tests {
     use super::is_anomalous_noop_turn;
 
-    /// The b29371e2 failure signature: reasoning present (with tool intent),
-    /// content EMPTY, no tool calls — the turn that used to complete the
-    /// workflow silently with zero actions.
+    /// The b29371e2 failure signature (shape 1): reasoning present (with tool
+    /// intent), content EMPTY, no tool calls — the turn that used to complete
+    /// the workflow silently with zero actions.
     #[test]
     fn reasoning_with_empty_content_is_anomalous() {
         let reasoning = Some("Let me read my inbox with the canonical NO-argument form.".to_string());
@@ -756,19 +770,22 @@ mod noop_turn_tests {
         assert!(is_anomalous_noop_turn("   \n", &reasoning));
     }
 
+    /// The b29371e2 failure signature (shape 2, field-proven 2026-10-31 on
+    /// zobde's resumed session): a COMPLETELY EMPTY turn — no content, no
+    /// reasoning, no tool calls. The model emitted EOS immediately. A
+    /// reasoning-required signature MISSES this shape; the guard must not.
+    #[test]
+    fn completely_empty_turn_is_anomalous() {
+        assert!(is_anomalous_noop_turn("", &None));
+        assert!(is_anomalous_noop_turn("", &Some(String::new())));
+        assert!(is_anomalous_noop_turn("   \n", &Some("  ".to_string())));
+    }
+
     /// A turn with real content completes normally — never retried.
     #[test]
     fn content_turn_is_not_anomalous() {
         let reasoning = Some("thinking".to_string());
         assert!(!is_anomalous_noop_turn("Here is the answer.", &reasoning));
-    }
-
-    /// No reasoning → the signature does not apply (a plain empty response is
-    /// out of scope for this guard; the prescribed class is tool-intent reasoning).
-    #[test]
-    fn no_reasoning_is_not_anomalous() {
-        assert!(!is_anomalous_noop_turn("", &None));
-        assert!(!is_anomalous_noop_turn("", &Some(String::new())));
-        assert!(!is_anomalous_noop_turn("", &Some("   ".to_string())));
+        assert!(!is_anomalous_noop_turn("Yes.", &None));
     }
 }

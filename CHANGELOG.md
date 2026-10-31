@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.2] - 2026-10-31
+
+### Fixed
+
+- **The anomalous-turn guard now catches the COMPLETELY EMPTY turn shape (b29371e2 follow-up, field-proven on zobde's resumed session)** — the 0.22.1 guard required reasoning to be non-empty; the field then produced a second shape: attempt 1 anomalous (reasoning streamed, guard fired, retried ✓) → attempt 2 returned a COMPLETELY EMPTY turn (no content, no reasoning, no tool calls — the model emitted EOS immediately) → the reasoning-required signature MISSED it → the workflow still completed silently on an empty assistant message. Fix: `is_anomalous_noop_turn` now flags ANY Content-shaped turn with empty text (the Content variant means no tool calls by construction — a no-op turn regardless of reasoning). Retry once, then fail loud. NEVER a silent completion.
+
 ## [0.22.1] - 2026-10-31
 
 ### Fixed
