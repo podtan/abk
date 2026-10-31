@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.6] - 2026-10-31
+
+### Fixed
+
+- **The compaction summary request is capped at the conservative default window's ceiling (nghr 910a560f)** — the summary request ran at the FULL configured context (room = window − 16k = 984k with context_window=1000000), pushing the summarization call into the model's degradation zone (observed ~265K on GLM-5.3-Flash: clean sessions work at 18–267K, degradation at ~265K+). Fix: the summary room is now `min(window − 16k, 184k)` — a summary request is a COMPRESSION pass, not a full-context pass; the flatten ladder (oldest-first shortening, newest exchange never omitted) absorbs the cap. New `summary_room()` helper + pin test (summary_room_is_capped_at_the_conservative_ceiling).
+
 ## [0.22.5] - 2026-10-31
 
 ### Fixed

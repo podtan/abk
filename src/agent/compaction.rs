@@ -58,6 +58,15 @@ const RESERVE_MIN: u64 = 16_000;
 /// Window assumed when the model's real window is unknown — used only to size
 /// the summary REQUEST; auto compaction never fires on an unknown window.
 const UNKNOWN_WINDOW: u64 = 200_000;
+/// Ceiling for the summary REQUEST room (issue 910a560f): a summary request
+/// is a COMPRESSION pass, not a full-context pass — a declared 1M window
+/// must not push the summary request into the model's degradation zone
+/// (observed ~265K on GLM-5.3-Flash: clean sessions work at 18–267K,
+/// degradation at ~265K+). Capped at the conservative default window's
+/// ceiling — the same zone the code already trusts for unknown windows.
+/// The flatten ladder (oldest-first shortening) absorbs the cap; the newest
+/// exchange is never omitted.
+const SUMMARY_ROOM_CAP: u64 = UNKNOWN_WINDOW - RESERVE_MIN;
 /// Output tokens requested for the summary generation.
 const SUMMARY_OUTPUT_TOKENS: u32 = 16_384;
 /// Chars kept of a tool result inside the verbatim recent tail (opencode
@@ -210,6 +219,18 @@ pub fn calculate_ceiling(window: u64, buffer: Option<u64>) -> u64 {
         share
     };
     window.saturating_sub(reserve)
+}
+
+/// Room for the summary REQUEST (issue 910a560f): the model window (assumed
+/// 200k when unknown) minus the reserve kept for the reply — CAPPED at the
+/// conservative default window's ceiling. A summary request is a compression
+/// pass, not a full-context pass: a declared 1M window must not push the
+/// request into the model's degradation zone (observed ~265K on
+/// GLM-5.3-Flash). The flatten ladder (oldest-first shortening) absorbs the
+/// cap; the newest exchange is never omitted.
+pub(crate) fn summary_room(context_window: Option<u64>) -> usize {
+    let window = context_window.unwrap_or(UNKNOWN_WINDOW);
+    window.saturating_sub(RESERVE_MIN).min(SUMMARY_ROOM_CAP) as usize
 }
 
 // ---------------------------------------------------------------------------
@@ -739,9 +760,11 @@ impl super::Agent {
         }
 
         // Room for the summary request: the model window (assumed 200k when
-        // unknown) minus the reserve kept for the reply.
-        let window = settings.context_window.unwrap_or(UNKNOWN_WINDOW);
-        let room = window.saturating_sub(RESERVE_MIN) as usize;
+        // unknown) minus the reserve kept for the reply — CAPPED at the
+        // conservative default window's ceiling (issue 910a560f): a declared
+        // 1M window must not push the summary request into the model's
+        // degradation zone; the flatten ladder absorbs the cap.
+        let room = summary_room(settings.context_window);
 
         let prompt = build_summary_prompt(update_mode);
         let request_messages = build_summary_request(&messages, &prompt, room).ok_or_else(|| {
@@ -952,6 +975,20 @@ mod tests {
         assert_eq!(calculate_ceiling(100_000, Some(20_000)), 80_000);
         // Buffer larger than the window is ignored.
         assert_eq!(calculate_ceiling(100_000, Some(500_000)), 100_000 - 16_000);
+    }
+
+    /// PIN (issue 910a560f): the summary-request room is CAPPED at the
+    /// conservative default window's ceiling — a declared 1M window must
+    /// never push the summary request into the model's degradation zone
+    /// (the old room was window − 16k = 984k).
+    #[test]
+    fn summary_room_is_capped_at_the_conservative_ceiling() {
+        assert_eq!(summary_room(Some(1_000_000)), 184_000, "the 1M window is capped");
+        assert_eq!(summary_room(Some(200_000)), 184_000, "the default window → the same ceiling");
+        assert_eq!(summary_room(None), 184_000, "unknown window → the conservative default");
+        // A small window stays window − reserve (below the cap).
+        assert_eq!(summary_room(Some(50_000)), 34_000);
+        assert_eq!(summary_room(Some(16_000)), 0);
     }
 
     #[test]
