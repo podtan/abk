@@ -147,6 +147,23 @@ pub trait AgentContext {
     fn extract_tool_calls(&self, response: &str) -> Result<Vec<umf::ToolCall>>;
 }
 
+/// Detect an anomalous no-op turn (nghr b29371e2).
+///
+/// A thinking model that emits reasoning ALWAYS follows with either visible
+/// content or tool calls. A turn with reasoning present but content EMPTY and
+/// no tool calls means the tool-call deltas were lost in assembly or the
+/// model stalled mid-turn — the exact "workflow completed without acting"
+/// class (reasoning ends with clear tool intent, engine declares "Task
+/// completed", zero actions executed). Such a turn must never complete the
+/// workflow silently: the caller retries once, then fails loud.
+fn is_anomalous_noop_turn(text: &str, reasoning: &Option<String>) -> bool {
+    reasoning
+        .as_ref()
+        .map(|r| !r.trim().is_empty())
+        .unwrap_or(false)
+        && text.trim().is_empty()
+}
+
 /// Run non-streaming workflow - reusable for any agent
 pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, cancel_token: Option<CancellationToken>) -> Result<String> {
     if !agent.is_running() {
@@ -161,6 +178,10 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
         });
         agent.log_info(&format!("🔑 Started conversation turn: {}", turn_id));
     }
+
+    // Anomalous-turn retry budget (nghr b29371e2): one retry for a turn that
+    // produced reasoning but neither content nor tool calls, then fail loud.
+    let mut noop_retry_count: u32 = 0;
 
     for iteration in agent.current_iteration()..=max_iterations {
         // Check cancellation at the top of each iteration
@@ -226,6 +247,22 @@ pub async fn run_workflow<A: AgentContext>(agent: &mut A, max_iterations: u32, c
                 handle_tool_calls(agent, tool_calls, content, reasoning, cancel_token.as_ref()).await?;
             }
             GenerateResult::Content { text: response_text, reasoning } => {
+                // nghr b29371e2: a turn with reasoning but neither content nor
+                // tool calls is anomalous (lost tool-call assembly or a stalled
+                // model) — retry once before completing; a second occurrence
+                // fails LOUD instead of the silent "Task completed".
+                if is_anomalous_noop_turn(&response_text, &reasoning) {
+                    if noop_retry_count == 0 {
+                        noop_retry_count += 1;
+                        agent.log_info(
+                            "⚠️ Anomalous turn: reasoning without content or tool calls — retrying once (nghr b29371e2)",
+                        );
+                        continue;
+                    }
+                    let err = "Anomalous turn repeated: reasoning without content or tool calls — failing loud instead of silent completion (nghr b29371e2)";
+                    agent.log_error(err, None)?;
+                    return Err(anyhow::anyhow!(err));
+                }
                 // LLM finished naturally - stop the loop.
                 // streaming_enabled: false because we're inside the non-streaming
                 // run_workflow; LlmResponse event IS needed here.
@@ -255,6 +292,10 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
 
     let mut stream_retry_count: u32 = 0;
     let max_stream_retries: u32 = 3; // Same as default max_retries
+
+    // Anomalous-turn retry budget (nghr b29371e2): one retry for a turn that
+    // produced reasoning but neither content nor tool calls, then fail loud.
+    let mut noop_retry_count: u32 = 0;
 
     loop {
         // Check cancellation at the top of each loop iteration
@@ -332,6 +373,24 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                         continue;
                     }
                     GenerateResult::Content { text: response_text, reasoning } => {
+                        // nghr b29371e2: a turn with reasoning but neither
+                        // content nor tool calls is anomalous (lost tool-call
+                        // assembly or a stalled model) — retry once before
+                        // completing; a second occurrence fails LOUD instead
+                        // of the silent "Task completed" that made workflows
+                        // finish without acting.
+                        if is_anomalous_noop_turn(&response_text, &reasoning) {
+                            if noop_retry_count == 0 {
+                                noop_retry_count += 1;
+                                agent.log_info(
+                                    "⚠️ Anomalous turn: reasoning without content or tool calls — retrying once (nghr b29371e2)",
+                                );
+                                continue;
+                            }
+                            let err = "Anomalous turn repeated: reasoning without content or tool calls — failing loud instead of silent completion (nghr b29371e2)";
+                            agent.log_error(err, None)?;
+                            return Err(anyhow::anyhow!(err));
+                        }
                         // LLM finished naturally - stop the loop.
                         // streaming_enabled: true because we're inside run_workflow_streaming;
                         // pass true so handle_content_response skips the redundant
@@ -680,5 +739,36 @@ fn extract_hint(name: &str, args_json: &str) -> Option<String> {
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod noop_turn_tests {
+    use super::is_anomalous_noop_turn;
+
+    /// The b29371e2 failure signature: reasoning present (with tool intent),
+    /// content EMPTY, no tool calls — the turn that used to complete the
+    /// workflow silently with zero actions.
+    #[test]
+    fn reasoning_with_empty_content_is_anomalous() {
+        let reasoning = Some("Let me read my inbox with the canonical NO-argument form.".to_string());
+        assert!(is_anomalous_noop_turn("", &reasoning));
+        assert!(is_anomalous_noop_turn("   \n", &reasoning));
+    }
+
+    /// A turn with real content completes normally — never retried.
+    #[test]
+    fn content_turn_is_not_anomalous() {
+        let reasoning = Some("thinking".to_string());
+        assert!(!is_anomalous_noop_turn("Here is the answer.", &reasoning));
+    }
+
+    /// No reasoning → the signature does not apply (a plain empty response is
+    /// out of scope for this guard; the prescribed class is tool-intent reasoning).
+    #[test]
+    fn no_reasoning_is_not_anomalous() {
+        assert!(!is_anomalous_noop_turn("", &None));
+        assert!(!is_anomalous_noop_turn("", &Some(String::new())));
+        assert!(!is_anomalous_noop_turn("", &Some("   ".to_string())));
     }
 }

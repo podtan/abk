@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2026-10-31
+
+### Fixed
+
+- **Streaming-assembly cross-run hardening (nghr b29371e2, Critical — fix order #2)** — three engine-side fixes for the "workflows complete without acting" class:
+  - **Per-run logger isolation in the spawned streaming tasks** (`openai/mod.rs`, `extension.rs`, `wasm/mod.rs`): tokio task-locals (`TASK_LOGGER`, `TUI_MODE`) do NOT propagate into `tokio::spawn`'d tasks — the per-chunk `append_to_global_log` calls inside the streaming task resolved to the process-global `FALLBACK_LOGGER` (and the stream-error `tee_eprintln` printed to stdout unsuppressed in TUI mode), so ALL concurrent runs' raw text/reasoning deltas interleaved in one shared file/stdout (the garbled-mid-line log evidence). Fix: capture the CALLER's logger + TUI mode BEFORE the spawn and use the captured handles inside — each stream's deltas land in its own run's logger, never a shared one.
+  - **finish_reason visibility** (`openai/sse.rs`): the finish reason (stop / length / tool_calls) was parsed and collapsed to `Done` — the reason itself was discarded, so the engine could not distinguish a natural end from a max_tokens cut or lost tool-call deltas. Now logged (debug-gated, once per stream at the final chunk).
+  - **No silent premature completion** (`orchestration/agent_orchestration.rs`): the workflow declared "Task completed" on ANY content-shaped result — including the anomalous signature (reasoning present + content EMPTY + no tool calls: a thinking model that produced neither content nor actions — the tool-call deltas were lost or the model stalled). New `is_anomalous_noop_turn` guard in BOTH `run_workflow` and `run_workflow_streaming`: the anomalous turn is retried ONCE (same conversation — the assistant message was never added), and a second occurrence fails LOUD (workflow error, visible) instead of silently completing. 3 new unit tests.
+
 ## [0.21.4] - 2026-10-24
 
 ### Fixed

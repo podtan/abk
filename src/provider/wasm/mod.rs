@@ -686,7 +686,14 @@ impl LlmProvider for WasmProvider {
         
         // Create channel for emitting multiple chunks per HTTP chunk
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        
+
+        // Per-run isolation (nghr b29371e2): tokio task-locals (TASK_LOGGER,
+        // TUI_MODE) do NOT propagate into tokio::spawn'd tasks — resolving
+        // inside the task falls back to the process-global FALLBACK_LOGGER
+        // and all concurrent runs' raw deltas interleave in one shared file.
+        // Capture the CALLER's logger before the spawn.
+        let task_logger = crate::observability::get_global_logger_opt();
+
         // Spawn task to process stream and emit chunks
         tokio::spawn(async move {
             use futures_util::StreamExt;
@@ -728,10 +735,15 @@ impl LlmProvider for WasmProvider {
                                 if let Ok(delta) = process_stream_chunk(&component, &engine, &event).await {
                                     // Handle reasoning delta (from thinking models like GLM, Qwen)
                                     if let Some(reasoning) = delta.reasoning {
-                                        // Log reasoning to file only; display is handled by OutputSink
-                                        crate::observability::append_to_global_log(
-                                            &crate::observability::strip_ansi(&reasoning)
-                                        );
+                                        // Per-run logger (nghr b29371e2): the old
+                                        // append_to_global_log resolved inside the spawned
+                                        // task → process-global fallback → cross-run
+                                        // interleave. Display is handled by OutputSink.
+                                        if let Some(logger) = &task_logger {
+                                            let _ = logger.append_to_log(
+                                                &crate::observability::strip_ansi(&reasoning),
+                                            );
+                                        }
                                         // EMIT this chunk
                                         if tx.send(Ok(crate::provider::StreamChunk::Reasoning(reasoning))).is_err() {
                                             return; // Receiver dropped
@@ -739,8 +751,10 @@ impl LlmProvider for WasmProvider {
                                     }
                                     
                                     if let Some(content) = delta.content {
-                                        // Log content to file only; display is handled by OutputSink
-                                        crate::observability::append_to_global_log(&content);
+                                        // Per-run logger (nghr b29371e2) — see above.
+                                        if let Some(logger) = &task_logger {
+                                            let _ = logger.append_to_log(&content);
+                                        }
                                         // EMIT this chunk immediately
                                         if tx.send(Ok(crate::provider::StreamChunk::Text(content))).is_err() {
                                             return; // Receiver dropped

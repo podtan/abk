@@ -440,6 +440,13 @@ impl LlmProvider for ExtensionProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
+        // Per-run isolation (nghr b29371e2): tokio task-locals (TASK_LOGGER,
+        // TUI_MODE) do NOT propagate into tokio::spawn'd tasks — resolving
+        // inside the task falls back to the process-global FALLBACK_LOGGER
+        // and all concurrent runs' raw deltas interleave in one shared file.
+        // Capture the CALLER's logger before the spawn.
+        let task_logger = crate::observability::get_global_logger_opt();
+
         tokio::spawn(async move {
             let mut byte_stream = byte_stream;
             // Byte-level buffer: per-chunk String::from_utf8_lossy destroyed
@@ -476,17 +483,27 @@ impl LlmProvider for ExtensionProvider {
                                         match delta.delta_type.as_str() {
                                             "reasoning" => {
                                                 if let Some(reasoning) = delta.reasoning {
-                                                    // Log reasoning to file only; display is handled by OutputSink
-                                                    crate::observability::append_to_global_log(
-                                                        &crate::observability::strip_ansi(&reasoning)
-                                                    );
+                                                    // Log reasoning to the CALLER's
+                                                    // (per-run) logger only; display is
+                                                    // handled by OutputSink. The old
+                                                    // append_to_global_log resolved inside
+                                                    // the spawned task → process-global
+                                                    // fallback → cross-run interleave
+                                                    // (nghr b29371e2).
+                                                    if let Some(logger) = &task_logger {
+                                                        let _ = logger.append_to_log(
+                                                            &crate::observability::strip_ansi(&reasoning),
+                                                        );
+                                                    }
                                                     let _ = tx.send(Ok(StreamChunk::Reasoning(reasoning)));
                                                 }
                                             }
                                             "content" => {
                                                 if let Some(content) = delta.content {
-                                                    // Log content to file only; display is handled by OutputSink
-                                                    crate::observability::append_to_global_log(&content);
+                                                    // Per-run logger (nghr b29371e2) — see above.
+                                                    if let Some(logger) = &task_logger {
+                                                        let _ = logger.append_to_log(&content);
+                                                    }
                                                     let _ = tx.send(Ok(StreamChunk::Text(content)));
                                                 }
                                             }

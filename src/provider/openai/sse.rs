@@ -80,7 +80,12 @@ pub fn parse_sse_event(data: &str) -> Option<Vec<StreamChunk>> {
         }
     }
 
-    // Check finish_reason for Done
+    // Check finish_reason for Done.
+    // nghr b29371e2: the reason itself (stop / length / tool_calls) used to be
+    // discarded here — the engine could not distinguish a natural end from a
+    // max_tokens cut or lost tool-call deltas, and declared "Task completed"
+    // on every no-tool-call turn. Log the reason (debug-gated, once per
+    // stream at the final chunk) so the turn's ending is visible in the log.
     let finish_reason = json
         .get("choices")
         .and_then(|c| c.get(0))
@@ -89,6 +94,15 @@ pub fn parse_sse_event(data: &str) -> Option<Vec<StreamChunk>> {
 
     if let Some(reason) = finish_reason {
         if !reason.is_empty() {
+            if std::env::var("RUST_LOG")
+                .map(|v| v.to_lowercase().contains("debug"))
+                .unwrap_or(false)
+            {
+                crate::observability::tee_eprintln(&format!(
+                    "[DEBUG OPENAI-NATIVE] turn finish_reason: {}",
+                    reason
+                ));
+            }
             chunks.push(StreamChunk::Done);
         }
     }

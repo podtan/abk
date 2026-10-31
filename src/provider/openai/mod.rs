@@ -221,6 +221,17 @@ impl LlmProvider for OpenAIProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
+        // Per-run isolation (nghr b29371e2): tokio task-locals (TASK_LOGGER,
+        // TUI_MODE) do NOT propagate into tokio::spawn'd tasks. Resolving the
+        // logger INSIDE the spawned task falls back to the process-global
+        // FALLBACK_LOGGER — all concurrent runs' raw deltas then interleave
+        // in one shared file (the garbled-mid-line log evidence). Capture the
+        // CALLER's logger and TUI mode here, before the spawn, and use the
+        // captured handles inside: each stream's deltas land in its own
+        // run's logger, never a shared one.
+        let task_logger = crate::observability::get_global_logger_opt();
+        let caller_tui_mode = crate::observability::is_tui_mode();
+
         tokio::spawn(async move {
             let mut byte_stream = byte_stream;
             // Byte-level buffer: per-chunk String::from_utf8_lossy destroyed
@@ -248,12 +259,16 @@ impl LlmProvider for OpenAIProvider {
                                         for chunk in chunks {
                                             match &chunk {
                                                 crate::provider::StreamChunk::Text(t) => {
-                                                    crate::observability::append_to_global_log(t);
+                                                    if let Some(logger) = &task_logger {
+                                                        let _ = logger.append_to_log(t);
+                                                    }
                                                 }
                                                 crate::provider::StreamChunk::Reasoning(r) => {
-                                                    crate::observability::append_to_global_log(
-                                                        &crate::observability::strip_ansi(r),
-                                                    );
+                                                    if let Some(logger) = &task_logger {
+                                                        let _ = logger.append_to_log(
+                                                            &crate::observability::strip_ansi(r),
+                                                        );
+                                                    }
                                                 }
                                                 _ => {}
                                             }
@@ -265,10 +280,23 @@ impl LlmProvider for OpenAIProvider {
                         }
                     }
                     Err(e) => {
-                        crate::observability::tee_eprintln(&format!(
-                            "\n⚠️  Stream byte error: {}\n",
-                            e
-                        ));
+                        // Stream errors are rare (once per stream, not per
+                        // chunk). Surface via the CAPTURED handles: the old
+                        // tee_eprintln re-resolved inside the spawned task —
+                        // task-locals don't propagate, so TUI_MODE read false
+                        // and the error printed to stdout unsuppressed in TUI
+                        // mode, and the logger fell back to the process-global
+                        // one (the cross-run interleave class, nghr b29371e2).
+                        if !caller_tui_mode {
+                            // stderr is unbuffered in Rust — no flush needed.
+                            eprint!("\n⚠️  Stream byte error: {}\n", e);
+                        }
+                        if let Some(logger) = &task_logger {
+                            let _ = logger.append_to_log(&format!(
+                                "\n⚠️  Stream byte error: {}\n",
+                                e
+                            ));
+                        }
                         let _ = tx.send(Err(anyhow::anyhow!("Stream error: {}", e)));
                         return;
                     }
