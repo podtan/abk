@@ -991,6 +991,56 @@ mod tests {
         assert_eq!(summary_room(Some(16_000)), 0);
     }
 
+    /// MEASUREMENT (issue 8aca95f3, measurement-first — do not fix blind):
+    /// the keep-boundary estimator vs the formatter's count_tokens. The
+    /// estimator uses the SAME cl100k tokenizer (a chars-based fallback only
+    /// when tokenization fails), so the divergence is the ChatML STRUCTURAL
+    /// overhead (special tokens + role markers + think tags per message) —
+    /// NOT a tokenizer mismatch. This test MEASURES the divergence on
+    /// representative real-shaped data (Persian multi-byte + English +
+    /// reasoning + tool calls) and asserts it stays BOUNDED per message —
+    /// the kept tail can exceed keep_tokens by at most ~a few dozen tokens
+    /// per message, never materially. Re-run with --nocapture to see the
+    /// numbers.
+    #[test]
+    fn measurement_estimator_vs_formatter_divergence_is_bounded_per_message() {
+        let persian = "سلام، این یک متن فارسی آزمایشی است که نویسه‌های چندبایتی و نیم‌فاصله دارد تا واژه‌بندی واقعی را بسنجد. ";
+        let english = "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs. ";
+        let mut messages: Vec<ChatMLMessage> = Vec::new();
+        for i in 0..50 {
+            let text = if i % 2 == 0 { persian.repeat(4) } else { english.repeat(8) };
+            let role = if i % 3 == 0 { MessageRole::Assistant } else { MessageRole::User };
+            let mut m = ChatMLMessage::new(role, text, None);
+            if i % 3 == 0 {
+                m.reasoning_content = Some(format!("reasoning pass {i}: weighing the next tool call against the ritual"));
+            }
+            messages.push(m);
+        }
+        // A tool-call exchange (the JSON-arguments shape the boundary walks).
+        messages.push(ChatMLMessage::new_assistant_with_tool_calls(
+            String::new(),
+            vec![umf::ToolCall {
+                id: "call_1".into(),
+                r#type: "function".into(),
+                function: umf::FunctionCall { name: "bash".into(), arguments: serde_json::json!({"command": "cargo test"}).to_string() },
+            }],
+        ));
+        let estimated = estimate_history_tokens(&messages);
+        let mut f = ChatMLFormatter::new();
+        *f.get_messages_mut() = messages.clone();
+        let counted = f.count_tokens();
+        let divergence = counted as i64 - estimated as i64;
+        let per_message = divergence.abs() as f64 / messages.len() as f64;
+        eprintln!(
+            "MEASUREMENT 8aca95f3: messages={} estimated={estimated} counted={counted} divergence_total={divergence} per_message={per_message:.1}",
+            messages.len()
+        );
+        assert!(
+            per_message < 32.0,
+            "per-message divergence must stay bounded (~special tokens + role markers + think tags), got {per_message:.1}"
+        );
+    }
+
     #[test]
     fn settings_default_is_disabled() {
         let s = CompactionSettings::default();
