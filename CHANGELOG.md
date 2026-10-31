@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.3] - 2026-10-31
+
+### Fixed
+
+- **/compact no longer GROWS the context (nghr fbfdb12c — field-proven 257065→307454, +50,389 tokens)** — the checkpoint wrapper was built with the kept recent tail rendered INSIDE it (`<recent-context>` section: user/assistant messages at full unclipped length, tool results clipped to 1250 chars) AND the same tail was appended verbatim right after the wrapper — every kept message shipped TWICE in the context. The compaction that exists to shrink instead added the wrapper's weight on top; the growth was intermittent because the duplication's magnitude depends on the tail's composition (user/assistant turns duplicate at full length, tool results only at 1250 chars — tool-heavy tails shrank net, content-heavy tails grew). Fix: the splice passes an empty recent slice — the wrapper carries ONLY the summary; the kept tail stays verbatim beside it (as the splice's own comment always said). Compaction suite 24/24; the wrapper's empty-recent shape was already pinned by `wrapper_without_recent_omits_section`.
+
 ## [0.22.2] - 2026-10-31
 
 ### Fixed

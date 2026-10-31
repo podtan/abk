@@ -752,9 +752,13 @@ impl super::Agent {
         };
 
         // Splice: replace [system_prefix..boundary) with the wrapper. The
-        // kept tail stays verbatim beside the summary.
-        let recent: Vec<ChatMLMessage> = messages[boundary..].to_vec();
-        let wrapper = build_checkpoint_message(&summary, &recent);
+        // kept tail stays verbatim beside the summary — so the wrapper
+        // carries ONLY the summary. Passing the tail into the wrapper
+        // duplicated every kept message (the <recent-context> copy rendered
+        // user/assistant turns at full length BESIDE the verbatim copy) and
+        // /compact GREW the context instead of shrinking it — field-proven
+        // 257065→307454 (+50,389 tokens) on zobde's chain (nghr fbfdb12c).
+        let wrapper = build_checkpoint_message(&summary, &[]);
         let mut next: Vec<ChatMLMessage> = Vec::with_capacity(messages.len());
         next.extend_from_slice(&messages[..system_prefix]);
         next.push(wrapper);
