@@ -353,26 +353,28 @@ pub fn find_keep_boundary(messages: &[ChatMLMessage], keep_tokens: u64) -> usize
     }
     let dropped = start_idx.min(entries.len() - 1);
 
-    // Align FORWARD to the first user message at-or-after the dropped edge —
-    // the kept tail starts at an exchange boundary WITHOUT extending
-    // backward. The old backward search ((0..=dropped).rev()) grabbed user
-    // messages clustered at the history's START (e.g. a previous checkpoint
-    // wrapper — itself a user message) and extended the kept tail to nearly
-    // the whole history, leaving the summarizable prefix with only the
-    // wrapper → "Nothing to compact yet" on a ~320K-token session
-    // (nghr 124cb0e7, three consecutive /compact refusals). The backward
-    // search kept MORE than the allowance; the forward alignment keeps LESS
-    // — the correct direction for a compaction boundary (never keep more
-    // than the allowance; the newest exchange always stays).
+    // The allowance edge IS the boundary — the configured keep_tokens is
+    // HONORED (the kept tail ≈ the allowance, within one message's
+    // granularity). Two prior alignments were both wrong:
+    // - the backward search ((0..=dropped).rev()) kept MORE than the
+    //   allowance: with user messages clustered at the history's ends (a
+    //   previous checkpoint wrapper at the start — itself a user message),
+    //   it dragged the kept tail back to the wrapper, the summarizable
+    //   prefix shrank to that one message, and the compaction refused
+    //   ("Nothing to compact yet" on a ~320K session — nghr 124cb0e7);
+    // - a forward-only user search kept LESS (the first user message at/after
+    //   the edge can be hundreds of messages later in a long tool-work run —
+    //   5K kept instead of the configured 100K — the config not honored).
+    // WIRE-VALIDITY GUARD: the tail must not START on a tool message — a
+    // tool result without its preceding assistant tool_calls is an orphaned
+    // tool message and the provider rejects the request. Step back to the
+    // caller when the edge lands on one.
     if dropped > 0 {
-        if let Some(boundary) = (dropped..entries.len()).find(|&k| {
-            let i = entries[k];
-            messages[i].role == MessageRole::User
-        }) {
-            return entries[boundary];
+        let mut boundary = entries[dropped];
+        while boundary > system_prefix && messages[boundary].role == MessageRole::Tool {
+            boundary -= 1;
         }
-        // No user message at/after the edge: the dropped edge itself.
-        return entries[dropped];
+        return boundary;
     }
 
     // Everything fits, or no user boundary inside the allowance: keep only
@@ -904,6 +906,9 @@ mod tests {
     fn system(text: &str) -> ChatMLMessage {
         ChatMLMessage::new(MessageRole::System, text.to_string(), None)
     }
+    fn tool_msg(text: &str) -> ChatMLMessage {
+        ChatMLMessage::new(MessageRole::Tool, text.to_string(), None)
+    }
     /// Pseudo-natural text: varied alphanumeric content that cl100k
     /// tokenizes near-linearly (runs of a single char merge into few tokens,
     /// which would make size-driven tests meaningless).
@@ -1003,16 +1008,18 @@ mod tests {
         assert_eq!(find_keep_boundary(&history, 100), 1);
     }
 
-    /// nghr 124cb0e7: user messages clustered at the history's ENDS — a
-    /// previous checkpoint wrapper at the start (itself a user message, the
-    /// fbfdb12c growth product) and the recent turns at the tail — must NOT
-    /// drag the kept tail backward to the wrapper. The alignment searches
-    /// FORWARD from the dropped edge: the summarizable prefix holds the
-    /// middle of the history and the compaction proceeds (the old backward
-    /// search left the prefix with only the wrapper → "Nothing to compact
-    /// yet" on a ~320K session, three consecutive refusals).
+    /// nghr 124cb0e7 + the config-honoring correction: user messages
+    /// clustered at the history's ENDS — a previous checkpoint wrapper at the
+    /// start (itself a user message, the fbfdb12c growth product) and the
+    /// recent turns at the tail — must NOT drag the kept tail backward to the
+    /// wrapper (the old backward search: the summarizable prefix shrank to
+    /// the wrapper alone → "Nothing to compact yet" on a ~320K session). The
+    /// boundary is the ALLOWANCE EDGE — the configured keep_tokens is honored
+    /// (the tail ≈ the allowance), never the far-forward user message (a
+    /// forward-only search kept 5K instead of the configured 100K in a long
+    /// tool-work run).
     #[test]
-    fn keep_boundary_never_extends_backward_to_a_start_clustered_user_message() {
+    fn keep_boundary_is_the_allowance_edge_never_backward_to_a_start_clustered_user_message() {
         let history = vec![
             system("sys"),           // [0]
             user("wrapper"),         // [1] — previous checkpoint wrapper (user role!)
@@ -1025,12 +1032,37 @@ mod tests {
         // Budget fits only the tail exchange (messages 5+6) — the dropped
         // range is entries for messages 1..5. The OLD backward alignment
         // grabbed the wrapper (message 1, a user message) → boundary=1 →
-        // nothing to summarize. The forward alignment must land on the
-        // RECENT user message (message 5) instead.
+        // nothing to summarize. The allowance edge is message 5 (a user
+        // message here) — the config is honored and the wrapper is not
+        // grabbed.
         let keep_tail = (estimate_message_tokens(&history[5]) + estimate_message_tokens(&history[6]))
             as u64;
         let boundary = find_keep_boundary(&history, keep_tail);
-        assert_eq!(boundary, 5, "alignment must search FORWARD from the dropped edge, never backward to the start-clustered wrapper");
+        assert_eq!(boundary, 5, "the boundary is the allowance edge (the config's keep honored), never backward to the start-clustered wrapper");
+    }
+
+    /// WIRE-VALIDITY: the allowance edge landing on a TOOL message must step
+    /// back to the tool's caller — a tool result without its preceding
+    /// assistant tool_calls is an orphaned tool message and the provider
+    /// rejects the request.
+    #[test]
+    fn keep_boundary_never_starts_on_an_orphaned_tool_message() {
+        let history = vec![
+            system("sys"),           // [0]
+            user("ask"),             // [1]
+            assistant(&long(3000)),  // [2]
+            assistant(&long(3000)),  // [3]
+            assistant(&long(3000)),  // [4] — the caller
+            tool_msg(&long(100)),    // [5] — its tool result
+            assistant(&long(100)),   // [6]
+        ];
+        // Budget fits messages 5+6 → the allowance edge is message 5 (a TOOL
+        // message) → the boundary steps back to message 4 (the caller) so the
+        // tail never opens on an orphaned tool result.
+        let keep_tail = (estimate_message_tokens(&history[5]) + estimate_message_tokens(&history[6]))
+            as u64;
+        let boundary = find_keep_boundary(&history, keep_tail);
+        assert_eq!(boundary, 4, "the tail must never start on an orphaned tool message — step back to the caller");
     }
 
     #[test]

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.5] - 2026-10-31
+
+### Fixed
+
+- **The compaction boundary HONORS the configured keep (owner-reported: "we do not keep 100000")** — the 0.22.4 forward-user-alignment overcorrected: in a long tool-work run the first user message at/after the dropped edge can be hundreds of messages later, so the kept tail shrank to ~5K instead of the configured 100K. Fix: the boundary IS the allowance edge (the walk's break point — the tail ≈ keep_tokens within one message's granularity), with a WIRE-VALIDITY guard: the tail must never START on a tool message (an orphaned tool result without its preceding assistant tool_calls is rejected by the provider) — the boundary steps back to the caller when the edge lands on one. Simulated on the real data (checkpoint 177, keep=100000): boundary = message 55 (assistant), kept tail ~96K tokens (the config honored), ~228K summarized → the compacted context ~112K. New test: keep_boundary_never_starts_on_an_orphaned_tool_message; the 124cb0e7 regression test updated for the allowance-edge semantic.
+
 ## [0.22.4] - 2026-10-31
 
 ### Fixed
