@@ -26,10 +26,10 @@ pub struct McpServerConfig {
     /// Authentication token (static, resolved at creation time).
     /// When `registry-mcp-token` feature is enabled, use `with_token_provider()`
     /// for dynamic token management.
-    auth_token: Option<String>,
+    pub(crate) auth_token: Option<String>,
     /// Dynamic token provider (only available with `registry-mcp-token` feature).
     #[cfg(feature = "registry-mcp-token")]
-    token_provider: Option<TokenProviderEnum>,
+    pub(crate) token_provider: Option<TokenProviderEnum>,
     /// Streamable-HTTP session id (`Mcp-Session-Id`). Lives on the CONFIG (not
     /// the client) behind an Arc so every clone shares it — `McpToolSource`
     /// builds a FRESH `McpClient` for later `tools/call` and must resume the

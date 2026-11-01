@@ -59,6 +59,13 @@ pub enum ToolSourceConfig {
         /// Optional authentication token (supports env var substitution)
         #[serde(default)]
         auth_token: Option<String>,
+        /// Reference to a named credential in `[mcp.credentials.*]` — the
+        /// dynamic token path (issue 6121fc76: the factory's Mcp arm
+        /// previously wired ONLY the static `auth_token`, so the entire
+        /// dynamic path was dead code here). Takes priority over
+        /// `auth_token` when both are present.
+        #[serde(default)]
+        credentials: Option<String>,
         /// Auto-initialize connection
         #[serde(default = "default_auto_init")]
         auto_init: bool,
