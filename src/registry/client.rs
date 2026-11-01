@@ -1199,4 +1199,119 @@ mod streamable_tests {
         );
     }
 
+    /// THE TOKEN-EXPIRY SIMULATION PIN (issue 6121fc76, the CPO's
+    /// acceptance criterion 3): a mock IdP minting SHORT-TTL tokens (2s) +
+    /// a mock MCP server that only accepts minted tokens; the client with
+    /// a service-account provider; calls spanning > the TTL must ALL
+    /// succeed — the provider's inline refresh (the T-90s proactive
+    /// horizon) means the client NEVER bears a dying token: ZERO surfaced
+    /// 401s across the expiry boundary.
+    #[tokio::test]
+    #[cfg(feature = "registry-mcp-token")]
+    async fn client_runs_past_token_expiry_with_zero_surfaced_401s() {
+        use pep::token_provider::{ServiceAccountConfig, ServiceAccountTokenProvider, TokenProviderEnum};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // ── the mock IdP + MCP server on one raw TCP listener ──────────
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let mints = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (m_c, c_c) = (mints.clone(), calls.clone());
+        let server = tokio::spawn(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            loop {
+                let (mut sock, _) = match listener.accept().await {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                let (mints, calls) = (m_c.clone(), c_c.clone());
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let body = if req.contains("well-known") {
+                        let doc = format!(
+                            "{{\"issuer\":\"http://127.0.0.1:{port}\",\"jwks_uri\":\"http://127.0.0.1:{port}/jwks\",\"token_endpoint\":\"http://127.0.0.1:{port}/token\"}}"
+                        );
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            doc.len(), doc
+                        )
+                    } else if req.contains("POST /token") {
+                        let m = mints.fetch_add(1, Ordering::SeqCst) + 1;
+                        let tok = format!("mock-token-{m}");
+                        let b = format!("{{\"access_token\":\"{tok}\",\"expires_in\":2,\"token_type\":\"Bearer\"}}");
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            b.len(), b
+                        )
+                    } else {
+                        // the MCP endpoint: only MINTED tokens pass; anything
+                        // else is a 401 (the expiry simulation's rejection).
+                        // reqwest normalizes header names to lowercase on the
+                        // wire — match the lowercase form.
+                        let lower = req.to_lowercase();
+                        let bearer = lower
+                            .split("authorization: bearer ")
+                            .nth(1)
+                            .and_then(|r| r.split("\r\n").next())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let is_minted = bearer.starts_with("mock-token-");
+                        let _ = calls.fetch_add(1, Ordering::SeqCst);
+                        if is_minted {
+                            let b = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"ping\",\"description\":\"pong\",\"inputSchema\":{\"type\":\"object\"}}]}}";
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                b.len(), b
+                            )
+                        } else {
+                            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                        }
+                    };
+                    let _ = sock.write_all(body.as_bytes()).await;
+                });
+            }
+        });
+
+        // ── the client with a service-account provider (2s TTL) ────────
+        let provider = ServiceAccountTokenProvider::new(ServiceAccountConfig {
+            service_token: "svc-token-1".to_string(),
+            issuer_url: format!("http://127.0.0.1:{port}"),
+            client_id: "pdt-api".to_string(),
+            client_secret: None,
+            audience: "pdt-api".to_string(),
+            scope: None,
+        });
+        let config = McpServerConfig::new("mock", &format!("http://127.0.0.1:{port}/mcp"))
+            .with_token_provider(TokenProviderEnum::ServiceAccount(provider));
+        let client = McpClient::new();
+
+        // THE SIMULATION: 6 calls, 1s apart = 6s — THREE expiry boundaries
+        // of the 2s TTL. Every call must succeed (the provider's inline
+        // refresh at the T-90s horizon): ZERO surfaced 401s.
+        for i in 0..6 {
+            let tools = client
+                .fetch_tools(&config)
+                .await
+                .unwrap_or_else(|e| panic!("call {i} must succeed — zero surfaced 401s across the expiry boundary: {e}"));
+            assert_eq!(tools.len(), 1, "call {i}: the mock's tool list");
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+
+        // The provider MUST have refreshed across the TTL (the mint count
+        // > 2): the dynamic path is live, not a one-shot token.
+        assert!(
+            mints.load(Ordering::SeqCst) > 2,
+            "the provider must refresh across the 2s TTL (mints={}, expected > 2) — \
+             a one-shot token would surface 401s after the first expiry",
+            mints.load(Ordering::SeqCst)
+        );
+        server.abort();
+    }
+
 }
