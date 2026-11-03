@@ -136,8 +136,9 @@ impl ExtensionProvider {
         let api_key = std::env::var("OPENAI_API_KEY")
             .context("OPENAI_API_KEY not set")?;
 
-        let default_model = std::env::var("OPENAI_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+        // fffe9141 F5: env-only — empty when unset (never a fictional
+        // model); the wire sites fail loud on empty.
+        let default_model = std::env::var("OPENAI_DEFAULT_MODEL").unwrap_or_default();
 
         Ok(crate::extension::provider_only::provider::Config {
             base_url,
@@ -207,7 +208,12 @@ impl ExtensionProvider {
                     }
 
                     let body = resp.text().await.unwrap_or_default();
-                    return Err(anyhow::anyhow!("API error {}: {}", status, body));
+                    // Typed for orchestration-level terminal-4xx
+                    // classification (fffe9141 F2).
+                    return Err(anyhow::Error::new(crate::api_error::ApiStatusError {
+                        status: status.as_u16(),
+                        body,
+                    }));
                 }
                 Err(e) => {
                     if e.is_timeout() || e.is_connect() {
@@ -242,7 +248,17 @@ impl LlmProvider for ExtensionProvider {
         config: &GenerateConfig,
     ) -> Result<GenerateResponse> {
         let provider_config = self.get_config()?;
-        let model = config.model.clone().unwrap_or_else(|| provider_config.default_model.clone());
+        // fffe9141 F5: no fictional fallback — unset model fails loud.
+        let model = match config.model.clone().filter(|s| !s.is_empty()) {
+            Some(m) => m,
+            None if provider_config.default_model.is_empty() => {
+                return Err(anyhow::anyhow!(
+                    "no model configured: set OPENAI_DEFAULT_MODEL (extension provider '{}')",
+                    self.name
+                ));
+            }
+            None => provider_config.default_model.clone(),
+        };
 
         // Serialize messages to JSON for format_request_from_json
         let messages_json = serde_json::to_string(&messages)?;
@@ -326,7 +342,17 @@ impl LlmProvider for ExtensionProvider {
         use crate::provider::StreamChunk;
 
         let provider_config = self.get_config()?;
-        let model = config.model.clone().unwrap_or_else(|| provider_config.default_model.clone());
+        // fffe9141 F5: no fictional fallback — unset model fails loud.
+        let model = match config.model.clone().filter(|s| !s.is_empty()) {
+            Some(m) => m,
+            None if provider_config.default_model.is_empty() => {
+                return Err(anyhow::anyhow!(
+                    "no model configured: set OPENAI_DEFAULT_MODEL (extension provider '{}')",
+                    self.name
+                ));
+            }
+            None => provider_config.default_model.clone(),
+        };
 
         // Check if streaming is supported (async)
         let supports_streaming = {

@@ -355,10 +355,14 @@ impl LlmProvider for WasmProvider {
             .as_str()
             .context("Missing api_key in config")?;
         
-        // Get model from config or wasm_config
+        // Get model from config or wasm_config — fffe9141 F5: no fictional
+        // fallback; unset model fails loud.
         let model = config.model.clone()
             .or_else(|| wasm_config.get("default_model").and_then(|v| v.as_str()).map(|s| s.to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow::anyhow!(
+                "no model configured: set the wasm provider's default_model or the request model"
+            ))?;
         
         // Serialize messages to JSON for WASM
         let messages_json = serde_json::to_string(&messages)?;
@@ -439,7 +443,12 @@ impl LlmProvider for WasmProvider {
         let response_body = response.text().await?;
         
         if !status.is_success() {
-            anyhow::bail!("API error {}: {}", status, response_body);
+            // Typed for orchestration-level terminal-4xx classification
+            // (fffe9141 F2).
+            return Err(anyhow::Error::new(crate::api_error::ApiStatusError {
+                status: status.as_u16(),
+                body: response_body,
+            }));
         }
         
         // Parse response using WASM - it will detect backend from model string
@@ -501,10 +510,14 @@ impl LlmProvider for WasmProvider {
             .context("Missing api_key in config")?
             .to_string();
         
-        // Get model from config or wasm_config
+        // Get model from config or wasm_config — fffe9141 F5: no fictional
+        // fallback; unset model fails loud.
         let model = config.model.clone()
             .or_else(|| wasm_config.get("default_model").and_then(|v| v.as_str()).map(|s| s.to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow::anyhow!(
+                "no model configured: set the wasm provider's default_model or the request model"
+            ))?;
         
         // Check if streaming is supported for this model (WASM provider decides)
         let supports_streaming = {
@@ -668,7 +681,12 @@ impl LlmProvider for WasmProvider {
         
         if !status.is_success() {
             let error_body = response.text().await?;
-            anyhow::bail!("API error {}: {}", status, error_body);
+            // Typed for orchestration-level terminal-4xx classification
+            // (fffe9141 F2).
+            return Err(anyhow::Error::new(crate::api_error::ApiStatusError {
+                status: status.as_u16(),
+                body: error_body,
+            }));
         }
         
         // Create streaming response

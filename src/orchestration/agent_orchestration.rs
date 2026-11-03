@@ -421,6 +421,15 @@ pub async fn run_workflow_streaming<A: AgentContext>(agent: &mut A, max_iteratio
                     return stop_session(agent, &err_msg).await;
                 } else if err_msg.contains("Maximum iterations") {
                     return stop_session(agent, &format!("Maximum iterations ({}) reached", max_iterations)).await;
+                } else if crate::api_error::is_terminal_api_error(&*e) {
+                    // fffe9141 F2: deterministic 4xx (400/401/403/404/422…) —
+                    // the provider will repeat it identically; fail fast
+                    // instead of burning identical retries.
+                    agent.log_error(
+                        &format!("LLM call failed (terminal 4xx): {} — not retrying", err_msg),
+                        None,
+                    )?;
+                    return Err(e).context("Streaming workflow failed");
                 } else {
                     // Retry on any other error (connection refused, timeout, rate limit,
                     // stream errors, etc.) — same behavior as the non-streaming path.
@@ -490,6 +499,11 @@ async fn generate_with_retry<A: AgentContext>(agent: &mut A) -> Result<GenerateR
         match agent.generate_with_provider(tools, max_tokens, streaming_enabled).await {
             Ok(result) => return Ok(result),
             Err(e) => {
+                // fffe9141 F2: terminal 4xx fails fast — deterministic
+                // provider errors stop masquerading as transient.
+                if crate::api_error::is_terminal_api_error(&*e) {
+                    return Err(e);
+                }
                 last_error = Some(e);
                 if attempt < agent.max_retries() {
                     let delay = agent.retry_strategy().delay_secs(attempt, agent.retry_base_delay_seconds());

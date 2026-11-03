@@ -402,7 +402,8 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub api_key: Option<String>,
     /// Default model (e.g. "GLM-5.2", "gpt-4o").
-    /// Falls back to `OPENAI_DEFAULT_MODEL` env var, then "gpt-4o-mini".
+    /// Falls back to `OPENAI_DEFAULT_MODEL` env var; unset = loud error on
+    /// the wire (no fictional fallback — fffe9141 F5).
     #[serde(default)]
     pub model: Option<String>,
     /// All selectable models for this endpoint (populates UI model pickers).

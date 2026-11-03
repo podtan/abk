@@ -133,9 +133,14 @@ impl HttpClient {
                         continue;
                     }
 
-                    // Client error (non-429) — no retry
+                    // Client error (non-429) — no retry. Typed so the
+                    // orchestration retry branches can classify terminal 4xx
+                    // (fffe9141 F2); Display keeps the wire format.
                     let error_body = resp.text().await.unwrap_or_default();
-                    return Err(anyhow::anyhow!("API error {}: {}", status, error_body));
+                    return Err(anyhow::Error::new(crate::api_error::ApiStatusError {
+                        status: status.as_u16(),
+                        body: error_body,
+                    }));
                 }
                 Err(e) => {
                     if e.is_timeout() || e.is_connect() {

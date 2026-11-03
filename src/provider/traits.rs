@@ -119,12 +119,16 @@ pub trait LlmProvider: Send + Sync {
     /// Provider identifier (e.g., "openai", "anthropic")
     fn provider_name(&self) -> &str;
 
-    /// Get the default model name for this provider
+    /// Get the display name of this provider's configured model.
     ///
-    /// This method should check environment variables first, then fall back to hardcoded defaults.
-    /// For example, GitHub provider checks GITHUB_MODEL, OpenAI checks OPENAI_DEFAULT_MODEL.
+    /// Display/log path only — implementations render an honest placeholder
+    /// when no model is configured (never a fictional default). The WIRE
+    /// path is the provider's fallible resolver (e.g.
+    /// `OpenAIProvider::resolve_model`), which fails loud when nothing is
+    /// configured (fffe9141 F5, owner-ordered).
     ///
     /// # Returns
-    /// Model identifier (e.g., "gpt-4o-mini", "claude-sonnet-4-5")
+    /// Model identifier (e.g., "GLM-5.3-Flash", "claude-sonnet-4-5") or an
+    /// explicit "(no model configured)" placeholder.
     fn default_model(&self) -> String;
 }

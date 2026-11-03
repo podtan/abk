@@ -119,6 +119,11 @@ pub fn get_home_dir() -> Result<String, String> {
 /// UTF-8 aware — see nghr f844d2df)
 pub mod text;
 
+/// Typed LLM API status error + terminal-4xx classification (always
+/// available; fffe9141 F2 — deterministic provider errors stop masquerading
+/// as transient)
+pub mod api_error;
+
  /// Configuration management (enabled with the `config` feature)
  #[cfg(feature = "config")]
  pub mod config;

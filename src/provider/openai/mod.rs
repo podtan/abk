@@ -32,7 +32,8 @@ macro_rules! debug {
 /// fallback to environment variables:
 /// - `OPENAI_API_KEY` (required if not in config)
 /// - `BASE_URL` (preferred) or `OPENAI_BASE_URL` (legacy)
-/// - `OPENAI_DEFAULT_MODEL` (default: `gpt-4o-mini`)
+/// - `OPENAI_DEFAULT_MODEL` (no hardcoded fallback — unset fails loud on
+///   the wire, fffe9141 F5)
 pub struct OpenAIProvider {
     http: HttpClient,
     /// TOML-provided provider config (takes priority over env vars).
@@ -85,17 +86,35 @@ impl OpenAIProvider {
             .unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
     }
 
-    /// Get the default model from config or env (default: `gpt-4o-mini`).
-    fn default_model_inner(&self) -> String {
+    /// Get the configured model from config or env — `None` when neither is
+    /// set. The fictional `gpt-4o-mini` fallback is DELETED (fffe9141 F5,
+    /// owner-ordered): the wire path is [`Self::resolve_model`] (fallible,
+    /// loud); this feeds only display/log paths.
+    fn default_model_inner(&self) -> Option<String> {
         if let Some(ref cfg) = self.config {
             if let Some(ref model) = cfg.model {
                 if !model.is_empty() {
-                    return model.clone();
+                    return Some(model.clone());
                 }
             }
         }
         std::env::var("OPENAI_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "gpt-4o-mini".to_string())
+            .ok()
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Resolve the model that actually hits the wire: request model →
+    /// configured model → loud error (fffe9141 F5 — never a fictional
+    /// default silently sent to a non-OpenAI endpoint).
+    fn resolve_model(&self, request_model: Option<String>) -> Result<String> {
+        if let Some(m) = request_model.filter(|s| !s.is_empty()) {
+            return Ok(m);
+        }
+        self.default_model_inner().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no model configured: set [llm.provider].model or OPENAI_DEFAULT_MODEL"
+            )
+        })
     }
 
     /// Build the chat-completions endpoint URL.
@@ -116,7 +135,10 @@ impl LlmProvider for OpenAIProvider {
     }
 
     fn default_model(&self) -> String {
+        // Display/log path only — the wire path is resolve_model (fallible).
+        // Unset renders honestly instead of a fictional OpenAI model.
         self.default_model_inner()
+            .unwrap_or_else(|| "(no model configured)".to_string())
     }
 
     async fn generate(
@@ -124,10 +146,7 @@ impl LlmProvider for OpenAIProvider {
         msgs: Vec<InternalMessage>,
         config: &GenerateConfig,
     ) -> Result<GenerateResponse> {
-        let model = config
-            .model
-            .clone()
-            .unwrap_or_else(|| self.default_model());
+        let model = self.resolve_model(config.model.clone())?;
 
         // Convert messages
         let openai_messages = messages::messages_to_openai(&msgs);
@@ -176,10 +195,7 @@ impl LlmProvider for OpenAIProvider {
     ) -> Result<StreamingResponse> {
         use futures_util::StreamExt;
 
-        let model = config
-            .model
-            .clone()
-            .unwrap_or_else(|| self.default_model());
+        let model = self.resolve_model(config.model.clone())?;
 
         // Convert messages
         let openai_messages = messages::messages_to_openai(&msgs);
@@ -311,5 +327,70 @@ impl LlmProvider for OpenAIProvider {
             rx,
             |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider_with(model: Option<String>) -> OpenAIProvider {
+        OpenAIProvider::with_config(ProviderConfig {
+            name: Some("glm-zai".into()),
+            provider_type: Some("openai".into()),
+            base_url: Some("https://api.z.ai/api/coding/paas/v4".into()),
+            api_key: Some("test-key".into()),
+            model,
+            models: vec![],
+            danger_accept_invalid_certs: false,
+        })
+        .expect("provider")
+    }
+
+    /// fffe9141 F5 pin (f): unset model + unset env → loud error naming the
+    /// fix — never the fictional "gpt-4o-mini" on the wire.
+    #[test]
+    fn resolve_model_unset_fails_loud_naming_the_fix() {
+        std::env::remove_var("OPENAI_DEFAULT_MODEL");
+        let provider = provider_with(None);
+        let err = provider
+            .resolve_model(None)
+            .expect_err("unset model must fail loud");
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("no model configured"), "honest message: {msg}");
+        assert!(
+            msg.contains("[llm.provider].model"),
+            "names the config key: {msg}"
+        );
+        assert!(msg.contains("OPENAI_DEFAULT_MODEL"), "names the env: {msg}");
+        assert!(!msg.contains("gpt-4o-mini"), "never the fictional model: {msg}");
+    }
+
+    /// fffe9141 pin: request model wins when set.
+    #[test]
+    fn resolve_model_request_model_wins() {
+        let provider = provider_with(Some("GLM-5.2".into()));
+        let m = provider
+            .resolve_model(Some("GLM-5.3-Flash".into()))
+            .expect("request model resolves");
+        assert_eq!(m, "GLM-5.3-Flash");
+    }
+
+    /// fffe9141 pin: empty-string request model is filtered → configured model.
+    #[test]
+    fn resolve_model_empty_string_falls_to_config() {
+        let provider = provider_with(Some("GLM-5.2".into()));
+        let m = provider
+            .resolve_model(Some("".into()))
+            .expect("empty filters to config model");
+        assert_eq!(m, "GLM-5.2");
+    }
+
+    /// fffe9141 pin: display path renders honestly when unset.
+    #[test]
+    fn default_model_display_is_honest_when_unset() {
+        std::env::remove_var("OPENAI_DEFAULT_MODEL");
+        let provider = provider_with(None);
+        assert_eq!(provider.default_model(), "(no model configured)");
     }
 }
