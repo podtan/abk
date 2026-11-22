@@ -108,6 +108,10 @@ mod tests {
 
     /// A minimal context wrapper (mirrors anyhow's `.context()` layering)
     /// proving the chain walk reaches the typed error through `source()`.
+    /// #[derive(Debug)]: std::error::Error carries a Debug supertrait — the
+    /// impl could never compile without it (gate-repair leg, nghr b7c419cd
+    /// session 2026-11-22; pre-existing breakage proven on the clean tree).
+    #[derive(Debug)]
     struct Wrapped(Box<dyn StdError + 'static>);
 
     impl fmt::Display for Wrapped {

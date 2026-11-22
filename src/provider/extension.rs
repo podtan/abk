@@ -317,13 +317,20 @@ impl LlmProvider for ExtensionProvider {
         if !assistant_msg.tool_calls.is_empty() {
             let invocations: Vec<ToolInvocation> = assistant_msg.tool_calls
                 .into_iter()
-                .map(|tc| ToolInvocation {
-                    id: tc.id,
-                    name: tc.name,
-                    arguments: serde_json::from_str(&tc.arguments).unwrap_or_default(),
-                    provider_metadata: std::collections::HashMap::new(),
+                .map(|tc| {
+                    // FAIL-LOUD ARGUMENT BOUNDARY (nghr b7c419cd, ruling 9359ae73):
+                    // same class as the openai response leg — a clipped/malformed
+                    // arguments string fails the tool call with a named error,
+                    // never executes with silent {}.
+                    let raw = serde_json::Value::String(tc.arguments.clone());
+                    Ok(ToolInvocation {
+                        arguments: crate::provider::traits::parse_tool_call_arguments(&tc.name, Some(&raw))?,
+                        id: tc.id,
+                        name: tc.name,
+                        provider_metadata: std::collections::HashMap::new(),
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
             Ok(GenerateResponse::ToolCalls { calls: invocations, reasoning: assistant_msg.reasoning })
         } else {
             Ok(GenerateResponse::Content {

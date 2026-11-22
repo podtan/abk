@@ -37,7 +37,7 @@ pub fn parse_response(response_body: &str) -> Result<GenerateResponse> {
                 .as_array()
                 .context("tool_calls is not an array")?
                 .iter()
-                .map(|tc| {
+                .map(|tc| -> anyhow::Result<ToolInvocation> {
                     let id = tc
                         .get("id")
                         .and_then(|v| v.as_str())
@@ -49,20 +49,20 @@ pub fn parse_response(response_body: &str) -> Result<GenerateResponse> {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let args_str = function
-                        .get("arguments")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("{}");
-                    let arguments = serde_json::from_str(args_str).unwrap_or_default();
+                    // FAIL-LOUD ARGUMENT BOUNDARY (nghr b7c419cd, ruling 9359ae73):
+                    // a clipped/malformed arguments string fails the tool call with
+                    // a named error — never execute with silent {}.
+                    let arguments =
+                        crate::provider::traits::parse_tool_call_arguments(&name, function.get("arguments"))?;
 
-                    ToolInvocation {
+                    Ok(ToolInvocation {
                         id,
                         name,
                         arguments,
                         provider_metadata: std::collections::HashMap::new(),
-                    }
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
 
             if !calls.is_empty() {
                 return Ok(GenerateResponse::ToolCalls { calls, reasoning });
@@ -133,6 +133,64 @@ mod tests {
         match resp {
             GenerateResponse::Content { reasoning, .. } => assert!(reasoning.is_none()),
             other => panic!("expected Content, got {:?}", other),
+        }
+    }
+
+    // GUARD (nghr b7c419cd-a): a clipped/truncated tool-call arguments string
+    // must FAIL the parse with a NAMED error — never degrade to silent {}
+    // arguments and execute the tool anyway (the 863cbaff data-loss class).
+    #[test]
+    fn test_clipped_tool_arguments_fail_loud_no_execution() {
+        // arguments string cut mid-JSON by the model output budget
+        let body = r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"write","arguments":"{\"path\": \"/tmp/x.txt\", \"content\": "}}]}}]}"#;
+        let err = parse_response(body).expect_err("clipped arguments must fail the parse loud");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("write"), "error must NAME the tool: {msg}");
+        assert!(
+            msg.contains("refusing to execute with empty arguments"),
+            "error must state the refusal: {msg}"
+        );
+    }
+
+    // GUARD control: valid tool-call arguments still parse to ToolCalls.
+    #[test]
+    fn test_valid_tool_arguments_still_parse() {
+        let body = r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\": \"ls\"}"}}]}}]}"#;
+        let resp = parse_response(body).expect("valid tool call must parse");
+        match resp {
+            GenerateResponse::ToolCalls { calls, .. } => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].name, "bash");
+                assert_eq!(calls[0].arguments["command"], "ls");
+            }
+            other => panic!("expected ToolCalls, got {:?}", other),
+        }
+    }
+
+    // GUARD (provider drift): object-form arguments pass through verbatim —
+    // never silently replaced with {}.
+    #[test]
+    fn test_object_form_arguments_pass_through() {
+        let body = r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":{"command":"ls -la"}}}]}}]}"#;
+        let resp = parse_response(body).expect("object-form arguments must parse");
+        match resp {
+            GenerateResponse::ToolCalls { calls, .. } => {
+                assert_eq!(calls[0].arguments["command"], "ls -la");
+            }
+            other => panic!("expected ToolCalls, got {:?}", other),
+        }
+    }
+
+    // GUARD control: absent arguments are legitimately empty (no-arg tools).
+    #[test]
+    fn test_absent_arguments_are_empty_object() {
+        let body = r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"submit"}}]}}]}"#;
+        let resp = parse_response(body).expect("absent arguments must parse");
+        match resp {
+            GenerateResponse::ToolCalls { calls, .. } => {
+                assert_eq!(calls[0].arguments, serde_json::json!({}));
+            }
+            other => panic!("expected ToolCalls, got {:?}", other),
         }
     }
 }
